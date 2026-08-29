@@ -18,7 +18,8 @@
     "test:parity": "vitest run --passWithNoTests test/parity",
     "test:safety": "vitest run --passWithNoTests test/safety",
     "test:unit": "vitest run --passWithNoTests test/unit",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json",
+    "verify": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run cf-typegen:check && npm run build:dry"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.1.0",
