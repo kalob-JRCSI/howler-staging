@@ -35,22 +35,42 @@ function operatorMigrationSql(): string {
 
 const GENERATED_AT = "2026-08-27T12:00:00.000Z";
 
+const OPERATOR_OBJECT_NAMES = [
+  "operator_intents",
+  "operator_intents_no_update",
+  "operator_intents_no_delete",
+  "workflow_runs",
+  "idx_workflow_runs_project_state",
+  "workflow_steps",
+  "workflow_results",
+  "workflow_results_no_update",
+  "workflow_results_no_delete",
+  "workflow_results_identity_guard",
+];
+
 describe("migration 0002_operator_runs applied to an empty database (after 0001)", () => {
   beforeEach(async () => {
     await dropAllTables(env.HOWLER_DB);
     await applySchema(env.HOWLER_DB, baselineMigrationSql());
   });
 
-  it("creates exactly the operator tables/triggers/indexes recorded in the migration file, additive to the existing six v0.9.4 tables", async () => {
+  it("creates exactly the operator objects recorded in the migration file — full bidirectional parity, no extras, no omissions", async () => {
     await applySchema(env.HOWLER_DB, operatorMigrationSql());
     const live = await introspectSchemaObjects(env.HOWLER_DB);
-
+    const liveOperator = live.filter((o) =>
+      OPERATOR_OBJECT_NAMES.includes(o.name),
+    );
     const expectedOperatorStatements = parseFixtureStatements(
       operatorMigrationSql(),
     );
-    for (const expectedSql of expectedOperatorStatements) {
-      expect(live.map((o) => o.sql)).toContain(expectedSql);
-    }
+
+    expect(liveOperator).toHaveLength(expectedOperatorStatements.length);
+    expect(liveOperator).toHaveLength(OPERATOR_OBJECT_NAMES.length);
+    expect(new Set(liveOperator.map((o) => o.sql))).toEqual(
+      new Set(expectedOperatorStatements),
+    );
+
+    // The six pre-existing v0.9.4 objects are untouched by the same introspection.
     const expected0001Statements = parseFixtureStatements(
       baselineMigrationSql(),
     );
@@ -63,7 +83,7 @@ describe("migration 0002_operator_runs applied to an empty database (after 0001)
     await applySchema(env.HOWLER_DB, operatorMigrationSql());
     const live = await introspectSchemaObjects(env.HOWLER_DB);
     expect(live.filter((o) => o.type === "table")).toHaveLength(6 + 4);
-    expect(live.filter((o) => o.type === "trigger")).toHaveLength(10 + 4);
+    expect(live.filter((o) => o.type === "trigger")).toHaveLength(10 + 5);
     expect(
       live.filter((o) => o.type === "index" && o.name.startsWith("idx_")),
     ).toHaveLength(3 + 1);
@@ -142,37 +162,113 @@ describe("migration 0002_operator_runs applied to an empty database (after 0001)
   });
 });
 
-describe("migration 0002 applied to a populated frozen v0.9.4 database", () => {
+describe("migration 0002 applied to a populated frozen v0.9.4 database (all six legacy tables)", () => {
   beforeEach(async () => {
     await dropAllTables(env.HOWLER_DB);
     await applySchema(env.HOWLER_DB, baselineMigrationSql());
   });
 
-  it("preserves all existing v0.9.4 data byte-for-byte after applying the additive operator migration", async () => {
-    const repo = new D1HowlerRepository(env.HOWLER_DB);
+  async function populateAllLegacyTables(
+    repo: D1HowlerRepository,
+  ): Promise<void> {
+    // projects, project_events, forecast_snapshots, oversight_reviews (via createProject).
     const model = createDeboardSeed();
     const initial = forecastInitial(model, GENERATED_AT, 1);
     await repo.createProject(model, initial.candidate, initial.oversight);
 
-    const beforeProject = await repo.loadProject("deboard-v091");
-    const beforeForecast = await repo.loadLatestForecast("deboard-v091");
-    const beforeEvents = await repo.loadEvents("deboard-v091");
+    // learning_records.
+    await repo.saveLearningRecord({
+      id: "rec-1",
+      layer: "PROJECT",
+      hypothesisType: "OUTCOME",
+      subjectKey: "subject-1",
+      hypothesis: "test hypothesis",
+      evidenceEventIds: [],
+      evidenceProjectIds: [],
+      observationCount: 1,
+      verifiedOutcomeCount: 1,
+      contradictingOutcomeCount: 0,
+      confidence: 0.6,
+      stage: "OBSERVATION",
+      lastObservedAt: GENERATED_AT,
+    });
+
+    // prediction_outcomes (references the seeded forecast snapshot).
+    await repo.savePredictionOutcome({
+      predictionId: "pred-1",
+      activityId: "masonry",
+      horizonDays: 3,
+      predicted: {
+        optimistic: "2026-08-24",
+        likely: "2026-08-26",
+        conservative: "2026-08-28",
+      },
+      actual: "2026-08-26",
+      pointErrorWorkdays: 0,
+      rangeHit: true,
+      confidenceAtPrediction: 0.7,
+      sourceSnapshotId: initial.candidate.id,
+    });
+  }
+
+  it("preserves all historical rows/data across every legacy table, byte-for-byte, after applying the additive operator migration", async () => {
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    await populateAllLegacyTables(repo);
+
+    const before = {
+      project: await repo.loadProject("deboard-v091"),
+      forecast: await repo.loadLatestForecast("deboard-v091"),
+      events: await repo.loadEvents("deboard-v091"),
+      learning: await repo.loadLearningRecords(),
+      outcomes: await repo.loadPredictionOutcomes("deboard-v091"),
+    };
 
     await applySchema(env.HOWLER_DB, operatorMigrationSql());
 
-    const afterProject = await repo.loadProject("deboard-v091");
-    const afterForecast = await repo.loadLatestForecast("deboard-v091");
-    const afterEvents = await repo.loadEvents("deboard-v091");
-    expect(afterProject).toEqual(beforeProject);
-    expect(afterForecast).toEqual(beforeForecast);
-    expect(afterEvents).toEqual(beforeEvents);
+    const after = {
+      project: await repo.loadProject("deboard-v091"),
+      forecast: await repo.loadLatestForecast("deboard-v091"),
+      events: await repo.loadEvents("deboard-v091"),
+      learning: await repo.loadLearningRecords(),
+      outcomes: await repo.loadPredictionOutcomes("deboard-v091"),
+    };
+
+    expect(after.project).toEqual(before.project);
+    expect(after.forecast).toEqual(before.forecast);
+    expect(after.events).toEqual(before.events);
+    expect(after.learning).toEqual(before.learning);
+    expect(after.outcomes).toEqual(before.outcomes);
+    expect(after.project?.revision).toBe(before.project?.revision);
+  });
+
+  it("preserves the exact historical schema definitions (tables/triggers/indexes) for every legacy object", async () => {
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    await populateAllLegacyTables(repo);
+    const before = await introspectSchemaObjects(env.HOWLER_DB);
+
+    await applySchema(env.HOWLER_DB, operatorMigrationSql());
+
+    const after = await introspectSchemaObjects(env.HOWLER_DB);
+    const beforeByName = new Map(before.map((o) => [o.name, o.sql]));
+    for (const [name, sql] of beforeByName) {
+      const match = after.find((o) => o.name === name);
+      expect(match?.sql, `schema object ${name}`).toBe(sql);
+    }
+  });
+
+  it("passes PRAGMA foreign_key_check after the additive migration", async () => {
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    await populateAllLegacyTables(repo);
+    await applySchema(env.HOWLER_DB, operatorMigrationSql());
+    const violations = await env.HOWLER_DB.prepare(
+      "PRAGMA foreign_key_check",
+    ).all();
+    expect(violations.results).toEqual([]);
   });
 
   it("keeps existing append-only guards on the original six tables fully intact", async () => {
     const repo = new D1HowlerRepository(env.HOWLER_DB);
-    const model = createDeboardSeed();
-    const initial = forecastInitial(model, GENERATED_AT, 1);
-    await repo.createProject(model, initial.candidate, initial.oversight);
+    await populateAllLegacyTables(repo);
     await applySchema(env.HOWLER_DB, operatorMigrationSql());
 
     await expect(
@@ -185,13 +281,16 @@ describe("migration 0002 applied to a populated frozen v0.9.4 database", () => {
         "DELETE FROM project_events WHERE project_id = 'deboard-v091'",
       ).run(),
     ).rejects.toThrow("project_events is append-only");
+    await expect(
+      env.HOWLER_DB.prepare(
+        "UPDATE prediction_outcomes SET range_hit = 0 WHERE prediction_id = 'pred-1'",
+      ).run(),
+    ).rejects.toThrow("prediction_outcomes is append-only");
   });
 
   it("keeps the existing revision-guard trigger semantics unchanged", async () => {
     const repo = new D1HowlerRepository(env.HOWLER_DB);
-    const model = createDeboardSeed();
-    const initial = forecastInitial(model, GENERATED_AT, 1);
-    await repo.createProject(model, initial.candidate, initial.oversight);
+    await populateAllLegacyTables(repo);
     await applySchema(env.HOWLER_DB, operatorMigrationSql());
 
     await expect(
@@ -205,11 +304,17 @@ describe("migration 0002 applied to a populated frozen v0.9.4 database", () => {
     ).rejects.toThrow("HOWLER_REVISION_CONFLICT");
   });
 
-  it("reapplying 0002 (idempotent CREATE ... IF NOT EXISTS) does not duplicate or alter the operator schema", async () => {
+  it("reapplying 0002 (idempotent CREATE ... IF NOT EXISTS) does not duplicate or alter the operator schema, with historical data already present", async () => {
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    await populateAllLegacyTables(repo);
     await applySchema(env.HOWLER_DB, operatorMigrationSql());
     const first = await introspectSchemaObjects(env.HOWLER_DB);
+    const beforeProject = await repo.loadProject("deboard-v091");
+
     await applySchema(env.HOWLER_DB, operatorMigrationSql());
+
     const second = await introspectSchemaObjects(env.HOWLER_DB);
     expect(second).toEqual(first);
+    expect(await repo.loadProject("deboard-v091")).toEqual(beforeProject);
   });
 });

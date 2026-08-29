@@ -6,13 +6,18 @@ import type {
   LearningRecordV094,
   PredictionOutcomeV094,
 } from "../engine/learning";
-import type { IntentKind } from "../operator/intent";
+import type { IntentV1 } from "../operator/intent";
+import {
+  isValidTransition,
+  validateTerminalInvariants,
+} from "../operator/workflow";
 import type {
   WorkflowProblem,
   WorkflowRunV1,
   WorkflowState,
 } from "../operator/workflow";
 import type { ResultV1 } from "../operator/result";
+import { sha256Hex, stableStringify } from "./hash";
 
 function parseJson(value: string, label: string): unknown {
   try {
@@ -40,14 +45,13 @@ export interface ShadowTransitionV094 {
 }
 
 export interface ClaimIntentInput {
-  intentId: string;
-  projectId: string;
-  idempotencyKey: string;
-  kind: IntentKind;
-  /** Canonical (stably-stringified) JSON of the full intent, exactly as hashed. */
-  canonicalRequestJson: string;
-  /** SHA-256 of `canonicalRequestJson` — never the raw admin key or any secret. */
-  requestHash: string;
+  /**
+   * The already-validated intent (the output of Task 11's `validateIntent`), not independently
+   * supplied identity columns/JSON/hash. `claimIntent` derives everything it persists — intentId,
+   * projectId, idempotencyKey, kind, canonical JSON, and its SHA-256 — from this one trusted
+   * object, so the persisted hash can never disagree with the persisted JSON.
+   */
+  intent: IntentV1;
   workflowId: string;
   maxAttempts: number;
   now: string;
@@ -73,6 +77,14 @@ export interface UpdateWorkflowRunStateInput {
   markCompleted?: boolean;
 }
 
+export interface FinalizeWorkflowRunInput {
+  workflowId: string;
+  expectedState: WorkflowState;
+  terminalState: "SUCCEEDED" | "BLOCKED" | "FAILED";
+  result: ResultV1;
+  now: string;
+}
+
 interface WorkflowRunRow {
   workflow_id: string;
   intent_id: string;
@@ -96,11 +108,14 @@ interface WorkflowRunRow {
 }
 
 function mapWorkflowRunRow(row: WorkflowRunRow): WorkflowRunV1 {
+  // Read workflow_type/workflow_version from the row itself rather than substituting the
+  // canonical constants — a schema CHECK constraint prevents writing anything else, but the
+  // loader must still faithfully reflect whatever is actually persisted, not paper over it.
   return {
     schemaVersion: "1",
     workflowId: row.workflow_id,
-    workflowType: "OPERATOR_INTENT_V1",
-    workflowVersion: 1,
+    workflowType: row.workflow_type as WorkflowRunV1["workflowType"],
+    workflowVersion: row.workflow_version as WorkflowRunV1["workflowVersion"],
     intentId: row.intent_id,
     intentHash: row.intent_hash,
     projectId: row.project_id,
@@ -143,6 +158,27 @@ function mapWorkflowRunRow(row: WorkflowRunRow): WorkflowRunV1 {
 
 const WORKFLOW_RUN_COLUMNS =
   "workflow_id, intent_id, intent_hash, project_id, workflow_type, workflow_version, state, current_step, attempt, max_attempts, resumable, interruption_json, blocked_reason_json, failure_json, result_id, created_at, started_at, updated_at, completed_at";
+
+/**
+ * Explicit allow-list of IntentV1's own fields, matching the interface exactly. Guards against
+ * hashing/persisting anything beyond it — e.g. an Authorization header or admin key accidentally
+ * spread onto the same object reference upstream — regardless of what extra enumerable
+ * properties the runtime object might carry beyond its declared type.
+ */
+function toCanonicalIntentRecord(intent: IntentV1): Record<string, unknown> {
+  return {
+    schemaVersion: intent.schemaVersion,
+    intentId: intent.intentId,
+    idempotencyKey: intent.idempotencyKey,
+    projectId: intent.projectId,
+    kind: intent.kind,
+    requestedEffect: intent.requestedEffect,
+    expectedProjectRevision: intent.expectedProjectRevision,
+    submittedAt: intent.submittedAt,
+    source: intent.source,
+    payload: intent.payload,
+  };
+}
 
 export class D1HowlerRepository {
   constructor(private readonly db: D1Database) {}
@@ -613,9 +649,15 @@ export class D1HowlerRepository {
    * immutable intent row and its one-to-one workflow run atomically. A conflicting intentId or
    * (projectId, idempotencyKey) with the *same* request hash replays the existing run rather than
    * executing again; a conflict with a *different* hash reports which uniqueness rule reused.
-   * Never receives or persists the admin key — callers pass only the canonical intent JSON.
+   * Never receives or persists the admin key, an Authorization header, or any other credential —
+   * only the explicit allow-listed IntentV1 fields are ever hashed or written.
    */
   async claimIntent(input: ClaimIntentInput): Promise<ClaimIntentResult> {
+    const canonicalIntent = toCanonicalIntentRecord(input.intent);
+    const canonicalRequestJson = stableStringify(canonicalIntent);
+    const requestHash = await sha256Hex(canonicalIntent);
+    const { intentId, projectId, idempotencyKey, kind } = input.intent;
+
     const statements: D1PreparedStatement[] = [
       this.db
         .prepare(
@@ -624,12 +666,12 @@ export class D1HowlerRepository {
         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         )
         .bind(
-          input.intentId,
-          input.projectId,
-          input.idempotencyKey,
-          input.kind,
-          input.canonicalRequestJson,
-          input.requestHash,
+          intentId,
+          projectId,
+          idempotencyKey,
+          kind,
+          canonicalRequestJson,
+          requestHash,
           input.now,
         ),
       this.db
@@ -640,9 +682,9 @@ export class D1HowlerRepository {
         )
         .bind(
           input.workflowId,
-          input.intentId,
-          input.requestHash,
-          input.projectId,
+          intentId,
+          requestHash,
+          projectId,
           input.maxAttempts,
           input.now,
           input.now,
@@ -651,44 +693,75 @@ export class D1HowlerRepository {
     try {
       await this.db.batch(statements);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (
-        message.includes("UNIQUE constraint failed: operator_intents.intent_id")
-      ) {
-        const existing = await this.loadIntentSummary(
-          "intent_id",
-          input.intentId,
-        );
-        if (existing && existing.requestHash === input.requestHash) {
-          const run = await this.loadWorkflowRunByIntentId(input.intentId);
-          if (run) return { outcome: "REPLAY", run };
-        }
-        return { outcome: "INTENT_ID_REUSE" };
-      }
-      if (
-        message.includes(
-          "UNIQUE constraint failed: operator_intents.project_id, operator_intents.idempotency_key",
-        )
-      ) {
-        const existing = await this.loadIntentSummaryByIdempotencyKey(
-          input.projectId,
-          input.idempotencyKey,
-        );
-        if (existing && existing.requestHash === input.requestHash) {
-          const run = await this.loadWorkflowRunByIntentId(existing.intentId);
-          if (run) return { outcome: "REPLAY", run };
-        }
-        return { outcome: "IDEMPOTENCY_KEY_REUSE" };
-      }
-      throw error;
+      return this.resolveClaimConflict(
+        intentId,
+        projectId,
+        idempotencyKey,
+        requestHash,
+        error,
+      );
     }
-    const run = await this.loadWorkflowRunByIntentId(input.intentId);
+    const run = await this.loadWorkflowRunByIntentId(intentId);
     if (!run) {
       throw new Error(
-        `Claimed intent ${input.intentId} but its workflow run was not found`,
+        `Claimed intent ${intentId} but its workflow run was not found`,
       );
     }
     return { outcome: "CLAIMED", run };
+  }
+
+  /**
+   * Resolves an INSERT failure by independently querying *both* identity dimensions — never by
+   * parsing which specific constraint the D1 error text names, since the message alone cannot
+   * distinguish an ordinary retry from a split-identity collision. Replays only when both
+   * dimensions consistently resolve to the same existing intent; a genuine disagreement between
+   * them fails closed, and a resolved intent with no corresponding run is treated as corruption,
+   * never as ordinary reuse.
+   */
+  private async resolveClaimConflict(
+    intentId: string,
+    projectId: string,
+    idempotencyKey: string,
+    requestHash: string,
+    originalError: unknown,
+  ): Promise<ClaimIntentResult> {
+    const byIntentId = await this.loadIntentSummary("intent_id", intentId);
+    const byIdempotencyKey = await this.loadIntentSummaryByIdempotencyKey(
+      projectId,
+      idempotencyKey,
+    );
+
+    if (!byIntentId && !byIdempotencyKey) {
+      // Neither identity dimension actually collided in the database — the batch failure must be
+      // something else entirely, so surface it rather than misclassifying it as reuse.
+      throw originalError;
+    }
+
+    if (
+      byIntentId &&
+      byIdempotencyKey &&
+      byIntentId.intentId !== byIdempotencyKey.intentId
+    ) {
+      throw new Error(
+        `Split-identity collision: intentId ${intentId} and (projectId, idempotencyKey) resolve to two different existing intents (${byIntentId.intentId} vs ${byIdempotencyKey.intentId})`,
+      );
+    }
+
+    const resolved = byIntentId ?? byIdempotencyKey;
+    if (!resolved) throw originalError;
+
+    if (resolved.requestHash !== requestHash) {
+      return byIntentId
+        ? { outcome: "INTENT_ID_REUSE" }
+        : { outcome: "IDEMPOTENCY_KEY_REUSE" };
+    }
+    const run = await this.loadWorkflowRunByIntentId(resolved.intentId);
+    if (!run) {
+      throw new Error(
+        `Corruption: intent ${resolved.intentId} exists but has no workflow run`,
+      );
+    }
+    return { outcome: "REPLAY", run };
   }
 
   private async loadIntentSummary(
@@ -747,13 +820,58 @@ export class D1HowlerRepository {
   }
 
   /**
-   * Guarded (optimistic) run-state update: the WHERE clause requires the row to still be in
-   * `expectedState`, matching the "guarded repository methods" the design assigns to run/step
-   * operational state. Returns whether the guard held (a row actually changed).
+   * Guarded (optimistic) run-state update for *non-terminal* transitions only (RECEIVED ->
+   * VALIDATING -> READY -> RUNNING, RUNNING -> INTERRUPTED, INTERRUPTED -> RUNNING). Rejects any
+   * transition outside Task 11's canonical state matrix (`isValidTransition`) and any resulting
+   * shape that would violate Task 11's terminal/interruption invariants
+   * (`validateTerminalInvariants`) *before* issuing SQL — reusing that logic rather than
+   * duplicating a second, potentially-conflicting state graph here. A terminal target state
+   * (SUCCEEDED/BLOCKED/FAILED) must go through `finalizeWorkflowRun` instead, since only that
+   * method can atomically attach the one required result. The WHERE clause still requires the row
+   * to still be in `expectedState` for true DB-level optimistic concurrency; returns whether that
+   * guard held (a row actually changed).
    */
   async updateWorkflowRunState(
     input: UpdateWorkflowRunStateInput,
   ): Promise<boolean> {
+    if (
+      input.nextState === "SUCCEEDED" ||
+      input.nextState === "BLOCKED" ||
+      input.nextState === "FAILED"
+    ) {
+      throw new Error(
+        `updateWorkflowRunState cannot target terminal state ${input.nextState}; use finalizeWorkflowRun`,
+      );
+    }
+    if (!isValidTransition(input.expectedState, input.nextState)) {
+      throw new Error(
+        `Invalid workflow state transition: ${input.expectedState} -> ${input.nextState}`,
+      );
+    }
+    const current = await this.loadWorkflowRun(input.workflowId);
+    if (!current) {
+      throw new Error(`Cannot update unknown workflow run ${input.workflowId}`);
+    }
+    if (current.state !== input.expectedState) return false;
+
+    const prospective: WorkflowRunV1 = {
+      ...current,
+      state: input.nextState,
+      ...(input.currentStep !== undefined
+        ? { currentStep: input.currentStep }
+        : {}),
+      ...(input.interruption ? { interruption: input.interruption } : {}),
+      ...(input.blockedReason ? { blockedReason: input.blockedReason } : {}),
+      ...(input.failure ? { failure: input.failure } : {}),
+      ...(input.resultId ? { resultId: input.resultId } : {}),
+    };
+    const violations = validateTerminalInvariants(prospective);
+    if (violations.length > 0) {
+      throw new Error(
+        `Invalid workflow run state update: ${violations.map((v) => v.message).join("; ")}`,
+      );
+    }
+
     const result = await this.db
       .prepare(
         `UPDATE workflow_runs
@@ -762,9 +880,7 @@ export class D1HowlerRepository {
             interruption_json = ?,
             blocked_reason_json = ?,
             failure_json = ?,
-            result_id = ?,
             started_at = CASE WHEN ? THEN COALESCE(started_at, ?) ELSE started_at END,
-            completed_at = CASE WHEN ? THEN ? ELSE completed_at END,
             updated_at = ?
         WHERE workflow_id = ? AND state = ?`,
       )
@@ -774,10 +890,7 @@ export class D1HowlerRepository {
         input.interruption ? JSON.stringify(input.interruption) : null,
         input.blockedReason ? JSON.stringify(input.blockedReason) : null,
         input.failure ? JSON.stringify(input.failure) : null,
-        input.resultId ?? null,
         input.markStarted ? 1 : 0,
-        input.now,
-        input.markCompleted ? 1 : 0,
         input.now,
         input.now,
         input.workflowId,
@@ -787,23 +900,90 @@ export class D1HowlerRepository {
     return result.meta.changes > 0;
   }
 
-  /** Inserts the one immutable result row for a workflow. `result.createdAt` is used as-is. */
-  async recordWorkflowResult(result: ResultV1): Promise<void> {
-    await this.db
-      .prepare(
-        `INSERT INTO workflow_results
-        (result_id, workflow_id, intent_id, project_id, status, result_json, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .bind(
-        result.resultId,
-        result.workflowId,
-        result.intentId,
-        result.projectId,
-        result.status,
-        JSON.stringify(result),
-        result.createdAt,
-      )
-      .run();
+  /**
+   * Atomically finalizes a workflow run: inserts the one immutable result row and performs the
+   * allowed terminal transition (RUNNING -> SUCCEEDED|BLOCKED|FAILED, or retry-exhaustion
+   * INTERRUPTED -> FAILED) in a single D1 batch, so neither can happen without the other. The
+   * run's state is updated *before* the result insert within the same batch so the schema's own
+   * `workflow_results_identity_guard` trigger — which compares the result's identity/status
+   * against the run's row — observes the already-terminal state, not the pre-transition one.
+   * Returns false (no SQL executed) if the run is no longer in `expectedState`.
+   */
+  async finalizeWorkflowRun(input: FinalizeWorkflowRunInput): Promise<boolean> {
+    if (!isValidTransition(input.expectedState, input.terminalState)) {
+      throw new Error(
+        `Invalid terminal transition: ${input.expectedState} -> ${input.terminalState}`,
+      );
+    }
+    if (input.result.status !== input.terminalState) {
+      throw new Error(
+        `Result status ${input.result.status} does not match terminal state ${input.terminalState}`,
+      );
+    }
+    if (input.result.workflowId !== input.workflowId) {
+      throw new Error(
+        "Result workflowId does not match the workflow being finalized",
+      );
+    }
+    const current = await this.loadWorkflowRun(input.workflowId);
+    if (!current) {
+      throw new Error(
+        `Cannot finalize unknown workflow run ${input.workflowId}`,
+      );
+    }
+    if (current.intentId !== input.result.intentId) {
+      throw new Error("Result intentId does not match the workflow's intentId");
+    }
+    if (current.projectId !== input.result.projectId) {
+      throw new Error(
+        "Result projectId does not match the workflow's projectId",
+      );
+    }
+    if (current.state !== input.expectedState) return false;
+
+    const statements: D1PreparedStatement[] = [
+      this.db
+        .prepare(
+          `UPDATE workflow_runs
+          SET state = ?, result_id = ?, updated_at = ?, completed_at = ?
+          WHERE workflow_id = ? AND state = ?`,
+        )
+        .bind(
+          input.terminalState,
+          input.result.resultId,
+          input.now,
+          input.now,
+          input.workflowId,
+          input.expectedState,
+        ),
+      this.db
+        .prepare(
+          `INSERT INTO workflow_results
+          (result_id, workflow_id, intent_id, project_id, status, result_json, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          input.result.resultId,
+          input.result.workflowId,
+          input.result.intentId,
+          input.result.projectId,
+          input.result.status,
+          JSON.stringify(input.result),
+          input.result.createdAt,
+        ),
+    ];
+    try {
+      await this.db.batch(statements);
+    } catch (error) {
+      // The guard's own WHERE clause not matching (a concurrent finalize already ran) surfaces as
+      // a workflow_results FK/identity failure once the UPDATE silently affects zero rows and the
+      // run is left in its prior (non-terminal) state — re-check rather than guess from the text.
+      const stillCurrent = await this.loadWorkflowRun(input.workflowId);
+      if (stillCurrent && stillCurrent.state === input.expectedState) {
+        return false;
+      }
+      throw error;
+    }
+    return true;
   }
 }
