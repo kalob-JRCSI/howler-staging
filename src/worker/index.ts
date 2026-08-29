@@ -1,8 +1,11 @@
-import { forecastInitial } from "../engine/engine";
+import { forecastAfterEvent, forecastInitial } from "../engine/engine";
+import type { ProjectEventV094 } from "../domain/types";
 import { createDeboardSeed } from "./deboard-seed";
-import { buildHealthReport } from "./health";
-import { HttpError, json, requireAdmin } from "./http";
+import { buildHealthReport, projectHealth } from "./health";
+import { HttpError, json, readJson, requireAdmin } from "./http";
 import { D1HowlerRepository } from "./repository";
+import { validateUnderstandingProposal } from "./understanding";
+import type { UnderstandingProposalInputV094 } from "./understanding";
 
 interface Env {
   HOWLER_DB?: D1Database;
@@ -34,6 +37,29 @@ function projectRoute(
   const match = /^\/v1\/projects\/([^/]+)\/(.+)$/.exec(pathname);
   if (!match?.[1] || !match[2]) return undefined;
   return { projectId: decodeURIComponent(match[1]), action: match[2] };
+}
+
+async function eventRun(
+  repository: D1HowlerRepository,
+  projectId: string,
+  event: ProjectEventV094,
+) {
+  const project = await repository.loadProject(projectId);
+  if (!project) throw new HttpError(404, "Project not found");
+  if (event.projectId !== projectId)
+    throw new HttpError(400, "Event projectId does not match route projectId");
+  const latest = await repository.loadLatestForecast(projectId);
+  if (!latest) throw new HttpError(409, "Project has no forecast baseline");
+  const baseline = await repository.loadLatestPublishedForecast(projectId);
+  const comparison = baseline ?? latest;
+  const run = forecastAfterEvent(
+    project,
+    event,
+    event.receivedAt,
+    latest.version + 1,
+    comparison,
+  );
+  return { project, latest, baseline, comparison, run };
 }
 
 async function handle(request: Request, env: Env): Promise<Response> {
@@ -125,6 +151,33 @@ async function handle(request: Request, env: Env): Promise<Response> {
         const latest = await repository.loadLatestForecast(route.projectId);
         return json({ modelRevision: project.revision, latest: latest ?? null });
       }
+      if (request.method === "GET" && route.action === "forecast/health") {
+        const project = await repository.loadProject(route.projectId);
+        if (!project) throw new HttpError(404, "Project not found");
+        const latest = await repository.loadLatestForecast(route.projectId);
+        return json(await projectHealth(repository, project, latest));
+      }
+      if (request.method === "GET" && route.action === "forecast/recovery") {
+        const project = await repository.loadProject(route.projectId);
+        if (!project) throw new HttpError(404, "Project not found");
+        const latest = await repository.loadLatestForecast(route.projectId);
+        if (!latest) throw new HttpError(404, "Forecast not found");
+        const baseline = await repository.loadLatestPublishedForecast(route.projectId);
+        return json({
+          projectId: route.projectId,
+          projectRevision: project.revision,
+          latestVersion: latest.version,
+          baselineVersion: baseline?.version ?? null,
+          recovery: latest.recoveryAnalysis,
+          recoveryLayer: "advisory-only",
+          publicationGate: {
+            forecastAllowed: true,
+            commitmentEligible: false,
+            oversightDecision: "BLOCK",
+          },
+          stagingOnly: true,
+        });
+      }
       if (request.method === "GET" && route.action === "events") {
         const limit = Number(url.searchParams.get("limit") ?? "100");
         return json({ events: await repository.loadEvents(route.projectId, limit) });
@@ -132,11 +185,71 @@ async function handle(request: Request, env: Env): Promise<Response> {
       if (request.method === "GET" && route.action === "learning") {
         return json({ learning: await repository.loadLearningRecords(route.projectId) });
       }
-
-      return json(
-        { error: `v0.9.4 ${route.action} handler recovery pending` },
-        501,
-      );
+      if (request.method === "POST" && route.action === "understanding/preview") {
+        const body = (await readJson(request)) as UnderstandingProposalInputV094;
+        if (body.projectId !== route.projectId)
+          throw new HttpError(400, "Proposal projectId does not match route projectId");
+        return json(validateUnderstandingProposal(body));
+      }
+      if (
+        request.method === "POST" &&
+        (route.action === "events/preview" || route.action === "events/apply-shadow")
+      ) {
+        const event = (await readJson(request)) as ProjectEventV094;
+        const { project, latest, baseline, comparison, run } = await eventRun(
+          repository,
+          route.projectId,
+          event,
+        );
+        const common = {
+          projectRevision: project.revision,
+          candidate: run.candidate,
+          delta: run.candidate.delta ?? null,
+          recoveryAnalysis: run.candidate.recoveryAnalysis,
+          supersededSources: run.candidate.supersededSources,
+          impactActivityIds: run.candidate.impactActivityIds,
+          oversight: run.oversight,
+        };
+        if (route.action === "events/preview") {
+          return json({
+            projectRevision: project.revision,
+            baselineVersion: baseline?.version ?? null,
+            latestVersion: latest.version,
+            comparisonVersion: comparison.version,
+            candidate: run.candidate,
+            delta: run.candidate.delta ?? null,
+            recoveryAnalysis: run.candidate.recoveryAnalysis,
+            supersededSources: run.candidate.supersededSources,
+            impactActivityIds: run.candidate.impactActivityIds,
+            oversight: run.oversight,
+            forecastable: run.forecastable,
+            commitmentEligible: run.commitmentEligible,
+            oversightPublishable: run.publishable,
+            publishable: false,
+            reviewToken: null,
+            persisted: false,
+            mode: env.HOWLER_MODE ?? "shadow",
+            stagingOnly: true,
+          });
+        }
+        await repository.commitShadowTransition({
+          expectedRevision: project.revision,
+          modelAfterEvent: run.modelAfterEvent,
+          event,
+          candidate: run.candidate,
+          oversight: run.oversight,
+        });
+        return json(
+          {
+            applied: true,
+            stagingOnly: true,
+            ...common,
+            projectRevision: run.modelAfterEvent.revision,
+            publicationGate: run.candidate.publicationGate,
+          },
+          201,
+        );
+      }
     }
   }
 
