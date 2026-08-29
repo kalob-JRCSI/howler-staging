@@ -1,5 +1,8 @@
+import { forecastInitial } from "../engine/engine";
+import { createDeboardSeed } from "./deboard-seed";
 import { buildHealthReport } from "./health";
 import { HttpError, json, requireAdmin } from "./http";
+import { D1HowlerRepository } from "./repository";
 
 interface Env {
   HOWLER_DB?: D1Database;
@@ -18,6 +21,11 @@ function html(body: string): Response {
       "cache-control": "no-store",
     },
   });
+}
+
+function requireDb(db: D1Database | undefined): D1Database {
+  if (!db) throw new HttpError(503, "HOWLER_DB is not bound");
+  return db;
 }
 
 function projectRoute(
@@ -57,7 +65,29 @@ async function handle(request: Request, env: Env): Promise<Response> {
     url.pathname === "/v1/projects/deboard-v091/seed"
   ) {
     await requireAdmin(request, env.HOWLER_ADMIN_KEY);
-    return json({ error: "v0.9.4 seed handler recovery pending" }, 501);
+    const repository = new D1HowlerRepository(requireDb(env.HOWLER_DB));
+    const project = createDeboardSeed();
+    if (await repository.projectExists(project.projectId)) {
+      throw new HttpError(409, `Project ${project.projectId} already exists`);
+    }
+    const run = forecastInitial(project, new Date().toISOString());
+    await repository.createProject(project, run.candidate, run.oversight);
+    return json(
+      {
+        project,
+        initialForecast: {
+          modelRevision: project.revision,
+          latest: run.candidate,
+        },
+        oversight: run.oversight,
+        forecastable: run.forecastable,
+        commitmentEligible: run.commitmentEligible,
+        oversightPublishable: run.publishable,
+        publishable: false,
+        stagingOnly: true,
+      },
+      201,
+    );
   }
 
   const route = projectRoute(url.pathname);
@@ -87,6 +117,22 @@ async function handle(request: Request, env: Env): Promise<Response> {
           403,
         );
       }
+
+      const repository = new D1HowlerRepository(requireDb(env.HOWLER_DB));
+      if (request.method === "GET" && route.action === "forecast") {
+        const project = await repository.loadProject(route.projectId);
+        if (!project) throw new HttpError(404, "Project not found");
+        const latest = await repository.loadLatestForecast(route.projectId);
+        return json({ modelRevision: project.revision, latest: latest ?? null });
+      }
+      if (request.method === "GET" && route.action === "events") {
+        const limit = Number(url.searchParams.get("limit") ?? "100");
+        return json({ events: await repository.loadEvents(route.projectId, limit) });
+      }
+      if (request.method === "GET" && route.action === "learning") {
+        return json({ learning: await repository.loadLearningRecords(route.projectId) });
+      }
+
       return json(
         { error: `v0.9.4 ${route.action} handler recovery pending` },
         501,
