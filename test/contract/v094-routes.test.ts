@@ -27,7 +27,6 @@ describe("v0.9.4 preserved route inventory", () => {
         HOWLER_MODE: "shadow",
         HOWLER_ADMIN_KEY: "test-admin-key",
       },
-      {},
     );
 
     expect(response.status, `${method} ${path} must be registered`).not.toBe(
@@ -48,7 +47,6 @@ describe("v0.9.4 preserved route inventory", () => {
         HOWLER_MODE: "shadow",
         HOWLER_ADMIN_KEY: "test-admin-key",
       },
-      {},
     );
 
     expect(response.status).toBe(403);
