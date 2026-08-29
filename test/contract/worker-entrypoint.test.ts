@@ -21,11 +21,12 @@ describe("worker entrypoint", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("application/json");
-    const body = await response.json();
-    expect(body.service).toBe("howler-scheduling-staging");
-    expect(body.version).toBe("0.9.5");
-    expect(body.engineCompatibilityVersion).toBe("0.9.4");
-    expect(body.liveSystemsConnected).toBe(false);
+    await expect(response.json()).resolves.toMatchObject({
+      service: "howler-scheduling-staging",
+      version: "0.9.5",
+      engineCompatibilityVersion: "0.9.4",
+      liveSystemsConnected: false,
+    });
   });
 
   it("returns 404 JSON for an unknown public route", async () => {
