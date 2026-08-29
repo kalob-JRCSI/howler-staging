@@ -42,8 +42,15 @@ jobs:
       - name: Test
         run: npm test
 
-      - name: Cloudflare type generation check
-        run: npm run cf-typegen:check
+      - name: Generate Cloudflare types
+        run: npm run cf-typegen
+
+      - name: Upload generated Cloudflare types
+        uses: actions/upload-artifact@v6
+        with:
+          name: worker-configuration
+          path: worker-configuration.d.ts
+          if-no-files-found: error
 
       - name: Wrangler dry-run build
         run: npm run build:dry
