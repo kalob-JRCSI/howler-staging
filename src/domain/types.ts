@@ -136,6 +136,8 @@ export interface ProjectEventV094 {
   mutations: EventMutationV094[];
   payload: Record<string, unknown>;
   note?: string;
+  causeCode?: string;
+  causeVerification?: string;
 }
 
 export interface ProjectModelV094 {
