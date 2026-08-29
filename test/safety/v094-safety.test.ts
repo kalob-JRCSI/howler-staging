@@ -21,15 +21,18 @@ describe("v0.9.4 worker safety", () => {
 
   it("rejects an oversized JSON body before event handling", async () => {
     const response = await worker.fetch(
-      new Request("https://howler.test/v1/projects/deboard-v091/events/preview", {
-        method: "POST",
-        headers: {
-          Authorization: "Bearer test-admin-key",
-          "Content-Type": "application/json",
-          "Content-Length": String(256 * 1024 + 1),
+      new Request(
+        "https://howler.test/v1/projects/deboard-v091/events/preview",
+        {
+          method: "POST",
+          headers: {
+            Authorization: "Bearer test-admin-key",
+            "Content-Type": "application/json",
+            "Content-Length": String(256 * 1024 + 1),
+          },
+          body: "{}",
         },
-        body: "{}",
-      }),
+      ),
       env,
     );
     expect(response.status).toBe(413);
@@ -37,10 +40,13 @@ describe("v0.9.4 worker safety", () => {
 
   it("never enables publishing in shadow mode", async () => {
     const response = await worker.fetch(
-      new Request("https://howler.test/v1/projects/deboard-v091/events/publish", {
-        method: "POST",
-        headers: { Authorization: "Bearer test-admin-key" },
-      }),
+      new Request(
+        "https://howler.test/v1/projects/deboard-v091/events/publish",
+        {
+          method: "POST",
+          headers: { Authorization: "Bearer test-admin-key" },
+        },
+      ),
       env,
     );
     expect(response.status).toBe(403);
