@@ -1,11 +1,11 @@
-import { forecastAfterEvent, forecastInitial } from "../engine/engine";
 import type { ProjectEventV094 } from "../domain/types";
+import { forecastAfterEvent, forecastInitial } from "../engine/engine";
 import { createDeboardSeed } from "./deboard-seed";
 import { buildHealthReport, projectHealth } from "./health";
 import { HttpError, json, readJson, requireAdmin } from "./http";
 import { D1HowlerRepository } from "./repository";
-import { validateUnderstandingProposal } from "./understanding";
 import type { UnderstandingProposalInputV094 } from "./understanding";
+import { validateUnderstandingProposal } from "./understanding";
 
 interface Env {
   HOWLER_DB?: D1Database;
@@ -46,8 +46,9 @@ async function eventRun(
 ) {
   const project = await repository.loadProject(projectId);
   if (!project) throw new HttpError(404, "Project not found");
-  if (event.projectId !== projectId)
+  if (event.projectId !== projectId) {
     throw new HttpError(400, "Event projectId does not match route projectId");
+  }
   const latest = await repository.loadLatestForecast(projectId);
   if (!latest) throw new HttpError(409, "Project has no forecast baseline");
   const baseline = await repository.loadLatestPublishedForecast(projectId);
@@ -162,7 +163,9 @@ async function handle(request: Request, env: Env): Promise<Response> {
         if (!project) throw new HttpError(404, "Project not found");
         const latest = await repository.loadLatestForecast(route.projectId);
         if (!latest) throw new HttpError(404, "Forecast not found");
-        const baseline = await repository.loadLatestPublishedForecast(route.projectId);
+        const baseline = await repository.loadLatestPublishedForecast(
+          route.projectId,
+        );
         return json({
           projectId: route.projectId,
           projectRevision: project.revision,
@@ -180,20 +183,34 @@ async function handle(request: Request, env: Env): Promise<Response> {
       }
       if (request.method === "GET" && route.action === "events") {
         const limit = Number(url.searchParams.get("limit") ?? "100");
-        return json({ events: await repository.loadEvents(route.projectId, limit) });
+        return json({
+          events: await repository.loadEvents(route.projectId, limit),
+        });
       }
       if (request.method === "GET" && route.action === "learning") {
-        return json({ learning: await repository.loadLearningRecords(route.projectId) });
+        return json({
+          learning: await repository.loadLearningRecords(route.projectId),
+        });
       }
-      if (request.method === "POST" && route.action === "understanding/preview") {
-        const body = (await readJson(request)) as UnderstandingProposalInputV094;
-        if (body.projectId !== route.projectId)
-          throw new HttpError(400, "Proposal projectId does not match route projectId");
+      if (
+        request.method === "POST" &&
+        route.action === "understanding/preview"
+      ) {
+        const body = (await readJson(
+          request,
+        )) as UnderstandingProposalInputV094;
+        if (body.projectId !== route.projectId) {
+          throw new HttpError(
+            400,
+            "Proposal projectId does not match route projectId",
+          );
+        }
         return json(validateUnderstandingProposal(body));
       }
       if (
         request.method === "POST" &&
-        (route.action === "events/preview" || route.action === "events/apply-shadow")
+        (route.action === "events/preview" ||
+          route.action === "events/apply-shadow")
       ) {
         const event = (await readJson(request)) as ProjectEventV094;
         const { project, latest, baseline, comparison, run } = await eventRun(
