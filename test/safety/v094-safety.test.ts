@@ -33,7 +33,7 @@ describe("v0.9.4 worker safety", () => {
           body: "{}",
         },
       ),
-      env,
+      { ...env, HOWLER_DB: {} as D1Database },
     );
     expect(response.status).toBe(413);
   });
