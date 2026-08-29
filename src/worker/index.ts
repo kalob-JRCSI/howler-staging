@@ -7,7 +7,8 @@ interface Env {
   HOWLER_ADMIN_KEY?: string;
 }
 
-const ADMIN_HTML = "<!doctype html><html><body><main><h1>Howler staging admin</h1></main></body></html>";
+const ADMIN_HTML =
+  "<!doctype html><html><body><main><h1>Howler staging admin</h1></main></body></html>";
 
 function html(body: string): Response {
   return new Response(body, {
@@ -19,7 +20,9 @@ function html(body: string): Response {
   });
 }
 
-function projectRoute(pathname: string): { projectId: string; action: string } | undefined {
+function projectRoute(
+  pathname: string,
+): { projectId: string; action: string } | undefined {
   const match = /^\/v1\/projects\/([^/]+)\/(.+)$/.exec(pathname);
   if (!match?.[1] || !match[2]) return undefined;
   return { projectId: decodeURIComponent(match[1]), action: match[2] };
@@ -28,7 +31,10 @@ function projectRoute(pathname: string): { projectId: string; action: string } |
 async function handle(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
 
-  if (request.method === "GET" && (url.pathname === "/" || url.pathname === "/admin")) {
+  if (
+    request.method === "GET" &&
+    (url.pathname === "/" || url.pathname === "/admin")
+  ) {
     return html(ADMIN_HTML);
   }
 
@@ -46,7 +52,10 @@ async function handle(request: Request, env: Env): Promise<Response> {
     return json({ error: "v0.9.4 init-db handler recovery pending" }, 501);
   }
 
-  if (request.method === "POST" && url.pathname === "/v1/projects/deboard-v091/seed") {
+  if (
+    request.method === "POST" &&
+    url.pathname === "/v1/projects/deboard-v091/seed"
+  ) {
     await requireAdmin(request, env.HOWLER_ADMIN_KEY);
     return json({ error: "v0.9.4 seed handler recovery pending" }, 501);
   }
@@ -78,7 +87,10 @@ async function handle(request: Request, env: Env): Promise<Response> {
           403,
         );
       }
-      return json({ error: `v0.9.4 ${route.action} handler recovery pending` }, 501);
+      return json(
+        { error: `v0.9.4 ${route.action} handler recovery pending` },
+        501,
+      );
     }
   }
 
