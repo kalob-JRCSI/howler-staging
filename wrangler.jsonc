@@ -1,13 +1,17 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "jarvis-voice-staging",
-  "main": "worker.js",
+  "main": "src/worker/index.ts",
   "compatibility_date": "2026-08-26",
   "d1_databases": [
     {
       "binding": "HOWLER_DB",
       "database_name": "howler-intelligence-staging",
-      "database_id": "b1049979-11cc-4faa-9a94-a0f42f9f4f23"
-    }
-  ]
+      "database_id": "b1049979-11cc-4faa-9a94-a0f42f9f4f23",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "vars": {
+    "HOWLER_MODE": "shadow",
+  },
 }
