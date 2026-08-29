@@ -1,0 +1,4675 @@
+{
+  "engineCompatibilityVersion": "0.9.4",
+  "request": {
+    "method": "POST",
+    "path": "/v1/projects/deboard-v091/events/preview",
+    "body": {
+      "id": "deboard-v093-field-sim-1787832000000",
+      "baseRevision": 1,
+      "projectId": "deboard-v091",
+      "type": "FIELD_UPDATE",
+      "occurredAt": "2026-08-27T12:00:00.000Z",
+      "receivedAt": "2026-08-27T12:00:00.000Z",
+      "sourceIds": [
+        "src-v093-field-sim-1787832000000"
+      ],
+      "verification": "PM_CONFIRMED",
+      "impactSeedActivityIds": [
+        "masonry"
+      ],
+      "mutations": [
+        {
+          "op": "UPSERT_SOURCE",
+          "source": {
+            "id": "src-v093-field-sim-1787832000000",
+            "type": "FIELD_REPORT",
+            "label": "v0.9.3 current masonry commitment - CMU verified and Aug 27 mobilization committed",
+            "observedAt": "2026-08-27T12:00:00.000Z",
+            "effectiveDate": "2026-08-27",
+            "authority": 0.95,
+            "reliability": 0.95
+          }
+        },
+        {
+          "op": "SUPERSEDE_SOURCE",
+          "sourceId": "src-masonry-calendar",
+          "supersededBySourceId": "src-v093-field-sim-1787832000000"
+        },
+        {
+          "op": "SET_CONSTRAINT_STATE",
+          "constraintId": "masonry-material",
+          "state": "SATISFIED",
+          "verification": "PM_CONFIRMED"
+        },
+        {
+          "op": "SET_CONSTRAINT_READINESS",
+          "constraintId": "masonry-material",
+          "readiness": {
+            "optimistic": "2026-08-26",
+            "likely": "2026-08-26",
+            "conservative": "2026-08-26"
+          },
+          "verification": "PM_CONFIRMED"
+        },
+        {
+          "op": "SET_CONSTRAINT_STATE",
+          "constraintId": "masonry-trade",
+          "state": "COMMITTED",
+          "verification": "PM_CONFIRMED"
+        },
+        {
+          "op": "SET_CONSTRAINT_READINESS",
+          "constraintId": "masonry-trade",
+          "readiness": {
+            "optimistic": "2026-08-27",
+            "likely": "2026-08-27",
+            "conservative": "2026-08-27"
+          },
+          "verification": "PM_CONFIRMED"
+        }
+      ],
+      "payload": {
+        "simulation": true,
+        "supersedesSourceId": "src-masonry-calendar",
+        "materialVerified": true,
+        "masonryStartCommitment": "2026-08-27"
+      },
+      "note": "Staging-only v0.9.4 supersession test. Retains the Aug 24 source in history, marks it superseded, and keeps the Aug 27 commitment current. Does not touch live systems."
+    }
+  },
+  "response": {
+    "body": {
+      "projectRevision": 1,
+      "baselineVersion": null,
+      "latestVersion": 1,
+      "comparisonVersion": 1,
+      "candidate": {
+        "id": "deboard-v091-forecast-v2",
+        "modelRevision": 2,
+        "projectId": "deboard-v091",
+        "version": 2,
+        "status": "WORKING",
+        "generatedAt": "2026-08-27T12:00:00.000Z",
+        "basedOnEventIds": [
+          "deboard-v091-baseline-evidence-2026-08-26",
+          "deboard-v093-field-sim-1787832000000"
+        ],
+        "basedOnSourceIds": [
+          "src-plans",
+          "src-scope",
+          "src-engineering",
+          "src-budget",
+          "src-dashboard",
+          "src-building-package",
+          "src-roof-action",
+          "src-masonry-calendar",
+          "src-hvac",
+          "src-plumbing",
+          "src-trades",
+          "src-brick-risk",
+          "src-material-quotes",
+          "src-v093-field-sim-1787832000000"
+        ],
+        "evidenceRevision": 2,
+        "impactActivityIds": [
+          "masonry",
+          "structural_release",
+          "framing",
+          "opening_protection",
+          "roofing",
+          "dry_in_release",
+          "electrical_rough",
+          "hvac_rough",
+          "plumbing_rough",
+          "rough_inspection",
+          "insulation",
+          "underslab_mep",
+          "slab_prep",
+          "slab",
+          "drywall_hang",
+          "drywall_finish",
+          "garage_doors",
+          "prime_paint",
+          "finish_carpentry",
+          "electrical_final",
+          "flooring",
+          "half_bath_finish",
+          "hvac_startup",
+          "plumbing_final",
+          "windows_ext_doors",
+          "brick_veneer",
+          "exterior_closeout",
+          "final_grading_cleanup",
+          "final_inspection",
+          "homeowner_walkthrough"
+        ],
+        "activityForecasts": {
+          "masonry": {
+            "activityId": "masonry",
+            "activityName": "CMU foundation walls",
+            "phase": "Foundation",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "COMMITMENT_SUPPORTED",
+            "assumptions": [],
+            "start": {
+              "optimistic": "2026-08-27",
+              "likely": "2026-08-27",
+              "conservative": "2026-08-27"
+            },
+            "finish": {
+              "optimistic": "2026-08-28",
+              "likely": "2026-08-31",
+              "conservative": "2026-09-02"
+            },
+            "likelyFloatWorkdays": 0,
+            "critical": true,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.81,
+              "dependencyClarity": 0.95,
+              "materialReadiness": 1,
+              "tradeReadiness": 0.82,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.9025,
+              "contradictionPenalty": 0.05,
+              "overall": 0.8048499999999998
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-plans",
+                "src-scope",
+                "src-dashboard",
+                "src-masonry-calendar",
+                "src-material-quotes",
+                "src-trades",
+                "src-engineering"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26",
+                "deboard-v093-field-sim-1787832000000"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "CONSTRAINT",
+                "id": "masonry-trade",
+                "label": "Masonry crew mobilization after stale Aug 24 target",
+                "constraintType": "TRADE_AVAILABILITY",
+                "truthState": "COMMITTED",
+                "requiredBy": "2026-08-27",
+                "action": "Verify Masonry crew mobilization after stale Aug 24 target is actually satisfied by 2026-08-27"
+              }
+            ],
+            "drivers": [
+              "MATERIAL: Correct CMU/block package on site and verified [SATISFIED]",
+              "TRADE_AVAILABILITY: Masonry crew mobilization after stale Aug 24 target [COMMITTED]"
+            ],
+            "warnings": []
+          },
+          "structural_release": {
+            "activityId": "structural_release",
+            "activityName": "CMU structural release / anchors / elevations",
+            "phase": "Foundation",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "INFORMATION: Anchor / elevation / bearing conditions field-verified [UNVERIFIED]",
+              "FINISH_TO_START: CMU foundation walls remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-08-31",
+              "likely": "2026-09-01",
+              "conservative": "2026-09-03"
+            },
+            "finish": {
+              "optimistic": "2026-08-31",
+              "likely": "2026-09-01",
+              "conservative": "2026-09-04"
+            },
+            "likelyFloatWorkdays": 0,
+            "critical": true,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.8503333333333334,
+              "dependencyClarity": 0.893,
+              "materialReadiness": 0.72,
+              "tradeReadiness": 0.72,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.74954
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-plans",
+                "src-scope",
+                "src-engineering",
+                "src-dashboard"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "CONSTRAINT",
+                "id": "structural-release-verify",
+                "label": "Anchor / elevation / bearing conditions field-verified",
+                "constraintType": "INFORMATION",
+                "truthState": "UNVERIFIED",
+                "requiredBy": "2026-08-31",
+                "action": "Resolve/confirm Anchor / elevation / bearing conditions field-verified by 2026-08-31"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d01",
+                "activityId": "masonry",
+                "label": "CMU foundation walls",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-08-31",
+                "action": "CMU foundation walls must finish by 2026-08-31 to protect CMU structural release / anchors / elevations"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: CMU foundation walls",
+              "INFORMATION: Anchor / elevation / bearing conditions field-verified [UNVERIFIED]"
+            ],
+            "warnings": [
+              "Unverified hard information constraint: Anchor / elevation / bearing conditions field-verified"
+            ]
+          },
+          "structural_reconcile": {
+            "activityId": "structural_reconcile",
+            "activityName": "Plan / LVL engineering reconciliation",
+            "phase": "Framing Readiness",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "INFORMATION: Plan/LVL/post reconciliation status [STALE_REVERIFY]"
+            ],
+            "start": {
+              "optimistic": "2026-08-26",
+              "likely": "2026-08-27",
+              "conservative": "2026-08-28"
+            },
+            "finish": {
+              "optimistic": "2026-08-26",
+              "likely": "2026-08-27",
+              "conservative": "2026-08-31"
+            },
+            "likelyFloatWorkdays": 3,
+            "critical": false,
+            "impactStatus": "UNCHANGED",
+            "confidence": {
+              "scopeClarity": 0.848,
+              "dependencyClarity": 0.95,
+              "materialReadiness": 0.72,
+              "tradeReadiness": 0.72,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.75824
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-plans",
+                "src-engineering",
+                "src-dashboard"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "CONSTRAINT",
+                "id": "engineering-reconcile",
+                "label": "Plan/LVL/post reconciliation status",
+                "constraintType": "INFORMATION",
+                "truthState": "STALE_REVERIFY",
+                "requiredBy": "2026-08-26",
+                "action": "Re-verify Plan/LVL/post reconciliation status by 2026-08-26"
+              }
+            ],
+            "drivers": [
+              "INFORMATION: Plan/LVL/post reconciliation status [STALE_REVERIFY]"
+            ],
+            "warnings": [
+              "Stale evidence requires re-verification: Plan/LVL/post reconciliation status"
+            ]
+          },
+          "building_delivery": {
+            "activityId": "building_delivery",
+            "activityName": "Walls and subfloor package delivery",
+            "phase": "Procurement",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "COMMITMENT_SUPPORTED",
+            "assumptions": [],
+            "start": {
+              "optimistic": "2026-08-28",
+              "likely": "2026-08-28",
+              "conservative": "2026-08-28"
+            },
+            "finish": {
+              "optimistic": "2026-08-28",
+              "likely": "2026-08-28",
+              "conservative": "2026-08-28"
+            },
+            "likelyFloatWorkdays": 2,
+            "critical": false,
+            "impactStatus": "UNCHANGED",
+            "confidence": {
+              "scopeClarity": 0.45,
+              "dependencyClarity": 0.95,
+              "materialReadiness": 0.82,
+              "tradeReadiness": 0.72,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.7006
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-building-package",
+                "src-dashboard"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "CONSTRAINT",
+                "id": "building-delivery-ready",
+                "label": "Walls/subfloor delivery Aug 28",
+                "constraintType": "MATERIAL",
+                "truthState": "COMMITTED",
+                "requiredBy": "2026-08-28",
+                "action": "Verify Walls/subfloor delivery Aug 28 is actually satisfied by 2026-08-28"
+              }
+            ],
+            "drivers": [
+              "MATERIAL: Walls/subfloor delivery Aug 28 [COMMITTED]"
+            ],
+            "warnings": []
+          },
+          "framing": {
+            "activityId": "framing",
+            "activityName": "Structural framing + second-floor/loft system",
+            "phase": "Framing",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "TRADE_AVAILABILITY: Framer mobilization [UNVERIFIED]",
+              "MATERIAL: Walls/subfloor/LVL framing package received, counted, undamaged, staged [UNVERIFIED]",
+              "FINISH_TO_START: CMU structural release / anchors / elevations remains forecasted",
+              "FINISH_TO_START: Plan / LVL engineering reconciliation remains forecasted",
+              "FINISH_TO_START: Walls and subfloor package delivery remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-09-01",
+              "likely": "2026-09-02",
+              "conservative": "2026-09-07"
+            },
+            "finish": {
+              "optimistic": "2026-09-09",
+              "likely": "2026-09-14",
+              "conservative": "2026-09-22"
+            },
+            "likelyFloatWorkdays": 0,
+            "critical": true,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.8503333333333334,
+              "dependencyClarity": 0.8252,
+              "materialReadiness": 0.42,
+              "tradeReadiness": 0.42,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.6546920000000002
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-plans",
+                "src-scope",
+                "src-engineering",
+                "src-budget",
+                "src-dashboard",
+                "src-building-package"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "CONSTRAINT",
+                "id": "framer-availability",
+                "label": "Framer mobilization",
+                "constraintType": "TRADE_AVAILABILITY",
+                "truthState": "UNVERIFIED",
+                "requiredBy": "2026-08-31",
+                "action": "Resolve/confirm Framer mobilization by 2026-08-31"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d02",
+                "activityId": "structural_release",
+                "label": "CMU structural release / anchors / elevations",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-09-01",
+                "action": "CMU structural release / anchors / elevations must finish by 2026-09-01 to protect Structural framing + second-floor/loft system"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d03",
+                "activityId": "structural_reconcile",
+                "label": "Plan / LVL engineering reconciliation",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-09-01",
+                "action": "Plan / LVL engineering reconciliation must finish by 2026-09-01 to protect Structural framing + second-floor/loft system"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d04",
+                "activityId": "building_delivery",
+                "label": "Walls and subfloor package delivery",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-09-01",
+                "action": "Walls and subfloor package delivery must finish by 2026-09-01 to protect Structural framing + second-floor/loft system"
+              },
+              {
+                "kind": "CONSTRAINT",
+                "id": "framing-material",
+                "label": "Walls/subfloor/LVL framing package received, counted, undamaged, staged",
+                "constraintType": "MATERIAL",
+                "truthState": "UNVERIFIED",
+                "requiredBy": "2026-09-02",
+                "action": "Resolve/confirm Walls/subfloor/LVL framing package received, counted, undamaged, staged by 2026-09-02"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: CMU structural release / anchors / elevations",
+              "Hard FINISH_TO_START: Plan / LVL engineering reconciliation",
+              "Hard FINISH_TO_START: Walls and subfloor package delivery",
+              "TRADE_AVAILABILITY: Framer mobilization [UNVERIFIED]",
+              "MATERIAL: Walls/subfloor/LVL framing package received, counted, undamaged, staged [UNVERIFIED]"
+            ],
+            "warnings": [
+              "Unverified hard trade_availability constraint: Framer mobilization",
+              "Unverified hard material constraint: Walls/subfloor/LVL framing package received, counted, undamaged, staged"
+            ]
+          },
+          "roof_procurement": {
+            "activityId": "roof_procurement",
+            "activityName": "Roof package selection / refresh / release",
+            "phase": "Procurement",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "INFORMATION: Roof vendor/package decision and release [UNVERIFIED]"
+            ],
+            "start": {
+              "optimistic": "2026-08-26",
+              "likely": "2026-08-27",
+              "conservative": "2026-08-28"
+            },
+            "finish": {
+              "optimistic": "2026-08-26",
+              "likely": "2026-08-28",
+              "conservative": "2026-09-01"
+            },
+            "likelyFloatWorkdays": 8,
+            "critical": false,
+            "impactStatus": "UNCHANGED",
+            "confidence": {
+              "scopeClarity": 0.45,
+              "dependencyClarity": 0.95,
+              "materialReadiness": 0.72,
+              "tradeReadiness": 0.72,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.6866
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-roof-action",
+                "src-material-quotes"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "CONSTRAINT",
+                "id": "roof-vendor",
+                "label": "Roof vendor/package decision and release",
+                "constraintType": "INFORMATION",
+                "truthState": "UNVERIFIED",
+                "requiredBy": "2026-08-26",
+                "action": "Resolve/confirm Roof vendor/package decision and release by 2026-08-26"
+              }
+            ],
+            "drivers": [
+              "INFORMATION: Roof vendor analysis / contact Tony on Aug 26 [COMMITTED]",
+              "INFORMATION: Roof vendor/package decision and release [UNVERIFIED]"
+            ],
+            "warnings": [
+              "Unverified hard information constraint: Roof vendor/package decision and release"
+            ]
+          },
+          "roofing": {
+            "activityId": "roofing",
+            "activityName": "Roof underlayment / shingles / flashings",
+            "phase": "Envelope",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "MATERIAL: Roof package refreshed, ordered and available [UNVERIFIED]",
+              "START_TO_START: Structural framing + second-floor/loft system remains forecasted",
+              "FINISH_TO_START: Roof package selection / refresh / release remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-09-09",
+              "likely": "2026-09-10",
+              "conservative": "2026-09-15"
+            },
+            "finish": {
+              "optimistic": "2026-09-11",
+              "likely": "2026-09-15",
+              "conservative": "2026-09-22"
+            },
+            "likelyFloatWorkdays": 0,
+            "critical": true,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.7326666666666668,
+              "materialReadiness": 0.42,
+              "tradeReadiness": 0.72,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.6827266666666667
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope",
+                "src-material-quotes",
+                "src-roof-action"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "PREDECESSOR_START",
+                "id": "d05",
+                "activityId": "framing",
+                "label": "Structural framing + second-floor/loft system",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-09-02",
+                "action": "Structural framing + second-floor/loft system must start by 2026-09-02 to protect Roof underlayment / shingles / flashings"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d06",
+                "activityId": "roof_procurement",
+                "label": "Roof package selection / refresh / release",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-09-09",
+                "action": "Roof package selection / refresh / release must finish by 2026-09-09 to protect Roof underlayment / shingles / flashings"
+              },
+              {
+                "kind": "CONSTRAINT",
+                "id": "roof-material",
+                "label": "Roof package refreshed, ordered and available",
+                "constraintType": "MATERIAL",
+                "truthState": "UNVERIFIED",
+                "requiredBy": "2026-09-10",
+                "action": "Resolve/confirm Roof package refreshed, ordered and available by 2026-09-10"
+              }
+            ],
+            "drivers": [
+              "Hard START_TO_START: Structural framing + second-floor/loft system",
+              "Hard FINISH_TO_START: Roof package selection / refresh / release",
+              "MATERIAL: Roof package refreshed, ordered and available [UNVERIFIED]"
+            ],
+            "warnings": [
+              "Unverified hard material constraint: Roof package refreshed, ordered and available"
+            ]
+          },
+          "opening_protection": {
+            "activityId": "opening_protection",
+            "activityName": "Weather protection at windows / service door / garage openings",
+            "phase": "Envelope",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "MATERIAL: Temporary/permanent opening protection available [UNVERIFIED]",
+              "START_TO_START: Structural framing + second-floor/loft system remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-09-08",
+              "likely": "2026-09-09",
+              "conservative": "2026-09-14"
+            },
+            "finish": {
+              "optimistic": "2026-09-08",
+              "likely": "2026-09-10",
+              "conservative": "2026-09-16"
+            },
+            "likelyFloatWorkdays": 3,
+            "critical": false,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.855,
+              "materialReadiness": 0.42,
+              "tradeReadiness": 0.72,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.7023
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope",
+                "src-material-quotes"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "PREDECESSOR_START",
+                "id": "d07",
+                "activityId": "framing",
+                "label": "Structural framing + second-floor/loft system",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-09-02",
+                "action": "Structural framing + second-floor/loft system must start by 2026-09-02 to protect Weather protection at windows / service door / garage openings"
+              },
+              {
+                "kind": "CONSTRAINT",
+                "id": "opening-protection-material",
+                "label": "Temporary/permanent opening protection available",
+                "constraintType": "MATERIAL",
+                "truthState": "UNVERIFIED",
+                "requiredBy": "2026-09-09",
+                "action": "Resolve/confirm Temporary/permanent opening protection available by 2026-09-09"
+              }
+            ],
+            "drivers": [
+              "Hard START_TO_START: Structural framing + second-floor/loft system",
+              "MATERIAL: Temporary/permanent opening protection available [UNVERIFIED]"
+            ],
+            "warnings": [
+              "Unverified hard material constraint: Temporary/permanent opening protection available"
+            ]
+          },
+          "dry_in_release": {
+            "activityId": "dry_in_release",
+            "activityName": "Weather dry-in release",
+            "phase": "Envelope",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "FINISH_TO_START: Roof underlayment / shingles / flashings remains forecasted",
+              "FINISH_TO_START: Weather protection at windows / service door / garage openings remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-09-14",
+              "likely": "2026-09-16",
+              "conservative": "2026-09-23"
+            },
+            "finish": {
+              "optimistic": "2026-09-14",
+              "likely": "2026-09-16",
+              "conservative": "2026-09-24"
+            },
+            "likelyFloatWorkdays": 0,
+            "critical": true,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.855,
+              "materialReadiness": 0.72,
+              "tradeReadiness": 0.72,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.7443
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d08",
+                "activityId": "roofing",
+                "label": "Roof underlayment / shingles / flashings",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-09-15",
+                "action": "Roof underlayment / shingles / flashings must finish by 2026-09-15 to protect Weather dry-in release"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d09",
+                "activityId": "opening_protection",
+                "label": "Weather protection at windows / service door / garage openings",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-09-15",
+                "action": "Weather protection at windows / service door / garage openings must finish by 2026-09-15 to protect Weather dry-in release"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: Roof underlayment / shingles / flashings",
+              "Hard FINISH_TO_START: Weather protection at windows / service door / garage openings"
+            ],
+            "warnings": []
+          },
+          "windows_ext_doors": {
+            "activityId": "windows_ext_doors",
+            "activityName": "Windows and exterior service door install",
+            "phase": "Envelope",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "MATERIAL: Window/service-door package availability and opening counts verified [UNVERIFIED]",
+              "FINISH_TO_START: Structural framing + second-floor/loft system remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-09-10",
+              "likely": "2026-09-15",
+              "conservative": "2026-09-23"
+            },
+            "finish": {
+              "optimistic": "2026-09-11",
+              "likely": "2026-09-17",
+              "conservative": "2026-09-29"
+            },
+            "likelyFloatWorkdays": 23,
+            "critical": false,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.855,
+              "materialReadiness": 0.42,
+              "tradeReadiness": 0.72,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.7023
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope",
+                "src-material-quotes"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d10",
+                "activityId": "framing",
+                "label": "Structural framing + second-floor/loft system",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-09-14",
+                "action": "Structural framing + second-floor/loft system must finish by 2026-09-14 to protect Windows and exterior service door install"
+              },
+              {
+                "kind": "CONSTRAINT",
+                "id": "windows-doors-material",
+                "label": "Window/service-door package availability and opening counts verified",
+                "constraintType": "MATERIAL",
+                "truthState": "UNVERIFIED",
+                "requiredBy": "2026-09-15",
+                "action": "Resolve/confirm Window/service-door package availability and opening counts verified by 2026-09-15"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: Structural framing + second-floor/loft system",
+              "MATERIAL: Window/service-door package availability and opening counts verified [UNVERIFIED]"
+            ],
+            "warnings": [
+              "Unverified hard material constraint: Window/service-door package availability and opening counts verified"
+            ]
+          },
+          "brick_veneer": {
+            "activityId": "brick_veneer",
+            "activityName": "Brick veneer / soldier courses / quoins",
+            "phase": "Exterior",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "MATERIAL: Brick veneer match approved against existing residence [BLOCKED]",
+              "MATERIAL: Lee masonry material quote refreshed / package released [UNVERIFIED]",
+              "FINISH_TO_START: Windows and exterior service door install remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-09-14",
+              "likely": "2026-09-18",
+              "conservative": "2026-09-30"
+            },
+            "finish": {
+              "optimistic": "2026-09-18",
+              "likely": "2026-09-28",
+              "conservative": "2026-10-13"
+            },
+            "likelyFloatWorkdays": 23,
+            "critical": false,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.855,
+              "materialReadiness": 0.21,
+              "tradeReadiness": 0.72,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.6729
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope",
+                "src-brick-risk",
+                "src-material-quotes"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d11",
+                "activityId": "windows_ext_doors",
+                "label": "Windows and exterior service door install",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-09-17",
+                "action": "Windows and exterior service door install must finish by 2026-09-17 to protect Brick veneer / soldier courses / quoins"
+              },
+              {
+                "kind": "CONSTRAINT",
+                "id": "brick-match",
+                "label": "Brick veneer match approved against existing residence",
+                "constraintType": "MATERIAL",
+                "truthState": "BLOCKED",
+                "requiredBy": "2026-09-18",
+                "action": "Resolve/confirm Brick veneer match approved against existing residence by 2026-09-18"
+              },
+              {
+                "kind": "CONSTRAINT",
+                "id": "brick-material",
+                "label": "Lee masonry material quote refreshed / package released",
+                "constraintType": "MATERIAL",
+                "truthState": "UNVERIFIED",
+                "requiredBy": "2026-09-18",
+                "action": "Resolve/confirm Lee masonry material quote refreshed / package released by 2026-09-18"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: Windows and exterior service door install",
+              "MATERIAL: Brick veneer match approved against existing residence [BLOCKED]",
+              "MATERIAL: Lee masonry material quote refreshed / package released [UNVERIFIED]"
+            ],
+            "warnings": [
+              "Blocked material constraint: Brick veneer match approved against existing residence",
+              "Unverified hard material constraint: Lee masonry material quote refreshed / package released"
+            ]
+          },
+          "underslab_mep": {
+            "activityId": "underslab_mep",
+            "activityName": "Under-slab plumbing/electrical routing",
+            "phase": "MEP",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "INFORMATION: Under-slab plumbing/electrical routing field-confirmed [UNVERIFIED]",
+              "FINISH_TO_START: Weather dry-in release remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-09-15",
+              "likely": "2026-09-17",
+              "conservative": "2026-09-25"
+            },
+            "finish": {
+              "optimistic": "2026-09-16",
+              "likely": "2026-09-21",
+              "conservative": "2026-10-01"
+            },
+            "likelyFloatWorkdays": 2,
+            "critical": false,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.855,
+              "materialReadiness": 0.72,
+              "tradeReadiness": 0.72,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.7443
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope",
+                "src-plumbing",
+                "src-trades"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "CONSTRAINT",
+                "id": "mep-routing",
+                "label": "Under-slab plumbing/electrical routing field-confirmed",
+                "constraintType": "INFORMATION",
+                "truthState": "UNVERIFIED",
+                "requiredBy": "2026-09-16",
+                "action": "Resolve/confirm Under-slab plumbing/electrical routing field-confirmed by 2026-09-16"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d12",
+                "activityId": "dry_in_release",
+                "label": "Weather dry-in release",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-09-16",
+                "action": "Weather dry-in release must finish by 2026-09-16 to protect Under-slab plumbing/electrical routing"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: Weather dry-in release",
+              "INFORMATION: Under-slab plumbing/electrical routing field-confirmed [UNVERIFIED]"
+            ],
+            "warnings": [
+              "Unverified hard information constraint: Under-slab plumbing/electrical routing field-confirmed"
+            ]
+          },
+          "slab_prep": {
+            "activityId": "slab_prep",
+            "activityName": "Slab stone / vapor / reinforcement / concealed inspection",
+            "phase": "Concrete",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "INSPECTION: Required under-slab/concealed inspection release [UNVERIFIED]",
+              "FINISH_TO_START: Under-slab plumbing/electrical routing remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-09-17",
+              "likely": "2026-09-22",
+              "conservative": "2026-10-02"
+            },
+            "finish": {
+              "optimistic": "2026-09-18",
+              "likely": "2026-09-24",
+              "conservative": "2026-10-08"
+            },
+            "likelyFloatWorkdays": 2,
+            "critical": false,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.855,
+              "materialReadiness": 0.72,
+              "tradeReadiness": 0.72,
+              "inspectionReadiness": 0.42,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.7143
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope",
+                "src-budget"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "CONSTRAINT",
+                "id": "slab-inspection",
+                "label": "Required under-slab/concealed inspection release",
+                "constraintType": "INSPECTION",
+                "truthState": "UNVERIFIED",
+                "requiredBy": "2026-09-21",
+                "action": "Resolve/confirm Required under-slab/concealed inspection release by 2026-09-21"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d13",
+                "activityId": "underslab_mep",
+                "label": "Under-slab plumbing/electrical routing",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-09-21",
+                "action": "Under-slab plumbing/electrical routing must finish by 2026-09-21 to protect Slab stone / vapor / reinforcement / concealed inspection"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: Under-slab plumbing/electrical routing",
+              "INSPECTION: Required under-slab/concealed inspection release [UNVERIFIED]"
+            ],
+            "warnings": [
+              "Unverified hard inspection constraint: Required under-slab/concealed inspection release"
+            ]
+          },
+          "slab": {
+            "activityId": "slab",
+            "activityName": "Garage and mower-storage slab pour / finish / cure release",
+            "phase": "Concrete",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "TRADE_AVAILABILITY: Concrete crew remobilization after dry-in [FORECASTED]",
+              "FINISH_TO_START: Slab stone / vapor / reinforcement / concealed inspection remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-09-21",
+              "likely": "2026-09-25",
+              "conservative": "2026-10-09"
+            },
+            "finish": {
+              "optimistic": "2026-09-22",
+              "likely": "2026-09-29",
+              "conservative": "2026-10-15"
+            },
+            "likelyFloatWorkdays": 2,
+            "critical": false,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.855,
+              "materialReadiness": 0.72,
+              "tradeReadiness": 0.62,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.7303
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope",
+                "src-budget",
+                "src-dashboard"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "CONSTRAINT",
+                "id": "concrete-trade",
+                "label": "Concrete crew remobilization after dry-in",
+                "constraintType": "TRADE_AVAILABILITY",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-09-23",
+                "action": "Resolve/confirm Concrete crew remobilization after dry-in by 2026-09-23"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d14",
+                "activityId": "slab_prep",
+                "label": "Slab stone / vapor / reinforcement / concealed inspection",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-09-24",
+                "action": "Slab stone / vapor / reinforcement / concealed inspection must finish by 2026-09-24 to protect Garage and mower-storage slab pour / finish / cure release"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: Slab stone / vapor / reinforcement / concealed inspection",
+              "TRADE_AVAILABILITY: Concrete crew remobilization after dry-in [FORECASTED]"
+            ],
+            "warnings": [
+              "Forecast-only hard trade_availability constraint: Concrete crew remobilization after dry-in"
+            ]
+          },
+          "electrical_rough": {
+            "activityId": "electrical_rough",
+            "activityName": "Electrical service and rough-in",
+            "phase": "MEP Rough",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "TRADE_AVAILABILITY: Jason Bonham electrical rough-in mobilization [FORECASTED]",
+              "FINISH_TO_START: Weather dry-in release remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-09-15",
+              "likely": "2026-09-17",
+              "conservative": "2026-09-25"
+            },
+            "finish": {
+              "optimistic": "2026-09-18",
+              "likely": "2026-09-24",
+              "conservative": "2026-10-07"
+            },
+            "likelyFloatWorkdays": 0,
+            "critical": true,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.855,
+              "materialReadiness": 0.72,
+              "tradeReadiness": 0.62,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.7303
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope",
+                "src-trades"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "CONSTRAINT",
+                "id": "electrical-trade",
+                "label": "Jason Bonham electrical rough-in mobilization",
+                "constraintType": "TRADE_AVAILABILITY",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-09-15",
+                "action": "Resolve/confirm Jason Bonham electrical rough-in mobilization by 2026-09-15"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d15",
+                "activityId": "dry_in_release",
+                "label": "Weather dry-in release",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-09-16",
+                "action": "Weather dry-in release must finish by 2026-09-16 to protect Electrical service and rough-in"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: Weather dry-in release",
+              "TRADE_AVAILABILITY: Jason Bonham electrical rough-in mobilization [FORECASTED]"
+            ],
+            "warnings": [
+              "Forecast-only hard trade_availability constraint: Jason Bonham electrical rough-in mobilization"
+            ]
+          },
+          "plumbing_rough": {
+            "activityId": "plumbing_rough",
+            "activityName": "Half-bath plumbing rough-in",
+            "phase": "MEP Rough",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "TRADE_AVAILABILITY: Medina plumbing rough-in mobilization [FORECASTED]",
+              "FINISH_TO_START: Weather dry-in release remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-09-15",
+              "likely": "2026-09-17",
+              "conservative": "2026-09-25"
+            },
+            "finish": {
+              "optimistic": "2026-09-17",
+              "likely": "2026-09-22",
+              "conservative": "2026-10-05"
+            },
+            "likelyFloatWorkdays": 2,
+            "critical": false,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.855,
+              "materialReadiness": 0.72,
+              "tradeReadiness": 0.62,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.7303
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope",
+                "src-plumbing",
+                "src-trades"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "CONSTRAINT",
+                "id": "plumbing-trade",
+                "label": "Medina plumbing rough-in mobilization",
+                "constraintType": "TRADE_AVAILABILITY",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-09-15",
+                "action": "Resolve/confirm Medina plumbing rough-in mobilization by 2026-09-15"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d16",
+                "activityId": "dry_in_release",
+                "label": "Weather dry-in release",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-09-16",
+                "action": "Weather dry-in release must finish by 2026-09-16 to protect Half-bath plumbing rough-in"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: Weather dry-in release",
+              "TRADE_AVAILABILITY: Medina plumbing rough-in mobilization [FORECASTED]"
+            ],
+            "warnings": [
+              "Forecast-only hard trade_availability constraint: Medina plumbing rough-in mobilization"
+            ]
+          },
+          "hvac_rough": {
+            "activityId": "hvac_rough",
+            "activityName": "Multi-zone mini-split rough-in / lines / condensate",
+            "phase": "MEP Rough",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "TRADE_AVAILABILITY: Anthony Parker HVAC rough-in mobilization [FORECASTED]",
+              "MATERIAL: Multi-zone HVAC equipment / route / condensate plan ready [UNVERIFIED]",
+              "FINISH_TO_START: Weather dry-in release remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-09-15",
+              "likely": "2026-09-17",
+              "conservative": "2026-09-25"
+            },
+            "finish": {
+              "optimistic": "2026-09-17",
+              "likely": "2026-09-23",
+              "conservative": "2026-10-06"
+            },
+            "likelyFloatWorkdays": 1,
+            "critical": false,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.855,
+              "materialReadiness": 0.42,
+              "tradeReadiness": 0.62,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.6883
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope",
+                "src-hvac",
+                "src-trades"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "CONSTRAINT",
+                "id": "hvac-trade",
+                "label": "Anthony Parker HVAC rough-in mobilization",
+                "constraintType": "TRADE_AVAILABILITY",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-09-15",
+                "action": "Resolve/confirm Anthony Parker HVAC rough-in mobilization by 2026-09-15"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d17",
+                "activityId": "dry_in_release",
+                "label": "Weather dry-in release",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-09-16",
+                "action": "Weather dry-in release must finish by 2026-09-16 to protect Multi-zone mini-split rough-in / lines / condensate"
+              },
+              {
+                "kind": "CONSTRAINT",
+                "id": "hvac-equipment",
+                "label": "Multi-zone HVAC equipment / route / condensate plan ready",
+                "constraintType": "MATERIAL",
+                "truthState": "UNVERIFIED",
+                "requiredBy": "2026-09-17",
+                "action": "Resolve/confirm Multi-zone HVAC equipment / route / condensate plan ready by 2026-09-17"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: Weather dry-in release",
+              "TRADE_AVAILABILITY: Anthony Parker HVAC rough-in mobilization [FORECASTED]",
+              "MATERIAL: Multi-zone HVAC equipment / route / condensate plan ready [UNVERIFIED]"
+            ],
+            "warnings": [
+              "Forecast-only hard trade_availability constraint: Anthony Parker HVAC rough-in mobilization",
+              "Unverified hard material constraint: Multi-zone HVAC equipment / route / condensate plan ready"
+            ]
+          },
+          "rough_inspection": {
+            "activityId": "rough_inspection",
+            "activityName": "MEP rough inspections",
+            "phase": "Inspection",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "INSPECTION: All rough trades inspection-ready and inspection slot confirmed [UNVERIFIED]",
+              "FINISH_TO_START: Electrical service and rough-in remains forecasted",
+              "FINISH_TO_START: Half-bath plumbing rough-in remains forecasted",
+              "FINISH_TO_START: Multi-zone mini-split rough-in / lines / condensate remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-09-21",
+              "likely": "2026-09-25",
+              "conservative": "2026-10-08"
+            },
+            "finish": {
+              "optimistic": "2026-09-21",
+              "likely": "2026-09-28",
+              "conservative": "2026-10-13"
+            },
+            "likelyFloatWorkdays": 0,
+            "critical": true,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.855,
+              "materialReadiness": 0.72,
+              "tradeReadiness": 0.72,
+              "inspectionReadiness": 0.42,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.7143
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "CONSTRAINT",
+                "id": "inspection-ready",
+                "label": "All rough trades inspection-ready and inspection slot confirmed",
+                "constraintType": "INSPECTION",
+                "truthState": "UNVERIFIED",
+                "requiredBy": "2026-09-24",
+                "action": "Resolve/confirm All rough trades inspection-ready and inspection slot confirmed by 2026-09-24"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d18",
+                "activityId": "electrical_rough",
+                "label": "Electrical service and rough-in",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-09-24",
+                "action": "Electrical service and rough-in must finish by 2026-09-24 to protect MEP rough inspections"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d19",
+                "activityId": "plumbing_rough",
+                "label": "Half-bath plumbing rough-in",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-09-24",
+                "action": "Half-bath plumbing rough-in must finish by 2026-09-24 to protect MEP rough inspections"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d20",
+                "activityId": "hvac_rough",
+                "label": "Multi-zone mini-split rough-in / lines / condensate",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-09-24",
+                "action": "Multi-zone mini-split rough-in / lines / condensate must finish by 2026-09-24 to protect MEP rough inspections"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: Electrical service and rough-in",
+              "Hard FINISH_TO_START: Half-bath plumbing rough-in",
+              "Hard FINISH_TO_START: Multi-zone mini-split rough-in / lines / condensate",
+              "INSPECTION: All rough trades inspection-ready and inspection slot confirmed [UNVERIFIED]"
+            ],
+            "warnings": [
+              "Unverified hard inspection constraint: All rough trades inspection-ready and inspection slot confirmed"
+            ]
+          },
+          "insulation": {
+            "activityId": "insulation",
+            "activityName": "Insulation and air sealing",
+            "phase": "Close-In",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "TRADE_AVAILABILITY: Insulation trade quote / mobilization [UNVERIFIED]",
+              "FINISH_TO_START: MEP rough inspections remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-09-22",
+              "likely": "2026-09-29",
+              "conservative": "2026-10-14"
+            },
+            "finish": {
+              "optimistic": "2026-09-23",
+              "likely": "2026-10-01",
+              "conservative": "2026-10-20"
+            },
+            "likelyFloatWorkdays": 0,
+            "critical": true,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.855,
+              "materialReadiness": 0.72,
+              "tradeReadiness": 0.42,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.7023
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope",
+                "src-dashboard"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "CONSTRAINT",
+                "id": "insulation-trade",
+                "label": "Insulation trade quote / mobilization",
+                "constraintType": "TRADE_AVAILABILITY",
+                "truthState": "UNVERIFIED",
+                "requiredBy": "2026-09-25",
+                "action": "Resolve/confirm Insulation trade quote / mobilization by 2026-09-25"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d21",
+                "activityId": "rough_inspection",
+                "label": "MEP rough inspections",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-09-28",
+                "action": "MEP rough inspections must finish by 2026-09-28 to protect Insulation and air sealing"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: MEP rough inspections",
+              "TRADE_AVAILABILITY: Insulation trade quote / mobilization [UNVERIFIED]"
+            ],
+            "warnings": [
+              "Unverified hard trade_availability constraint: Insulation trade quote / mobilization"
+            ]
+          },
+          "drywall_hang": {
+            "activityId": "drywall_hang",
+            "activityName": "Drywall hang",
+            "phase": "Close-In",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "TRADE_AVAILABILITY: Drywall crew mobilization [UNVERIFIED]",
+              "FINISH_TO_START: Insulation and air sealing remains forecasted",
+              "FINISH_TO_START: Garage and mower-storage slab pour / finish / cure release remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-09-24",
+              "likely": "2026-10-02",
+              "conservative": "2026-10-21"
+            },
+            "finish": {
+              "optimistic": "2026-09-28",
+              "likely": "2026-10-07",
+              "conservative": "2026-10-28"
+            },
+            "likelyFloatWorkdays": 0,
+            "critical": true,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.855,
+              "materialReadiness": 0.72,
+              "tradeReadiness": 0.42,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.7023
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope",
+                "src-budget",
+                "src-dashboard"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "CONSTRAINT",
+                "id": "drywall-trade",
+                "label": "Drywall crew mobilization",
+                "constraintType": "TRADE_AVAILABILITY",
+                "truthState": "UNVERIFIED",
+                "requiredBy": "2026-09-30",
+                "action": "Resolve/confirm Drywall crew mobilization by 2026-09-30"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d22",
+                "activityId": "insulation",
+                "label": "Insulation and air sealing",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-10-01",
+                "action": "Insulation and air sealing must finish by 2026-10-01 to protect Drywall hang"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d23",
+                "activityId": "slab",
+                "label": "Garage and mower-storage slab pour / finish / cure release",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-10-01",
+                "action": "Garage and mower-storage slab pour / finish / cure release must finish by 2026-10-01 to protect Drywall hang"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: Insulation and air sealing",
+              "Hard FINISH_TO_START: Garage and mower-storage slab pour / finish / cure release",
+              "TRADE_AVAILABILITY: Drywall crew mobilization [UNVERIFIED]"
+            ],
+            "warnings": [
+              "Unverified hard trade_availability constraint: Drywall crew mobilization"
+            ]
+          },
+          "drywall_finish": {
+            "activityId": "drywall_finish",
+            "activityName": "Drywall tape / finish / sand",
+            "phase": "Close-In",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "FINISH_TO_START: Drywall hang remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-09-29",
+              "likely": "2026-10-08",
+              "conservative": "2026-10-29"
+            },
+            "finish": {
+              "optimistic": "2026-10-02",
+              "likely": "2026-10-15",
+              "conservative": "2026-11-10"
+            },
+            "likelyFloatWorkdays": 0,
+            "critical": true,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.855,
+              "materialReadiness": 0.72,
+              "tradeReadiness": 0.72,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.7443
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope",
+                "src-budget"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d24",
+                "activityId": "drywall_hang",
+                "label": "Drywall hang",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-10-07",
+                "action": "Drywall hang must finish by 2026-10-07 to protect Drywall tape / finish / sand"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: Drywall hang"
+            ],
+            "warnings": []
+          },
+          "prime_paint": {
+            "activityId": "prime_paint",
+            "activityName": "Prime and interior paint",
+            "phase": "Finishes",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "TRADE_AVAILABILITY: Dylan Jasper painting mobilization [FORECASTED]",
+              "FINISH_TO_START: Drywall tape / finish / sand remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-10-05",
+              "likely": "2026-10-16",
+              "conservative": "2026-11-11"
+            },
+            "finish": {
+              "optimistic": "2026-10-08",
+              "likely": "2026-10-23",
+              "conservative": "2026-11-23"
+            },
+            "likelyFloatWorkdays": 0,
+            "critical": true,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.855,
+              "materialReadiness": 0.72,
+              "tradeReadiness": 0.62,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.7303
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope",
+                "src-budget",
+                "src-trades"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "CONSTRAINT",
+                "id": "paint-trade",
+                "label": "Dylan Jasper painting mobilization",
+                "constraintType": "TRADE_AVAILABILITY",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-10-14",
+                "action": "Resolve/confirm Dylan Jasper painting mobilization by 2026-10-14"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d25",
+                "activityId": "drywall_finish",
+                "label": "Drywall tape / finish / sand",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-10-15",
+                "action": "Drywall tape / finish / sand must finish by 2026-10-15 to protect Prime and interior paint"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: Drywall tape / finish / sand",
+              "TRADE_AVAILABILITY: Dylan Jasper painting mobilization [FORECASTED]"
+            ],
+            "warnings": [
+              "Forecast-only hard trade_availability constraint: Dylan Jasper painting mobilization"
+            ]
+          },
+          "finish_carpentry": {
+            "activityId": "finish_carpentry",
+            "activityName": "Interior doors / trim / stair finish / vanity setting",
+            "phase": "Finishes",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "TRADE_AVAILABILITY: Finish carpentry labor mobilization [FORECASTED]",
+              "FINISH_TO_START: Prime and interior paint remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-10-09",
+              "likely": "2026-10-26",
+              "conservative": "2026-11-24"
+            },
+            "finish": {
+              "optimistic": "2026-10-14",
+              "likely": "2026-11-02",
+              "conservative": "2026-12-04"
+            },
+            "likelyFloatWorkdays": 0,
+            "critical": true,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.855,
+              "materialReadiness": 0.72,
+              "tradeReadiness": 0.62,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.7303
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope",
+                "src-budget"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "CONSTRAINT",
+                "id": "finish-carpentry-trade",
+                "label": "Finish carpentry labor mobilization",
+                "constraintType": "TRADE_AVAILABILITY",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-10-22",
+                "action": "Resolve/confirm Finish carpentry labor mobilization by 2026-10-22"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d26",
+                "activityId": "prime_paint",
+                "label": "Prime and interior paint",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-10-23",
+                "action": "Prime and interior paint must finish by 2026-10-23 to protect Interior doors / trim / stair finish / vanity setting"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: Prime and interior paint",
+              "TRADE_AVAILABILITY: Finish carpentry labor mobilization [FORECASTED]"
+            ],
+            "warnings": [
+              "Forecast-only hard trade_availability constraint: Finish carpentry labor mobilization"
+            ]
+          },
+          "flooring": {
+            "activityId": "flooring",
+            "activityName": "Second-floor flooring / transitions / stair finish",
+            "phase": "Finishes",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "TRADE_AVAILABILITY: Flooring labor mobilization [FORECASTED]",
+              "FINISH_TO_START: Interior doors / trim / stair finish / vanity setting remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-10-15",
+              "likely": "2026-11-03",
+              "conservative": "2026-12-07"
+            },
+            "finish": {
+              "optimistic": "2026-10-16",
+              "likely": "2026-11-05",
+              "conservative": "2026-12-11"
+            },
+            "likelyFloatWorkdays": 2,
+            "critical": false,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.855,
+              "materialReadiness": 0.72,
+              "tradeReadiness": 0.62,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.7303
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope",
+                "src-budget"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "CONSTRAINT",
+                "id": "flooring-trade",
+                "label": "Flooring labor mobilization",
+                "constraintType": "TRADE_AVAILABILITY",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-10-30",
+                "action": "Resolve/confirm Flooring labor mobilization by 2026-10-30"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d27",
+                "activityId": "finish_carpentry",
+                "label": "Interior doors / trim / stair finish / vanity setting",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-11-02",
+                "action": "Interior doors / trim / stair finish / vanity setting must finish by 2026-11-02 to protect Second-floor flooring / transitions / stair finish"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: Interior doors / trim / stair finish / vanity setting",
+              "TRADE_AVAILABILITY: Flooring labor mobilization [FORECASTED]"
+            ],
+            "warnings": [
+              "Forecast-only hard trade_availability constraint: Flooring labor mobilization"
+            ]
+          },
+          "half_bath_finish": {
+            "activityId": "half_bath_finish",
+            "activityName": "Half-bath vanity / top / fixtures / mirror / accessories",
+            "phase": "Finishes",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "FINISH_TO_START: Interior doors / trim / stair finish / vanity setting remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-10-15",
+              "likely": "2026-11-03",
+              "conservative": "2026-12-07"
+            },
+            "finish": {
+              "optimistic": "2026-10-16",
+              "likely": "2026-11-05",
+              "conservative": "2026-12-11"
+            },
+            "likelyFloatWorkdays": 0,
+            "critical": true,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.855,
+              "materialReadiness": 0.42,
+              "tradeReadiness": 0.72,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.7023
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope",
+                "src-plumbing"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d28",
+                "activityId": "finish_carpentry",
+                "label": "Interior doors / trim / stair finish / vanity setting",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-11-02",
+                "action": "Interior doors / trim / stair finish / vanity setting must finish by 2026-11-02 to protect Half-bath vanity / top / fixtures / mirror / accessories"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: Interior doors / trim / stair finish / vanity setting",
+              "MATERIAL: Vanity/top/fixtures/mirror/accessories ready [UNVERIFIED]"
+            ],
+            "warnings": []
+          },
+          "garage_doors": {
+            "activityId": "garage_doors",
+            "activityName": "Overhead garage doors / openers / controls",
+            "phase": "Exterior",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "MATERIAL: Double + single overhead door/openers package ordered and available [UNVERIFIED]",
+              "FINISH_TO_START: Garage and mower-storage slab pour / finish / cure release remains forecasted",
+              "FINISH_TO_START: Structural framing + second-floor/loft system remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-09-23",
+              "likely": "2026-09-30",
+              "conservative": "2026-10-16"
+            },
+            "finish": {
+              "optimistic": "2026-09-24",
+              "likely": "2026-10-02",
+              "conservative": "2026-10-22"
+            },
+            "likelyFloatWorkdays": 19,
+            "critical": false,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.855,
+              "materialReadiness": 0.42,
+              "tradeReadiness": 0.72,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.7023
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope",
+                "src-budget"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d29",
+                "activityId": "slab",
+                "label": "Garage and mower-storage slab pour / finish / cure release",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-09-29",
+                "action": "Garage and mower-storage slab pour / finish / cure release must finish by 2026-09-29 to protect Overhead garage doors / openers / controls"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d30",
+                "activityId": "framing",
+                "label": "Structural framing + second-floor/loft system",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-09-29",
+                "action": "Structural framing + second-floor/loft system must finish by 2026-09-29 to protect Overhead garage doors / openers / controls"
+              },
+              {
+                "kind": "CONSTRAINT",
+                "id": "garage-door-package",
+                "label": "Double + single overhead door/openers package ordered and available",
+                "constraintType": "MATERIAL",
+                "truthState": "UNVERIFIED",
+                "requiredBy": "2026-09-30",
+                "action": "Resolve/confirm Double + single overhead door/openers package ordered and available by 2026-09-30"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: Garage and mower-storage slab pour / finish / cure release",
+              "Hard FINISH_TO_START: Structural framing + second-floor/loft system",
+              "MATERIAL: Double + single overhead door/openers package ordered and available [UNVERIFIED]"
+            ],
+            "warnings": [
+              "Unverified hard material constraint: Double + single overhead door/openers package ordered and available"
+            ]
+          },
+          "electrical_final": {
+            "activityId": "electrical_final",
+            "activityName": "Electrical trim / devices / lighting / testing",
+            "phase": "MEP Final",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "FINISH_TO_START: Interior doors / trim / stair finish / vanity setting remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-10-15",
+              "likely": "2026-11-03",
+              "conservative": "2026-12-07"
+            },
+            "finish": {
+              "optimistic": "2026-10-16",
+              "likely": "2026-11-05",
+              "conservative": "2026-12-11"
+            },
+            "likelyFloatWorkdays": 0,
+            "critical": true,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.855,
+              "materialReadiness": 0.72,
+              "tradeReadiness": 0.72,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.7443
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope",
+                "src-trades"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d31",
+                "activityId": "finish_carpentry",
+                "label": "Interior doors / trim / stair finish / vanity setting",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-11-02",
+                "action": "Interior doors / trim / stair finish / vanity setting must finish by 2026-11-02 to protect Electrical trim / devices / lighting / testing"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: Interior doors / trim / stair finish / vanity setting"
+            ],
+            "warnings": []
+          },
+          "plumbing_final": {
+            "activityId": "plumbing_final",
+            "activityName": "Plumbing fixtures / trim / testing",
+            "phase": "MEP Final",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "FINISH_TO_START: Half-bath vanity / top / fixtures / mirror / accessories remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-10-19",
+              "likely": "2026-11-06",
+              "conservative": "2026-12-14"
+            },
+            "finish": {
+              "optimistic": "2026-10-19",
+              "likely": "2026-11-09",
+              "conservative": "2026-12-16"
+            },
+            "likelyFloatWorkdays": 0,
+            "critical": true,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.855,
+              "materialReadiness": 0.72,
+              "tradeReadiness": 0.72,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.7443
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope",
+                "src-plumbing"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d32",
+                "activityId": "half_bath_finish",
+                "label": "Half-bath vanity / top / fixtures / mirror / accessories",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-11-05",
+                "action": "Half-bath vanity / top / fixtures / mirror / accessories must finish by 2026-11-05 to protect Plumbing fixtures / trim / testing"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: Half-bath vanity / top / fixtures / mirror / accessories"
+            ],
+            "warnings": []
+          },
+          "hvac_startup": {
+            "activityId": "hvac_startup",
+            "activityName": "HVAC startup / commissioning",
+            "phase": "MEP Final",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "FINISH_TO_START: Electrical trim / devices / lighting / testing remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-10-19",
+              "likely": "2026-11-06",
+              "conservative": "2026-12-14"
+            },
+            "finish": {
+              "optimistic": "2026-10-19",
+              "likely": "2026-11-09",
+              "conservative": "2026-12-16"
+            },
+            "likelyFloatWorkdays": 0,
+            "critical": true,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.855,
+              "materialReadiness": 0.72,
+              "tradeReadiness": 0.72,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.7443
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope",
+                "src-hvac"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d33",
+                "activityId": "electrical_final",
+                "label": "Electrical trim / devices / lighting / testing",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-11-05",
+                "action": "Electrical trim / devices / lighting / testing must finish by 2026-11-05 to protect HVAC startup / commissioning"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: Electrical trim / devices / lighting / testing"
+            ],
+            "warnings": []
+          },
+          "exterior_closeout": {
+            "activityId": "exterior_closeout",
+            "activityName": "Exterior trim / caulk / gutters / weatherproof closeout",
+            "phase": "Exterior",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "FINISH_TO_START: Roof underlayment / shingles / flashings remains forecasted",
+              "FINISH_TO_START: Brick veneer / soldier courses / quoins remains forecasted",
+              "FINISH_TO_START: Overhead garage doors / openers / controls remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-09-25",
+              "likely": "2026-10-05",
+              "conservative": "2026-10-23"
+            },
+            "finish": {
+              "optimistic": "2026-09-29",
+              "likely": "2026-10-08",
+              "conservative": "2026-10-30"
+            },
+            "likelyFloatWorkdays": 19,
+            "critical": false,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.855,
+              "materialReadiness": 0.72,
+              "tradeReadiness": 0.72,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.7443
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d34",
+                "activityId": "roofing",
+                "label": "Roof underlayment / shingles / flashings",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-10-02",
+                "action": "Roof underlayment / shingles / flashings must finish by 2026-10-02 to protect Exterior trim / caulk / gutters / weatherproof closeout"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d35",
+                "activityId": "brick_veneer",
+                "label": "Brick veneer / soldier courses / quoins",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-10-02",
+                "action": "Brick veneer / soldier courses / quoins must finish by 2026-10-02 to protect Exterior trim / caulk / gutters / weatherproof closeout"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d36",
+                "activityId": "garage_doors",
+                "label": "Overhead garage doors / openers / controls",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-10-02",
+                "action": "Overhead garage doors / openers / controls must finish by 2026-10-02 to protect Exterior trim / caulk / gutters / weatherproof closeout"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: Roof underlayment / shingles / flashings",
+              "Hard FINISH_TO_START: Brick veneer / soldier courses / quoins",
+              "Hard FINISH_TO_START: Overhead garage doors / openers / controls"
+            ],
+            "warnings": []
+          },
+          "final_grading_cleanup": {
+            "activityId": "final_grading_cleanup",
+            "activityName": "Final grading / lawn restoration / cleanup",
+            "phase": "Closeout",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "FINISH_TO_START: Exterior trim / caulk / gutters / weatherproof closeout remains forecasted",
+              "FINISH_TO_START: Garage and mower-storage slab pour / finish / cure release remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-09-30",
+              "likely": "2026-10-09",
+              "conservative": "2026-11-02"
+            },
+            "finish": {
+              "optimistic": "2026-10-01",
+              "likely": "2026-10-13",
+              "conservative": "2026-11-06"
+            },
+            "likelyFloatWorkdays": 19,
+            "critical": false,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.855,
+              "materialReadiness": 0.72,
+              "tradeReadiness": 0.72,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.7443
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d37",
+                "activityId": "exterior_closeout",
+                "label": "Exterior trim / caulk / gutters / weatherproof closeout",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-10-08",
+                "action": "Exterior trim / caulk / gutters / weatherproof closeout must finish by 2026-10-08 to protect Final grading / lawn restoration / cleanup"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d38",
+                "activityId": "slab",
+                "label": "Garage and mower-storage slab pour / finish / cure release",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-10-08",
+                "action": "Garage and mower-storage slab pour / finish / cure release must finish by 2026-10-08 to protect Final grading / lawn restoration / cleanup"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: Exterior trim / caulk / gutters / weatherproof closeout",
+              "Hard FINISH_TO_START: Garage and mower-storage slab pour / finish / cure release"
+            ],
+            "warnings": []
+          },
+          "final_inspection": {
+            "activityId": "final_inspection",
+            "activityName": "Final inspections / punch release",
+            "phase": "Closeout",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "INSPECTION: Final inspection availability [UNVERIFIED]",
+              "FINISH_TO_START: Second-floor flooring / transitions / stair finish remains forecasted",
+              "FINISH_TO_START: Plumbing fixtures / trim / testing remains forecasted",
+              "FINISH_TO_START: Electrical trim / devices / lighting / testing remains forecasted",
+              "FINISH_TO_START: HVAC startup / commissioning remains forecasted",
+              "FINISH_TO_START: Final grading / lawn restoration / cleanup remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-10-20",
+              "likely": "2026-11-10",
+              "conservative": "2026-12-17"
+            },
+            "finish": {
+              "optimistic": "2026-10-20",
+              "likely": "2026-11-11",
+              "conservative": "2026-12-22"
+            },
+            "likelyFloatWorkdays": 0,
+            "critical": true,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.8550000000000001,
+              "materialReadiness": 0.72,
+              "tradeReadiness": 0.72,
+              "inspectionReadiness": 0.42,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.7143
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "CONSTRAINT",
+                "id": "final-inspection",
+                "label": "Final inspection availability",
+                "constraintType": "INSPECTION",
+                "truthState": "UNVERIFIED",
+                "requiredBy": "2026-11-09",
+                "action": "Resolve/confirm Final inspection availability by 2026-11-09"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d39",
+                "activityId": "flooring",
+                "label": "Second-floor flooring / transitions / stair finish",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-11-09",
+                "action": "Second-floor flooring / transitions / stair finish must finish by 2026-11-09 to protect Final inspections / punch release"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d40",
+                "activityId": "plumbing_final",
+                "label": "Plumbing fixtures / trim / testing",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-11-09",
+                "action": "Plumbing fixtures / trim / testing must finish by 2026-11-09 to protect Final inspections / punch release"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d41",
+                "activityId": "electrical_final",
+                "label": "Electrical trim / devices / lighting / testing",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-11-09",
+                "action": "Electrical trim / devices / lighting / testing must finish by 2026-11-09 to protect Final inspections / punch release"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d42",
+                "activityId": "hvac_startup",
+                "label": "HVAC startup / commissioning",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-11-09",
+                "action": "HVAC startup / commissioning must finish by 2026-11-09 to protect Final inspections / punch release"
+              },
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d43",
+                "activityId": "final_grading_cleanup",
+                "label": "Final grading / lawn restoration / cleanup",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-11-09",
+                "action": "Final grading / lawn restoration / cleanup must finish by 2026-11-09 to protect Final inspections / punch release"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: Second-floor flooring / transitions / stair finish",
+              "Hard FINISH_TO_START: Plumbing fixtures / trim / testing",
+              "Hard FINISH_TO_START: Electrical trim / devices / lighting / testing",
+              "Hard FINISH_TO_START: HVAC startup / commissioning",
+              "Hard FINISH_TO_START: Final grading / lawn restoration / cleanup",
+              "INSPECTION: Final inspection availability [UNVERIFIED]"
+            ],
+            "warnings": [
+              "Unverified hard inspection constraint: Final inspection availability"
+            ]
+          },
+          "homeowner_walkthrough": {
+            "activityId": "homeowner_walkthrough",
+            "activityName": "Systems demonstration / homeowner walkthrough / closeout package",
+            "phase": "Closeout",
+            "activityState": "NOT_STARTED",
+            "truthState": "FORECASTED",
+            "dateBasis": "CONDITIONAL",
+            "assumptions": [
+              "FINISH_TO_START: Final inspections / punch release remains forecasted"
+            ],
+            "start": {
+              "optimistic": "2026-10-21",
+              "likely": "2026-11-12",
+              "conservative": "2026-12-23"
+            },
+            "finish": {
+              "optimistic": "2026-10-21",
+              "likely": "2026-11-12",
+              "conservative": "2026-12-24"
+            },
+            "likelyFloatWorkdays": 0,
+            "critical": true,
+            "impactStatus": "SHIFTED",
+            "confidence": {
+              "scopeClarity": 0.855,
+              "dependencyClarity": 0.855,
+              "materialReadiness": 0.72,
+              "tradeReadiness": 0.72,
+              "inspectionReadiness": 0.72,
+              "freshness": 1,
+              "historicalEvidence": 0.5,
+              "fieldVerification": 0.4,
+              "contradictionPenalty": 0,
+              "overall": 0.7443
+            },
+            "evidence": {
+              "sourceIds": [
+                "src-scope"
+              ],
+              "eventIds": [
+                "deboard-v091-baseline-evidence-2026-08-26"
+              ]
+            },
+            "requiredBy": [
+              {
+                "kind": "PREDECESSOR_FINISH",
+                "id": "d44",
+                "activityId": "final_inspection",
+                "label": "Final inspections / punch release",
+                "truthState": "FORECASTED",
+                "requiredBy": "2026-11-11",
+                "action": "Final inspections / punch release must finish by 2026-11-11 to protect Systems demonstration / homeowner walkthrough / closeout package"
+              }
+            ],
+            "drivers": [
+              "Hard FINISH_TO_START: Final inspections / punch release"
+            ],
+            "warnings": []
+          }
+        },
+        "pmActions": [
+          {
+            "activityId": "masonry",
+            "priority": "CRITICAL",
+            "requiredBy": "2026-08-27",
+            "dueStatus": "UPCOMING",
+            "truthState": "COMMITTED",
+            "action": "Verify Masonry crew mobilization after stale Aug 24 target is actually satisfied by 2026-08-27"
+          },
+          {
+            "activityId": "building_delivery",
+            "priority": "WATCH",
+            "requiredBy": "2026-08-28",
+            "dueStatus": "UPCOMING",
+            "truthState": "COMMITTED",
+            "action": "Verify Walls/subfloor delivery Aug 28 is actually satisfied by 2026-08-28"
+          },
+          {
+            "activityId": "framing",
+            "priority": "CRITICAL",
+            "requiredBy": "2026-08-31",
+            "dueStatus": "UPCOMING",
+            "truthState": "UNVERIFIED",
+            "action": "Resolve/confirm Framer mobilization by 2026-08-31"
+          },
+          {
+            "activityId": "structural_release",
+            "priority": "CRITICAL",
+            "requiredBy": "2026-08-31",
+            "dueStatus": "UPCOMING",
+            "truthState": "UNVERIFIED",
+            "action": "Resolve/confirm Anchor / elevation / bearing conditions field-verified by 2026-08-31"
+          },
+          {
+            "activityId": "framing",
+            "priority": "CRITICAL",
+            "requiredBy": "2026-09-02",
+            "dueStatus": "UPCOMING",
+            "truthState": "UNVERIFIED",
+            "action": "Resolve/confirm Walls/subfloor/LVL framing package received, counted, undamaged, staged by 2026-09-02"
+          },
+          {
+            "activityId": "roofing",
+            "priority": "CRITICAL",
+            "requiredBy": "2026-09-10",
+            "dueStatus": "UPCOMING",
+            "truthState": "UNVERIFIED",
+            "action": "Resolve/confirm Roof package refreshed, ordered and available by 2026-09-10"
+          },
+          {
+            "activityId": "electrical_rough",
+            "priority": "CRITICAL",
+            "requiredBy": "2026-09-15",
+            "dueStatus": "UPCOMING",
+            "truthState": "FORECASTED",
+            "action": "Resolve/confirm Jason Bonham electrical rough-in mobilization by 2026-09-15"
+          },
+          {
+            "activityId": "plumbing_rough",
+            "priority": "WATCH",
+            "requiredBy": "2026-09-15",
+            "dueStatus": "UPCOMING",
+            "truthState": "FORECASTED",
+            "action": "Resolve/confirm Medina plumbing rough-in mobilization by 2026-09-15"
+          },
+          {
+            "activityId": "hvac_rough",
+            "priority": "WATCH",
+            "requiredBy": "2026-09-15",
+            "dueStatus": "UPCOMING",
+            "truthState": "FORECASTED",
+            "action": "Resolve/confirm Anthony Parker HVAC rough-in mobilization by 2026-09-15"
+          },
+          {
+            "activityId": "underslab_mep",
+            "priority": "WATCH",
+            "requiredBy": "2026-09-16",
+            "dueStatus": "UPCOMING",
+            "truthState": "UNVERIFIED",
+            "action": "Resolve/confirm Under-slab plumbing/electrical routing field-confirmed by 2026-09-16"
+          },
+          {
+            "activityId": "hvac_rough",
+            "priority": "WATCH",
+            "requiredBy": "2026-09-17",
+            "dueStatus": "UPCOMING",
+            "truthState": "UNVERIFIED",
+            "action": "Resolve/confirm Multi-zone HVAC equipment / route / condensate plan ready by 2026-09-17"
+          },
+          {
+            "activityId": "slab_prep",
+            "priority": "WATCH",
+            "requiredBy": "2026-09-21",
+            "dueStatus": "UPCOMING",
+            "truthState": "UNVERIFIED",
+            "action": "Resolve/confirm Required under-slab/concealed inspection release by 2026-09-21"
+          },
+          {
+            "activityId": "slab",
+            "priority": "WATCH",
+            "requiredBy": "2026-09-23",
+            "dueStatus": "UPCOMING",
+            "truthState": "FORECASTED",
+            "action": "Resolve/confirm Concrete crew remobilization after dry-in by 2026-09-23"
+          },
+          {
+            "activityId": "rough_inspection",
+            "priority": "CRITICAL",
+            "requiredBy": "2026-09-24",
+            "dueStatus": "UPCOMING",
+            "truthState": "UNVERIFIED",
+            "action": "Resolve/confirm All rough trades inspection-ready and inspection slot confirmed by 2026-09-24"
+          },
+          {
+            "activityId": "insulation",
+            "priority": "CRITICAL",
+            "requiredBy": "2026-09-25",
+            "dueStatus": "UPCOMING",
+            "truthState": "UNVERIFIED",
+            "action": "Resolve/confirm Insulation trade quote / mobilization by 2026-09-25"
+          }
+        ],
+        "completion": {
+          "optimistic": "2026-10-21",
+          "likely": "2026-11-12",
+          "conservative": "2026-12-24"
+        },
+        "supersededSources": [
+          {
+            "sourceId": "src-masonry-calendar",
+            "label": "Prior masonry target Aug 24; no independent field start verification attached",
+            "effectiveDate": "2026-08-24",
+            "supersededBySourceId": "src-v093-field-sim-1787832000000",
+            "supersedingLabel": "v0.9.3 current masonry commitment - CMU verified and Aug 27 mobilization committed",
+            "supersedingObservedAt": "2026-08-27T12:00:00.000Z"
+          }
+        ],
+        "delta": {
+          "fromSnapshotId": "deboard-v091-forecast-v1",
+          "fromVersion": 1,
+          "completionLikely": {
+            "from": "2026-11-11",
+            "to": "2026-11-12",
+            "deltaWorkdays": 1
+          },
+          "shiftedActivityCount": 30,
+          "criticalShiftCount": 18,
+          "shiftedActivities": [
+            {
+              "activityId": "masonry",
+              "activityName": "CMU foundation walls",
+              "critical": true,
+              "startLikely": {
+                "from": "2026-08-26",
+                "to": "2026-08-27",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-08-28",
+                "to": "2026-08-31",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "structural_release",
+              "activityName": "CMU structural release / anchors / elevations",
+              "critical": true,
+              "startLikely": {
+                "from": "2026-08-31",
+                "to": "2026-09-01",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-08-31",
+                "to": "2026-09-01",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "framing",
+              "activityName": "Structural framing + second-floor/loft system",
+              "critical": true,
+              "startLikely": {
+                "from": "2026-09-01",
+                "to": "2026-09-02",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-09-11",
+                "to": "2026-09-14",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "roofing",
+              "activityName": "Roof underlayment / shingles / flashings",
+              "critical": true,
+              "startLikely": {
+                "from": "2026-09-09",
+                "to": "2026-09-10",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-09-14",
+                "to": "2026-09-15",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "opening_protection",
+              "activityName": "Weather protection at windows / service door / garage openings",
+              "critical": false,
+              "startLikely": {
+                "from": "2026-09-08",
+                "to": "2026-09-09",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-09-09",
+                "to": "2026-09-10",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "dry_in_release",
+              "activityName": "Weather dry-in release",
+              "critical": true,
+              "startLikely": {
+                "from": "2026-09-15",
+                "to": "2026-09-16",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-09-15",
+                "to": "2026-09-16",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "windows_ext_doors",
+              "activityName": "Windows and exterior service door install",
+              "critical": false,
+              "startLikely": {
+                "from": "2026-09-14",
+                "to": "2026-09-15",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-09-16",
+                "to": "2026-09-17",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "brick_veneer",
+              "activityName": "Brick veneer / soldier courses / quoins",
+              "critical": false,
+              "startLikely": {
+                "from": "2026-09-17",
+                "to": "2026-09-18",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-09-25",
+                "to": "2026-09-28",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "underslab_mep",
+              "activityName": "Under-slab plumbing/electrical routing",
+              "critical": false,
+              "startLikely": {
+                "from": "2026-09-16",
+                "to": "2026-09-17",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-09-18",
+                "to": "2026-09-21",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "slab_prep",
+              "activityName": "Slab stone / vapor / reinforcement / concealed inspection",
+              "critical": false,
+              "startLikely": {
+                "from": "2026-09-21",
+                "to": "2026-09-22",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-09-23",
+                "to": "2026-09-24",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "slab",
+              "activityName": "Garage and mower-storage slab pour / finish / cure release",
+              "critical": false,
+              "startLikely": {
+                "from": "2026-09-24",
+                "to": "2026-09-25",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-09-28",
+                "to": "2026-09-29",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "electrical_rough",
+              "activityName": "Electrical service and rough-in",
+              "critical": true,
+              "startLikely": {
+                "from": "2026-09-16",
+                "to": "2026-09-17",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-09-23",
+                "to": "2026-09-24",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "plumbing_rough",
+              "activityName": "Half-bath plumbing rough-in",
+              "critical": false,
+              "startLikely": {
+                "from": "2026-09-16",
+                "to": "2026-09-17",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-09-21",
+                "to": "2026-09-22",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "hvac_rough",
+              "activityName": "Multi-zone mini-split rough-in / lines / condensate",
+              "critical": false,
+              "startLikely": {
+                "from": "2026-09-16",
+                "to": "2026-09-17",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-09-22",
+                "to": "2026-09-23",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "rough_inspection",
+              "activityName": "MEP rough inspections",
+              "critical": true,
+              "startLikely": {
+                "from": "2026-09-24",
+                "to": "2026-09-25",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-09-25",
+                "to": "2026-09-28",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "insulation",
+              "activityName": "Insulation and air sealing",
+              "critical": true,
+              "startLikely": {
+                "from": "2026-09-28",
+                "to": "2026-09-29",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-09-30",
+                "to": "2026-10-01",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "drywall_hang",
+              "activityName": "Drywall hang",
+              "critical": true,
+              "startLikely": {
+                "from": "2026-10-01",
+                "to": "2026-10-02",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-10-06",
+                "to": "2026-10-07",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "drywall_finish",
+              "activityName": "Drywall tape / finish / sand",
+              "critical": true,
+              "startLikely": {
+                "from": "2026-10-07",
+                "to": "2026-10-08",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-10-14",
+                "to": "2026-10-15",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "prime_paint",
+              "activityName": "Prime and interior paint",
+              "critical": true,
+              "startLikely": {
+                "from": "2026-10-15",
+                "to": "2026-10-16",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-10-22",
+                "to": "2026-10-23",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "finish_carpentry",
+              "activityName": "Interior doors / trim / stair finish / vanity setting",
+              "critical": true,
+              "startLikely": {
+                "from": "2026-10-23",
+                "to": "2026-10-26",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-10-30",
+                "to": "2026-11-02",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "flooring",
+              "activityName": "Second-floor flooring / transitions / stair finish",
+              "critical": false,
+              "startLikely": {
+                "from": "2026-11-02",
+                "to": "2026-11-03",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-11-04",
+                "to": "2026-11-05",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "half_bath_finish",
+              "activityName": "Half-bath vanity / top / fixtures / mirror / accessories",
+              "critical": true,
+              "startLikely": {
+                "from": "2026-11-02",
+                "to": "2026-11-03",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-11-04",
+                "to": "2026-11-05",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "garage_doors",
+              "activityName": "Overhead garage doors / openers / controls",
+              "critical": false,
+              "startLikely": {
+                "from": "2026-09-29",
+                "to": "2026-09-30",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-10-01",
+                "to": "2026-10-02",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "electrical_final",
+              "activityName": "Electrical trim / devices / lighting / testing",
+              "critical": true,
+              "startLikely": {
+                "from": "2026-11-02",
+                "to": "2026-11-03",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-11-04",
+                "to": "2026-11-05",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "plumbing_final",
+              "activityName": "Plumbing fixtures / trim / testing",
+              "critical": true,
+              "startLikely": {
+                "from": "2026-11-05",
+                "to": "2026-11-06",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-11-06",
+                "to": "2026-11-09",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "hvac_startup",
+              "activityName": "HVAC startup / commissioning",
+              "critical": true,
+              "startLikely": {
+                "from": "2026-11-05",
+                "to": "2026-11-06",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-11-06",
+                "to": "2026-11-09",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "exterior_closeout",
+              "activityName": "Exterior trim / caulk / gutters / weatherproof closeout",
+              "critical": false,
+              "startLikely": {
+                "from": "2026-10-02",
+                "to": "2026-10-05",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-10-07",
+                "to": "2026-10-08",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "final_grading_cleanup",
+              "activityName": "Final grading / lawn restoration / cleanup",
+              "critical": false,
+              "startLikely": {
+                "from": "2026-10-08",
+                "to": "2026-10-09",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-10-12",
+                "to": "2026-10-13",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "final_inspection",
+              "activityName": "Final inspections / punch release",
+              "critical": true,
+              "startLikely": {
+                "from": "2026-11-09",
+                "to": "2026-11-10",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-11-10",
+                "to": "2026-11-11",
+                "deltaWorkdays": 1
+              }
+            },
+            {
+              "activityId": "homeowner_walkthrough",
+              "activityName": "Systems demonstration / homeowner walkthrough / closeout package",
+              "critical": true,
+              "startLikely": {
+                "from": "2026-11-11",
+                "to": "2026-11-12",
+                "deltaWorkdays": 1
+              },
+              "finishLikely": {
+                "from": "2026-11-11",
+                "to": "2026-11-12",
+                "deltaWorkdays": 1
+              }
+            }
+          ]
+        },
+        "deltaFromSnapshotId": "deboard-v091-forecast-v1",
+        "recoveryAnalysis": {
+          "status": "RECOVERY_AVAILABLE",
+          "recoveryAvailable": true,
+          "recoveryStandbyAvailable": true,
+          "delayWorkdays": 1,
+          "baselineCompletionLikely": "2026-11-11",
+          "currentCompletionLikely": "2026-11-12",
+          "recoverableWorkdays": 1,
+          "recoverableCompletionLikely": "2026-11-11",
+          "recoveryConfidence": 0.7095323333333333,
+          "standbyRecoveryCapacityWorkdays": 2,
+          "criticalExposureCount": 12,
+          "blockedProtectionCount": 0,
+          "nextRiskDate": "2026-08-27",
+          "advisoryOnly": true,
+          "requiresPmValidation": true,
+          "criticalShiftActivityIds": [
+            "masonry",
+            "structural_release",
+            "framing",
+            "roofing",
+            "dry_in_release",
+            "electrical_rough",
+            "rough_inspection",
+            "insulation",
+            "drywall_hang",
+            "drywall_finish",
+            "prime_paint",
+            "finish_carpentry",
+            "half_bath_finish",
+            "electrical_final",
+            "plumbing_final",
+            "hvac_startup",
+            "final_inspection",
+            "homeowner_walkthrough"
+          ],
+          "levers": [
+            {
+              "id": "duration:masonry",
+              "type": "DURATION_COMPRESSION_REVIEW",
+              "activityId": "masonry",
+              "earliestRelevantDate": "2026-08-27",
+              "maxRecoverableWorkdays": 1,
+              "confidence": 0.7243649999999999,
+              "requiresValidation": true,
+              "standby": false,
+              "action": "Pre-qualify whether CMU foundation walls can be completed in the optimistic 2-workday duration instead of the likely 3-workday duration without reducing scope, quality, safety, or required inspections."
+            },
+            {
+              "id": "handoff:d01",
+              "type": "SAME_DAY_HANDOFF_REVIEW",
+              "predecessorId": "masonry",
+              "successorId": "structural_release",
+              "earliestRelevantDate": "2026-08-31",
+              "maxRecoverableWorkdays": 1,
+              "confidence": 0.74954,
+              "requiresValidation": true,
+              "standby": false,
+              "action": "Pre-plan whether CMU foundation walls can field-release CMU structural release / anchors / elevations on the same workday if a delay occurs. Do not overlap until PM, trade, field, and inspection evidence allow it."
+            },
+            {
+              "id": "handoff:d02",
+              "type": "SAME_DAY_HANDOFF_REVIEW",
+              "predecessorId": "structural_release",
+              "successorId": "framing",
+              "earliestRelevantDate": "2026-09-01",
+              "maxRecoverableWorkdays": 1,
+              "confidence": 0.6546920000000002,
+              "requiresValidation": true,
+              "standby": false,
+              "action": "Pre-plan whether CMU structural release / anchors / elevations can field-release Structural framing + second-floor/loft system on the same workday if a delay occurs. Do not overlap until PM, trade, field, and inspection evidence allow it."
+            },
+            {
+              "id": "duration:framing",
+              "type": "DURATION_COMPRESSION_REVIEW",
+              "activityId": "framing",
+              "earliestRelevantDate": "2026-09-02",
+              "maxRecoverableWorkdays": 2,
+              "confidence": 0.5892228000000002,
+              "requiresValidation": true,
+              "standby": false,
+              "action": "Pre-qualify whether Structural framing + second-floor/loft system can be completed in the optimistic 7-workday duration instead of the likely 9-workday duration without reducing scope, quality, safety, or required inspections."
+            },
+            {
+              "id": "duration:roofing",
+              "type": "DURATION_COMPRESSION_REVIEW",
+              "activityId": "roofing",
+              "earliestRelevantDate": "2026-09-10",
+              "maxRecoverableWorkdays": 1,
+              "confidence": 0.6144540000000001,
+              "requiresValidation": true,
+              "standby": false,
+              "action": "Pre-qualify whether Roof underlayment / shingles / flashings can be completed in the optimistic 3-workday duration instead of the likely 4-workday duration without reducing scope, quality, safety, or required inspections."
+            },
+            {
+              "id": "handoff:d08",
+              "type": "SAME_DAY_HANDOFF_REVIEW",
+              "predecessorId": "roofing",
+              "successorId": "dry_in_release",
+              "earliestRelevantDate": "2026-09-15",
+              "maxRecoverableWorkdays": 1,
+              "confidence": 0.6827266666666667,
+              "requiresValidation": true,
+              "standby": false,
+              "action": "Pre-plan whether Roof underlayment / shingles / flashings can field-release Weather dry-in release on the same workday if a delay occurs. Do not overlap until PM, trade, field, and inspection evidence allow it."
+            }
+          ],
+          "standbyLevers": [
+            {
+              "id": "duration:masonry",
+              "type": "DURATION_COMPRESSION_REVIEW",
+              "activityId": "masonry",
+              "earliestRelevantDate": "2026-08-27",
+              "maxRecoverableWorkdays": 1,
+              "confidence": 0.7243649999999999,
+              "requiresValidation": true,
+              "standby": true,
+              "action": "Pre-qualify whether CMU foundation walls can be completed in the optimistic 2-workday duration instead of the likely 3-workday duration without reducing scope, quality, safety, or required inspections."
+            },
+            {
+              "id": "handoff:d01",
+              "type": "SAME_DAY_HANDOFF_REVIEW",
+              "predecessorId": "masonry",
+              "successorId": "structural_release",
+              "earliestRelevantDate": "2026-08-31",
+              "maxRecoverableWorkdays": 1,
+              "confidence": 0.74954,
+              "requiresValidation": true,
+              "standby": true,
+              "action": "Pre-plan whether CMU foundation walls can field-release CMU structural release / anchors / elevations on the same workday if a delay occurs. Do not overlap until PM, trade, field, and inspection evidence allow it."
+            },
+            {
+              "id": "handoff:d02",
+              "type": "SAME_DAY_HANDOFF_REVIEW",
+              "predecessorId": "structural_release",
+              "successorId": "framing",
+              "earliestRelevantDate": "2026-09-01",
+              "maxRecoverableWorkdays": 1,
+              "confidence": 0.6546920000000002,
+              "requiresValidation": true,
+              "standby": true,
+              "action": "Pre-plan whether CMU structural release / anchors / elevations can field-release Structural framing + second-floor/loft system on the same workday if a delay occurs. Do not overlap until PM, trade, field, and inspection evidence allow it."
+            },
+            {
+              "id": "duration:framing",
+              "type": "DURATION_COMPRESSION_REVIEW",
+              "activityId": "framing",
+              "earliestRelevantDate": "2026-09-02",
+              "maxRecoverableWorkdays": 2,
+              "confidence": 0.5892228000000002,
+              "requiresValidation": true,
+              "standby": true,
+              "action": "Pre-qualify whether Structural framing + second-floor/loft system can be completed in the optimistic 7-workday duration instead of the likely 9-workday duration without reducing scope, quality, safety, or required inspections."
+            },
+            {
+              "id": "duration:roofing",
+              "type": "DURATION_COMPRESSION_REVIEW",
+              "activityId": "roofing",
+              "earliestRelevantDate": "2026-09-10",
+              "maxRecoverableWorkdays": 1,
+              "confidence": 0.6144540000000001,
+              "requiresValidation": true,
+              "standby": true,
+              "action": "Pre-qualify whether Roof underlayment / shingles / flashings can be completed in the optimistic 3-workday duration instead of the likely 4-workday duration without reducing scope, quality, safety, or required inspections."
+            },
+            {
+              "id": "handoff:d08",
+              "type": "SAME_DAY_HANDOFF_REVIEW",
+              "predecessorId": "roofing",
+              "successorId": "dry_in_release",
+              "earliestRelevantDate": "2026-09-15",
+              "maxRecoverableWorkdays": 1,
+              "confidence": 0.6827266666666667,
+              "requiresValidation": true,
+              "standby": true,
+              "action": "Pre-plan whether Roof underlayment / shingles / flashings can field-release Weather dry-in release on the same workday if a delay occurs. Do not overlap until PM, trade, field, and inspection evidence allow it."
+            },
+            {
+              "id": "handoff:d15",
+              "type": "SAME_DAY_HANDOFF_REVIEW",
+              "predecessorId": "dry_in_release",
+              "successorId": "electrical_rough",
+              "earliestRelevantDate": "2026-09-16",
+              "maxRecoverableWorkdays": 1,
+              "confidence": 0.7303,
+              "requiresValidation": true,
+              "standby": true,
+              "action": "Pre-plan whether Weather dry-in release can field-release Electrical service and rough-in on the same workday if a delay occurs. Do not overlap until PM, trade, field, and inspection evidence allow it."
+            },
+            {
+              "id": "duration:electrical_rough",
+              "type": "DURATION_COMPRESSION_REVIEW",
+              "activityId": "electrical_rough",
+              "earliestRelevantDate": "2026-09-17",
+              "maxRecoverableWorkdays": 2,
+              "confidence": 0.65727,
+              "requiresValidation": true,
+              "standby": true,
+              "action": "Pre-qualify whether Electrical service and rough-in can be completed in the optimistic 4-workday duration instead of the likely 6-workday duration without reducing scope, quality, safety, or required inspections."
+            }
+          ],
+          "protectionActions": [
+            {
+              "id": "protect:masonry-trade",
+              "type": "EARLY_CONSTRAINT_CLOSEOUT",
+              "activityId": "masonry",
+              "activityName": "CMU foundation walls",
+              "constraintId": "masonry-trade",
+              "constraintType": "TRADE_AVAILABILITY",
+              "requiredBy": "2026-08-27",
+              "urgency": "UPCOMING",
+              "truthState": "COMMITTED",
+              "severity": "WATCH",
+              "critical": true,
+              "confidence": 0.8048499999999998,
+              "action": "Close Masonry crew mobilization after stale Aug 24 target by 2026-08-27 to protect CMU foundation walls and prevent a downstream critical-path shift."
+            },
+            {
+              "id": "protect:structural-release-verify",
+              "type": "EARLY_CONSTRAINT_CLOSEOUT",
+              "activityId": "structural_release",
+              "activityName": "CMU structural release / anchors / elevations",
+              "constraintId": "structural-release-verify",
+              "constraintType": "INFORMATION",
+              "requiredBy": "2026-08-31",
+              "urgency": "UPCOMING",
+              "truthState": "UNVERIFIED",
+              "severity": "WATCH",
+              "critical": true,
+              "confidence": 0.74954,
+              "action": "Close Anchor / elevation / bearing conditions field-verified by 2026-08-31 to protect CMU structural release / anchors / elevations and prevent a downstream critical-path shift."
+            },
+            {
+              "id": "protect:framer-availability",
+              "type": "EARLY_CONSTRAINT_CLOSEOUT",
+              "activityId": "framing",
+              "activityName": "Structural framing + second-floor/loft system",
+              "constraintId": "framer-availability",
+              "constraintType": "TRADE_AVAILABILITY",
+              "requiredBy": "2026-08-31",
+              "urgency": "UPCOMING",
+              "truthState": "UNVERIFIED",
+              "severity": "WATCH",
+              "critical": true,
+              "confidence": 0.6546920000000002,
+              "action": "Close Framer mobilization by 2026-08-31 to protect Structural framing + second-floor/loft system and prevent a downstream critical-path shift."
+            },
+            {
+              "id": "protect:framing-material",
+              "type": "EARLY_CONSTRAINT_CLOSEOUT",
+              "activityId": "framing",
+              "activityName": "Structural framing + second-floor/loft system",
+              "constraintId": "framing-material",
+              "constraintType": "MATERIAL",
+              "requiredBy": "2026-09-02",
+              "urgency": "UPCOMING",
+              "truthState": "UNVERIFIED",
+              "severity": "WATCH",
+              "critical": true,
+              "confidence": 0.6546920000000002,
+              "action": "Close Walls/subfloor/LVL framing package received, counted, undamaged, staged by 2026-09-02 to protect Structural framing + second-floor/loft system and prevent a downstream critical-path shift."
+            },
+            {
+              "id": "protect:roof-material",
+              "type": "EARLY_CONSTRAINT_CLOSEOUT",
+              "activityId": "roofing",
+              "activityName": "Roof underlayment / shingles / flashings",
+              "constraintId": "roof-material",
+              "constraintType": "MATERIAL",
+              "requiredBy": "2026-09-10",
+              "urgency": "UPCOMING",
+              "truthState": "UNVERIFIED",
+              "severity": "WATCH",
+              "critical": true,
+              "confidence": 0.6827266666666667,
+              "action": "Close Roof package refreshed, ordered and available by 2026-09-10 to protect Roof underlayment / shingles / flashings and prevent a downstream critical-path shift."
+            },
+            {
+              "id": "protect:electrical-trade",
+              "type": "EARLY_CONSTRAINT_CLOSEOUT",
+              "activityId": "electrical_rough",
+              "activityName": "Electrical service and rough-in",
+              "constraintId": "electrical-trade",
+              "constraintType": "TRADE_AVAILABILITY",
+              "requiredBy": "2026-09-15",
+              "urgency": "UPCOMING",
+              "truthState": "FORECASTED",
+              "severity": "WATCH",
+              "critical": true,
+              "confidence": 0.7303,
+              "action": "Close Jason Bonham electrical rough-in mobilization by 2026-09-15 to protect Electrical service and rough-in and prevent a downstream critical-path shift."
+            },
+            {
+              "id": "protect:inspection-ready",
+              "type": "EARLY_CONSTRAINT_CLOSEOUT",
+              "activityId": "rough_inspection",
+              "activityName": "MEP rough inspections",
+              "constraintId": "inspection-ready",
+              "constraintType": "INSPECTION",
+              "requiredBy": "2026-09-24",
+              "urgency": "UPCOMING",
+              "truthState": "UNVERIFIED",
+              "severity": "WATCH",
+              "critical": true,
+              "confidence": 0.7143,
+              "action": "Close All rough trades inspection-ready and inspection slot confirmed by 2026-09-24 to protect MEP rough inspections and prevent a downstream critical-path shift."
+            },
+            {
+              "id": "protect:insulation-trade",
+              "type": "EARLY_CONSTRAINT_CLOSEOUT",
+              "activityId": "insulation",
+              "activityName": "Insulation and air sealing",
+              "constraintId": "insulation-trade",
+              "constraintType": "TRADE_AVAILABILITY",
+              "requiredBy": "2026-09-25",
+              "urgency": "UPCOMING",
+              "truthState": "UNVERIFIED",
+              "severity": "WATCH",
+              "critical": true,
+              "confidence": 0.7023,
+              "action": "Close Insulation trade quote / mobilization by 2026-09-25 to protect Insulation and air sealing and prevent a downstream critical-path shift."
+            },
+            {
+              "id": "protect:drywall-trade",
+              "type": "EARLY_CONSTRAINT_CLOSEOUT",
+              "activityId": "drywall_hang",
+              "activityName": "Drywall hang",
+              "constraintId": "drywall-trade",
+              "constraintType": "TRADE_AVAILABILITY",
+              "requiredBy": "2026-09-30",
+              "urgency": "UPCOMING",
+              "truthState": "UNVERIFIED",
+              "severity": "WATCH",
+              "critical": true,
+              "confidence": 0.7023,
+              "action": "Close Drywall crew mobilization by 2026-09-30 to protect Drywall hang and prevent a downstream critical-path shift."
+            },
+            {
+              "id": "protect:paint-trade",
+              "type": "EARLY_CONSTRAINT_CLOSEOUT",
+              "activityId": "prime_paint",
+              "activityName": "Prime and interior paint",
+              "constraintId": "paint-trade",
+              "constraintType": "TRADE_AVAILABILITY",
+              "requiredBy": "2026-10-14",
+              "urgency": "UPCOMING",
+              "truthState": "FORECASTED",
+              "severity": "WATCH",
+              "critical": true,
+              "confidence": 0.7303,
+              "action": "Close Dylan Jasper painting mobilization by 2026-10-14 to protect Prime and interior paint and prevent a downstream critical-path shift."
+            },
+            {
+              "id": "protect:finish-carpentry-trade",
+              "type": "EARLY_CONSTRAINT_CLOSEOUT",
+              "activityId": "finish_carpentry",
+              "activityName": "Interior doors / trim / stair finish / vanity setting",
+              "constraintId": "finish-carpentry-trade",
+              "constraintType": "TRADE_AVAILABILITY",
+              "requiredBy": "2026-10-22",
+              "urgency": "UPCOMING",
+              "truthState": "FORECASTED",
+              "severity": "WATCH",
+              "critical": true,
+              "confidence": 0.7303,
+              "action": "Close Finish carpentry labor mobilization by 2026-10-22 to protect Interior doors / trim / stair finish / vanity setting and prevent a downstream critical-path shift."
+            },
+            {
+              "id": "protect:final-inspection",
+              "type": "EARLY_CONSTRAINT_CLOSEOUT",
+              "activityId": "final_inspection",
+              "activityName": "Final inspections / punch release",
+              "constraintId": "final-inspection",
+              "constraintType": "INSPECTION",
+              "requiredBy": "2026-11-09",
+              "urgency": "UPCOMING",
+              "truthState": "UNVERIFIED",
+              "severity": "WATCH",
+              "critical": true,
+              "confidence": 0.7143,
+              "action": "Close Final inspection availability by 2026-11-09 to protect Final inspections / punch release and prevent a downstream critical-path shift."
+            }
+          ],
+          "rule": "Recovery options are advisory. Howler does not convert a recovery lever into a schedule commitment until the required trade, field, inspection, material, or PM evidence is confirmed."
+        },
+        "oversightReviewId": "deboard-v091-forecast-v2-oversight",
+        "publicationGate": {
+          "forecastAllowed": true,
+          "commitmentEligible": false,
+          "oversightDecision": "BLOCK"
+        }
+      },
+      "delta": {
+        "fromSnapshotId": "deboard-v091-forecast-v1",
+        "fromVersion": 1,
+        "completionLikely": {
+          "from": "2026-11-11",
+          "to": "2026-11-12",
+          "deltaWorkdays": 1
+        },
+        "shiftedActivityCount": 30,
+        "criticalShiftCount": 18,
+        "shiftedActivities": [
+          {
+            "activityId": "masonry",
+            "activityName": "CMU foundation walls",
+            "critical": true,
+            "startLikely": {
+              "from": "2026-08-26",
+              "to": "2026-08-27",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-08-28",
+              "to": "2026-08-31",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "structural_release",
+            "activityName": "CMU structural release / anchors / elevations",
+            "critical": true,
+            "startLikely": {
+              "from": "2026-08-31",
+              "to": "2026-09-01",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-08-31",
+              "to": "2026-09-01",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "framing",
+            "activityName": "Structural framing + second-floor/loft system",
+            "critical": true,
+            "startLikely": {
+              "from": "2026-09-01",
+              "to": "2026-09-02",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-09-11",
+              "to": "2026-09-14",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "roofing",
+            "activityName": "Roof underlayment / shingles / flashings",
+            "critical": true,
+            "startLikely": {
+              "from": "2026-09-09",
+              "to": "2026-09-10",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-09-14",
+              "to": "2026-09-15",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "opening_protection",
+            "activityName": "Weather protection at windows / service door / garage openings",
+            "critical": false,
+            "startLikely": {
+              "from": "2026-09-08",
+              "to": "2026-09-09",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-09-09",
+              "to": "2026-09-10",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "dry_in_release",
+            "activityName": "Weather dry-in release",
+            "critical": true,
+            "startLikely": {
+              "from": "2026-09-15",
+              "to": "2026-09-16",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-09-15",
+              "to": "2026-09-16",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "windows_ext_doors",
+            "activityName": "Windows and exterior service door install",
+            "critical": false,
+            "startLikely": {
+              "from": "2026-09-14",
+              "to": "2026-09-15",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-09-16",
+              "to": "2026-09-17",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "brick_veneer",
+            "activityName": "Brick veneer / soldier courses / quoins",
+            "critical": false,
+            "startLikely": {
+              "from": "2026-09-17",
+              "to": "2026-09-18",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-09-25",
+              "to": "2026-09-28",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "underslab_mep",
+            "activityName": "Under-slab plumbing/electrical routing",
+            "critical": false,
+            "startLikely": {
+              "from": "2026-09-16",
+              "to": "2026-09-17",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-09-18",
+              "to": "2026-09-21",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "slab_prep",
+            "activityName": "Slab stone / vapor / reinforcement / concealed inspection",
+            "critical": false,
+            "startLikely": {
+              "from": "2026-09-21",
+              "to": "2026-09-22",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-09-23",
+              "to": "2026-09-24",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "slab",
+            "activityName": "Garage and mower-storage slab pour / finish / cure release",
+            "critical": false,
+            "startLikely": {
+              "from": "2026-09-24",
+              "to": "2026-09-25",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-09-28",
+              "to": "2026-09-29",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "electrical_rough",
+            "activityName": "Electrical service and rough-in",
+            "critical": true,
+            "startLikely": {
+              "from": "2026-09-16",
+              "to": "2026-09-17",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-09-23",
+              "to": "2026-09-24",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "plumbing_rough",
+            "activityName": "Half-bath plumbing rough-in",
+            "critical": false,
+            "startLikely": {
+              "from": "2026-09-16",
+              "to": "2026-09-17",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-09-21",
+              "to": "2026-09-22",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "hvac_rough",
+            "activityName": "Multi-zone mini-split rough-in / lines / condensate",
+            "critical": false,
+            "startLikely": {
+              "from": "2026-09-16",
+              "to": "2026-09-17",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-09-22",
+              "to": "2026-09-23",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "rough_inspection",
+            "activityName": "MEP rough inspections",
+            "critical": true,
+            "startLikely": {
+              "from": "2026-09-24",
+              "to": "2026-09-25",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-09-25",
+              "to": "2026-09-28",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "insulation",
+            "activityName": "Insulation and air sealing",
+            "critical": true,
+            "startLikely": {
+              "from": "2026-09-28",
+              "to": "2026-09-29",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-09-30",
+              "to": "2026-10-01",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "drywall_hang",
+            "activityName": "Drywall hang",
+            "critical": true,
+            "startLikely": {
+              "from": "2026-10-01",
+              "to": "2026-10-02",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-10-06",
+              "to": "2026-10-07",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "drywall_finish",
+            "activityName": "Drywall tape / finish / sand",
+            "critical": true,
+            "startLikely": {
+              "from": "2026-10-07",
+              "to": "2026-10-08",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-10-14",
+              "to": "2026-10-15",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "prime_paint",
+            "activityName": "Prime and interior paint",
+            "critical": true,
+            "startLikely": {
+              "from": "2026-10-15",
+              "to": "2026-10-16",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-10-22",
+              "to": "2026-10-23",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "finish_carpentry",
+            "activityName": "Interior doors / trim / stair finish / vanity setting",
+            "critical": true,
+            "startLikely": {
+              "from": "2026-10-23",
+              "to": "2026-10-26",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-10-30",
+              "to": "2026-11-02",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "flooring",
+            "activityName": "Second-floor flooring / transitions / stair finish",
+            "critical": false,
+            "startLikely": {
+              "from": "2026-11-02",
+              "to": "2026-11-03",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-11-04",
+              "to": "2026-11-05",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "half_bath_finish",
+            "activityName": "Half-bath vanity / top / fixtures / mirror / accessories",
+            "critical": true,
+            "startLikely": {
+              "from": "2026-11-02",
+              "to": "2026-11-03",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-11-04",
+              "to": "2026-11-05",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "garage_doors",
+            "activityName": "Overhead garage doors / openers / controls",
+            "critical": false,
+            "startLikely": {
+              "from": "2026-09-29",
+              "to": "2026-09-30",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-10-01",
+              "to": "2026-10-02",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "electrical_final",
+            "activityName": "Electrical trim / devices / lighting / testing",
+            "critical": true,
+            "startLikely": {
+              "from": "2026-11-02",
+              "to": "2026-11-03",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-11-04",
+              "to": "2026-11-05",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "plumbing_final",
+            "activityName": "Plumbing fixtures / trim / testing",
+            "critical": true,
+            "startLikely": {
+              "from": "2026-11-05",
+              "to": "2026-11-06",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-11-06",
+              "to": "2026-11-09",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "hvac_startup",
+            "activityName": "HVAC startup / commissioning",
+            "critical": true,
+            "startLikely": {
+              "from": "2026-11-05",
+              "to": "2026-11-06",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-11-06",
+              "to": "2026-11-09",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "exterior_closeout",
+            "activityName": "Exterior trim / caulk / gutters / weatherproof closeout",
+            "critical": false,
+            "startLikely": {
+              "from": "2026-10-02",
+              "to": "2026-10-05",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-10-07",
+              "to": "2026-10-08",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "final_grading_cleanup",
+            "activityName": "Final grading / lawn restoration / cleanup",
+            "critical": false,
+            "startLikely": {
+              "from": "2026-10-08",
+              "to": "2026-10-09",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-10-12",
+              "to": "2026-10-13",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "final_inspection",
+            "activityName": "Final inspections / punch release",
+            "critical": true,
+            "startLikely": {
+              "from": "2026-11-09",
+              "to": "2026-11-10",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-11-10",
+              "to": "2026-11-11",
+              "deltaWorkdays": 1
+            }
+          },
+          {
+            "activityId": "homeowner_walkthrough",
+            "activityName": "Systems demonstration / homeowner walkthrough / closeout package",
+            "critical": true,
+            "startLikely": {
+              "from": "2026-11-11",
+              "to": "2026-11-12",
+              "deltaWorkdays": 1
+            },
+            "finishLikely": {
+              "from": "2026-11-11",
+              "to": "2026-11-12",
+              "deltaWorkdays": 1
+            }
+          }
+        ]
+      },
+      "recoveryAnalysis": {
+        "status": "RECOVERY_AVAILABLE",
+        "recoveryAvailable": true,
+        "recoveryStandbyAvailable": true,
+        "delayWorkdays": 1,
+        "baselineCompletionLikely": "2026-11-11",
+        "currentCompletionLikely": "2026-11-12",
+        "recoverableWorkdays": 1,
+        "recoverableCompletionLikely": "2026-11-11",
+        "recoveryConfidence": 0.7095323333333333,
+        "standbyRecoveryCapacityWorkdays": 2,
+        "criticalExposureCount": 12,
+        "blockedProtectionCount": 0,
+        "nextRiskDate": "2026-08-27",
+        "advisoryOnly": true,
+        "requiresPmValidation": true,
+        "criticalShiftActivityIds": [
+          "masonry",
+          "structural_release",
+          "framing",
+          "roofing",
+          "dry_in_release",
+          "electrical_rough",
+          "rough_inspection",
+          "insulation",
+          "drywall_hang",
+          "drywall_finish",
+          "prime_paint",
+          "finish_carpentry",
+          "half_bath_finish",
+          "electrical_final",
+          "plumbing_final",
+          "hvac_startup",
+          "final_inspection",
+          "homeowner_walkthrough"
+        ],
+        "levers": [
+          {
+            "id": "duration:masonry",
+            "type": "DURATION_COMPRESSION_REVIEW",
+            "activityId": "masonry",
+            "earliestRelevantDate": "2026-08-27",
+            "maxRecoverableWorkdays": 1,
+            "confidence": 0.7243649999999999,
+            "requiresValidation": true,
+            "standby": false,
+            "action": "Pre-qualify whether CMU foundation walls can be completed in the optimistic 2-workday duration instead of the likely 3-workday duration without reducing scope, quality, safety, or required inspections."
+          },
+          {
+            "id": "handoff:d01",
+            "type": "SAME_DAY_HANDOFF_REVIEW",
+            "predecessorId": "masonry",
+            "successorId": "structural_release",
+            "earliestRelevantDate": "2026-08-31",
+            "maxRecoverableWorkdays": 1,
+            "confidence": 0.74954,
+            "requiresValidation": true,
+            "standby": false,
+            "action": "Pre-plan whether CMU foundation walls can field-release CMU structural release / anchors / elevations on the same workday if a delay occurs. Do not overlap until PM, trade, field, and inspection evidence allow it."
+          },
+          {
+            "id": "handoff:d02",
+            "type": "SAME_DAY_HANDOFF_REVIEW",
+            "predecessorId": "structural_release",
+            "successorId": "framing",
+            "earliestRelevantDate": "2026-09-01",
+            "maxRecoverableWorkdays": 1,
+            "confidence": 0.6546920000000002,
+            "requiresValidation": true,
+            "standby": false,
+            "action": "Pre-plan whether CMU structural release / anchors / elevations can field-release Structural framing + second-floor/loft system on the same workday if a delay occurs. Do not overlap until PM, trade, field, and inspection evidence allow it."
+          },
+          {
+            "id": "duration:framing",
+            "type": "DURATION_COMPRESSION_REVIEW",
+            "activityId": "framing",
+            "earliestRelevantDate": "2026-09-02",
+            "maxRecoverableWorkdays": 2,
+            "confidence": 0.5892228000000002,
+            "requiresValidation": true,
+            "standby": false,
+            "action": "Pre-qualify whether Structural framing + second-floor/loft system can be completed in the optimistic 7-workday duration instead of the likely 9-workday duration without reducing scope, quality, safety, or required inspections."
+          },
+          {
+            "id": "duration:roofing",
+            "type": "DURATION_COMPRESSION_REVIEW",
+            "activityId": "roofing",
+            "earliestRelevantDate": "2026-09-10",
+            "maxRecoverableWorkdays": 1,
+            "confidence": 0.6144540000000001,
+            "requiresValidation": true,
+            "standby": false,
+            "action": "Pre-qualify whether Roof underlayment / shingles / flashings can be completed in the optimistic 3-workday duration instead of the likely 4-workday duration without reducing scope, quality, safety, or required inspections."
+          },
+          {
+            "id": "handoff:d08",
+            "type": "SAME_DAY_HANDOFF_REVIEW",
+            "predecessorId": "roofing",
+            "successorId": "dry_in_release",
+            "earliestRelevantDate": "2026-09-15",
+            "maxRecoverableWorkdays": 1,
+            "confidence": 0.6827266666666667,
+            "requiresValidation": true,
+            "standby": false,
+            "action": "Pre-plan whether Roof underlayment / shingles / flashings can field-release Weather dry-in release on the same workday if a delay occurs. Do not overlap until PM, trade, field, and inspection evidence allow it."
+          }
+        ],
+        "standbyLevers": [
+          {
+            "id": "duration:masonry",
+            "type": "DURATION_COMPRESSION_REVIEW",
+            "activityId": "masonry",
+            "earliestRelevantDate": "2026-08-27",
+            "maxRecoverableWorkdays": 1,
+            "confidence": 0.7243649999999999,
+            "requiresValidation": true,
+            "standby": true,
+            "action": "Pre-qualify whether CMU foundation walls can be completed in the optimistic 2-workday duration instead of the likely 3-workday duration without reducing scope, quality, safety, or required inspections."
+          },
+          {
+            "id": "handoff:d01",
+            "type": "SAME_DAY_HANDOFF_REVIEW",
+            "predecessorId": "masonry",
+            "successorId": "structural_release",
+            "earliestRelevantDate": "2026-08-31",
+            "maxRecoverableWorkdays": 1,
+            "confidence": 0.74954,
+            "requiresValidation": true,
+            "standby": true,
+            "action": "Pre-plan whether CMU foundation walls can field-release CMU structural release / anchors / elevations on the same workday if a delay occurs. Do not overlap until PM, trade, field, and inspection evidence allow it."
+          },
+          {
+            "id": "handoff:d02",
+            "type": "SAME_DAY_HANDOFF_REVIEW",
+            "predecessorId": "structural_release",
+            "successorId": "framing",
+            "earliestRelevantDate": "2026-09-01",
+            "maxRecoverableWorkdays": 1,
+            "confidence": 0.6546920000000002,
+            "requiresValidation": true,
+            "standby": true,
+            "action": "Pre-plan whether CMU structural release / anchors / elevations can field-release Structural framing + second-floor/loft system on the same workday if a delay occurs. Do not overlap until PM, trade, field, and inspection evidence allow it."
+          },
+          {
+            "id": "duration:framing",
+            "type": "DURATION_COMPRESSION_REVIEW",
+            "activityId": "framing",
+            "earliestRelevantDate": "2026-09-02",
+            "maxRecoverableWorkdays": 2,
+            "confidence": 0.5892228000000002,
+            "requiresValidation": true,
+            "standby": true,
+            "action": "Pre-qualify whether Structural framing + second-floor/loft system can be completed in the optimistic 7-workday duration instead of the likely 9-workday duration without reducing scope, quality, safety, or required inspections."
+          },
+          {
+            "id": "duration:roofing",
+            "type": "DURATION_COMPRESSION_REVIEW",
+            "activityId": "roofing",
+            "earliestRelevantDate": "2026-09-10",
+            "maxRecoverableWorkdays": 1,
+            "confidence": 0.6144540000000001,
+            "requiresValidation": true,
+            "standby": true,
+            "action": "Pre-qualify whether Roof underlayment / shingles / flashings can be completed in the optimistic 3-workday duration instead of the likely 4-workday duration without reducing scope, quality, safety, or required inspections."
+          },
+          {
+            "id": "handoff:d08",
+            "type": "SAME_DAY_HANDOFF_REVIEW",
+            "predecessorId": "roofing",
+            "successorId": "dry_in_release",
+            "earliestRelevantDate": "2026-09-15",
+            "maxRecoverableWorkdays": 1,
+            "confidence": 0.6827266666666667,
+            "requiresValidation": true,
+            "standby": true,
+            "action": "Pre-plan whether Roof underlayment / shingles / flashings can field-release Weather dry-in release on the same workday if a delay occurs. Do not overlap until PM, trade, field, and inspection evidence allow it."
+          },
+          {
+            "id": "handoff:d15",
+            "type": "SAME_DAY_HANDOFF_REVIEW",
+            "predecessorId": "dry_in_release",
+            "successorId": "electrical_rough",
+            "earliestRelevantDate": "2026-09-16",
+            "maxRecoverableWorkdays": 1,
+            "confidence": 0.7303,
+            "requiresValidation": true,
+            "standby": true,
+            "action": "Pre-plan whether Weather dry-in release can field-release Electrical service and rough-in on the same workday if a delay occurs. Do not overlap until PM, trade, field, and inspection evidence allow it."
+          },
+          {
+            "id": "duration:electrical_rough",
+            "type": "DURATION_COMPRESSION_REVIEW",
+            "activityId": "electrical_rough",
+            "earliestRelevantDate": "2026-09-17",
+            "maxRecoverableWorkdays": 2,
+            "confidence": 0.65727,
+            "requiresValidation": true,
+            "standby": true,
+            "action": "Pre-qualify whether Electrical service and rough-in can be completed in the optimistic 4-workday duration instead of the likely 6-workday duration without reducing scope, quality, safety, or required inspections."
+          }
+        ],
+        "protectionActions": [
+          {
+            "id": "protect:masonry-trade",
+            "type": "EARLY_CONSTRAINT_CLOSEOUT",
+            "activityId": "masonry",
+            "activityName": "CMU foundation walls",
+            "constraintId": "masonry-trade",
+            "constraintType": "TRADE_AVAILABILITY",
+            "requiredBy": "2026-08-27",
+            "urgency": "UPCOMING",
+            "truthState": "COMMITTED",
+            "severity": "WATCH",
+            "critical": true,
+            "confidence": 0.8048499999999998,
+            "action": "Close Masonry crew mobilization after stale Aug 24 target by 2026-08-27 to protect CMU foundation walls and prevent a downstream critical-path shift."
+          },
+          {
+            "id": "protect:structural-release-verify",
+            "type": "EARLY_CONSTRAINT_CLOSEOUT",
+            "activityId": "structural_release",
+            "activityName": "CMU structural release / anchors / elevations",
+            "constraintId": "structural-release-verify",
+            "constraintType": "INFORMATION",
+            "requiredBy": "2026-08-31",
+            "urgency": "UPCOMING",
+            "truthState": "UNVERIFIED",
+            "severity": "WATCH",
+            "critical": true,
+            "confidence": 0.74954,
+            "action": "Close Anchor / elevation / bearing conditions field-verified by 2026-08-31 to protect CMU structural release / anchors / elevations and prevent a downstream critical-path shift."
+          },
+          {
+            "id": "protect:framer-availability",
+            "type": "EARLY_CONSTRAINT_CLOSEOUT",
+            "activityId": "framing",
+            "activityName": "Structural framing + second-floor/loft system",
+            "constraintId": "framer-availability",
+            "constraintType": "TRADE_AVAILABILITY",
+            "requiredBy": "2026-08-31",
+            "urgency": "UPCOMING",
+            "truthState": "UNVERIFIED",
+            "severity": "WATCH",
+            "critical": true,
+            "confidence": 0.6546920000000002,
+            "action": "Close Framer mobilization by 2026-08-31 to protect Structural framing + second-floor/loft system and prevent a downstream critical-path shift."
+          },
+          {
+            "id": "protect:framing-material",
+            "type": "EARLY_CONSTRAINT_CLOSEOUT",
+            "activityId": "framing",
+            "activityName": "Structural framing + second-floor/loft system",
+            "constraintId": "framing-material",
+            "constraintType": "MATERIAL",
+            "requiredBy": "2026-09-02",
+            "urgency": "UPCOMING",
+            "truthState": "UNVERIFIED",
+            "severity": "WATCH",
+            "critical": true,
+            "confidence": 0.6546920000000002,
+            "action": "Close Walls/subfloor/LVL framing package received, counted, undamaged, staged by 2026-09-02 to protect Structural framing + second-floor/loft system and prevent a downstream critical-path shift."
+          },
+          {
+            "id": "protect:roof-material",
+            "type": "EARLY_CONSTRAINT_CLOSEOUT",
+            "activityId": "roofing",
+            "activityName": "Roof underlayment / shingles / flashings",
+            "constraintId": "roof-material",
+            "constraintType": "MATERIAL",
+            "requiredBy": "2026-09-10",
+            "urgency": "UPCOMING",
+            "truthState": "UNVERIFIED",
+            "severity": "WATCH",
+            "critical": true,
+            "confidence": 0.6827266666666667,
+            "action": "Close Roof package refreshed, ordered and available by 2026-09-10 to protect Roof underlayment / shingles / flashings and prevent a downstream critical-path shift."
+          },
+          {
+            "id": "protect:electrical-trade",
+            "type": "EARLY_CONSTRAINT_CLOSEOUT",
+            "activityId": "electrical_rough",
+            "activityName": "Electrical service and rough-in",
+            "constraintId": "electrical-trade",
+            "constraintType": "TRADE_AVAILABILITY",
+            "requiredBy": "2026-09-15",
+            "urgency": "UPCOMING",
+            "truthState": "FORECASTED",
+            "severity": "WATCH",
+            "critical": true,
+            "confidence": 0.7303,
+            "action": "Close Jason Bonham electrical rough-in mobilization by 2026-09-15 to protect Electrical service and rough-in and prevent a downstream critical-path shift."
+          },
+          {
+            "id": "protect:inspection-ready",
+            "type": "EARLY_CONSTRAINT_CLOSEOUT",
+            "activityId": "rough_inspection",
+            "activityName": "MEP rough inspections",
+            "constraintId": "inspection-ready",
+            "constraintType": "INSPECTION",
+            "requiredBy": "2026-09-24",
+            "urgency": "UPCOMING",
+            "truthState": "UNVERIFIED",
+            "severity": "WATCH",
+            "critical": true,
+            "confidence": 0.7143,
+            "action": "Close All rough trades inspection-ready and inspection slot confirmed by 2026-09-24 to protect MEP rough inspections and prevent a downstream critical-path shift."
+          },
+          {
+            "id": "protect:insulation-trade",
+            "type": "EARLY_CONSTRAINT_CLOSEOUT",
+            "activityId": "insulation",
+            "activityName": "Insulation and air sealing",
+            "constraintId": "insulation-trade",
+            "constraintType": "TRADE_AVAILABILITY",
+            "requiredBy": "2026-09-25",
+            "urgency": "UPCOMING",
+            "truthState": "UNVERIFIED",
+            "severity": "WATCH",
+            "critical": true,
+            "confidence": 0.7023,
+            "action": "Close Insulation trade quote / mobilization by 2026-09-25 to protect Insulation and air sealing and prevent a downstream critical-path shift."
+          },
+          {
+            "id": "protect:drywall-trade",
+            "type": "EARLY_CONSTRAINT_CLOSEOUT",
+            "activityId": "drywall_hang",
+            "activityName": "Drywall hang",
+            "constraintId": "drywall-trade",
+            "constraintType": "TRADE_AVAILABILITY",
+            "requiredBy": "2026-09-30",
+            "urgency": "UPCOMING",
+            "truthState": "UNVERIFIED",
+            "severity": "WATCH",
+            "critical": true,
+            "confidence": 0.7023,
+            "action": "Close Drywall crew mobilization by 2026-09-30 to protect Drywall hang and prevent a downstream critical-path shift."
+          },
+          {
+            "id": "protect:paint-trade",
+            "type": "EARLY_CONSTRAINT_CLOSEOUT",
+            "activityId": "prime_paint",
+            "activityName": "Prime and interior paint",
+            "constraintId": "paint-trade",
+            "constraintType": "TRADE_AVAILABILITY",
+            "requiredBy": "2026-10-14",
+            "urgency": "UPCOMING",
+            "truthState": "FORECASTED",
+            "severity": "WATCH",
+            "critical": true,
+            "confidence": 0.7303,
+            "action": "Close Dylan Jasper painting mobilization by 2026-10-14 to protect Prime and interior paint and prevent a downstream critical-path shift."
+          },
+          {
+            "id": "protect:finish-carpentry-trade",
+            "type": "EARLY_CONSTRAINT_CLOSEOUT",
+            "activityId": "finish_carpentry",
+            "activityName": "Interior doors / trim / stair finish / vanity setting",
+            "constraintId": "finish-carpentry-trade",
+            "constraintType": "TRADE_AVAILABILITY",
+            "requiredBy": "2026-10-22",
+            "urgency": "UPCOMING",
+            "truthState": "FORECASTED",
+            "severity": "WATCH",
+            "critical": true,
+            "confidence": 0.7303,
+            "action": "Close Finish carpentry labor mobilization by 2026-10-22 to protect Interior doors / trim / stair finish / vanity setting and prevent a downstream critical-path shift."
+          },
+          {
+            "id": "protect:final-inspection",
+            "type": "EARLY_CONSTRAINT_CLOSEOUT",
+            "activityId": "final_inspection",
+            "activityName": "Final inspections / punch release",
+            "constraintId": "final-inspection",
+            "constraintType": "INSPECTION",
+            "requiredBy": "2026-11-09",
+            "urgency": "UPCOMING",
+            "truthState": "UNVERIFIED",
+            "severity": "WATCH",
+            "critical": true,
+            "confidence": 0.7143,
+            "action": "Close Final inspection availability by 2026-11-09 to protect Final inspections / punch release and prevent a downstream critical-path shift."
+          }
+        ],
+        "rule": "Recovery options are advisory. Howler does not convert a recovery lever into a schedule commitment until the required trade, field, inspection, material, or PM evidence is confirmed."
+      },
+      "supersededSources": [
+        {
+          "sourceId": "src-masonry-calendar",
+          "label": "Prior masonry target Aug 24; no independent field start verification attached",
+          "effectiveDate": "2026-08-24",
+          "supersededBySourceId": "src-v093-field-sim-1787832000000",
+          "supersedingLabel": "v0.9.3 current masonry commitment - CMU verified and Aug 27 mobilization committed",
+          "supersedingObservedAt": "2026-08-27T12:00:00.000Z"
+        }
+      ],
+      "impactActivityIds": [
+        "masonry",
+        "structural_release",
+        "framing",
+        "opening_protection",
+        "roofing",
+        "dry_in_release",
+        "electrical_rough",
+        "hvac_rough",
+        "plumbing_rough",
+        "rough_inspection",
+        "insulation",
+        "underslab_mep",
+        "slab_prep",
+        "slab",
+        "drywall_hang",
+        "drywall_finish",
+        "garage_doors",
+        "prime_paint",
+        "finish_carpentry",
+        "electrical_final",
+        "flooring",
+        "half_bath_finish",
+        "hvac_startup",
+        "plumbing_final",
+        "windows_ext_doors",
+        "brick_veneer",
+        "exterior_closeout",
+        "final_grading_cleanup",
+        "final_inspection",
+        "homeowner_walkthrough"
+      ],
+      "oversight": {
+        "id": "deboard-v091-forecast-v2-oversight",
+        "projectId": "deboard-v091",
+        "candidateSnapshotId": "deboard-v091-forecast-v2",
+        "createdAt": "2026-08-27T12:00:00.000Z",
+        "findings": [
+          {
+            "category": "DOCUMENTATION",
+            "severity": "BLOCK",
+            "message": "Open high-severity project truth conflict: Tradewalk plan set and newer LVL/post engineering must be reconciled before framing commitment.",
+            "activityIds": [
+              "structural_reconcile",
+              "framing"
+            ],
+            "sourceIds": [
+              "src-plans",
+              "src-engineering",
+              "src-dashboard"
+            ]
+          },
+          {
+            "category": "DOCUMENTATION",
+            "severity": "BLOCK",
+            "message": "Open high-severity project truth conflict: Brick veneer match task is not verified against the existing residence and the Lee material quote requires refresh.",
+            "activityIds": [
+              "brick_veneer"
+            ],
+            "sourceIds": [
+              "src-brick-risk",
+              "src-material-quotes"
+            ]
+          },
+          {
+            "category": "CRITICAL_PATH",
+            "severity": "WARN",
+            "message": "Critical activity relies on unverified hard constraints: Anchor / elevation / bearing conditions field-verified",
+            "activityIds": [
+              "structural_release"
+            ]
+          },
+          {
+            "category": "CRITICAL_PATH",
+            "severity": "WARN",
+            "message": "Critical activity relies on unverified hard constraints: Framer mobilization, Walls/subfloor/LVL framing package received, counted, undamaged, staged",
+            "activityIds": [
+              "framing"
+            ]
+          },
+          {
+            "category": "CRITICAL_PATH",
+            "severity": "WARN",
+            "message": "Critical activity relies on unverified hard constraints: Roof package refreshed, ordered and available",
+            "activityIds": [
+              "roofing"
+            ]
+          },
+          {
+            "category": "DOCUMENTATION",
+            "severity": "BLOCK",
+            "message": "Activity has blocked hard constraints: Brick veneer match approved against existing residence",
+            "activityIds": [
+              "brick_veneer"
+            ]
+          },
+          {
+            "category": "CRITICAL_PATH",
+            "severity": "WARN",
+            "message": "Critical activity relies on forecast-only hard constraints: Jason Bonham electrical rough-in mobilization. Forecasting may continue, but do not convert these dates into commitments.",
+            "activityIds": [
+              "electrical_rough"
+            ]
+          },
+          {
+            "category": "CRITICAL_PATH",
+            "severity": "WARN",
+            "message": "Critical activity relies on unverified hard constraints: All rough trades inspection-ready and inspection slot confirmed",
+            "activityIds": [
+              "rough_inspection"
+            ]
+          },
+          {
+            "category": "CRITICAL_PATH",
+            "severity": "WARN",
+            "message": "Critical activity relies on unverified hard constraints: Insulation trade quote / mobilization",
+            "activityIds": [
+              "insulation"
+            ]
+          },
+          {
+            "category": "CRITICAL_PATH",
+            "severity": "WARN",
+            "message": "Critical activity relies on unverified hard constraints: Drywall crew mobilization",
+            "activityIds": [
+              "drywall_hang"
+            ]
+          },
+          {
+            "category": "CRITICAL_PATH",
+            "severity": "WARN",
+            "message": "Critical activity relies on forecast-only hard constraints: Dylan Jasper painting mobilization. Forecasting may continue, but do not convert these dates into commitments.",
+            "activityIds": [
+              "prime_paint"
+            ]
+          },
+          {
+            "category": "CRITICAL_PATH",
+            "severity": "WARN",
+            "message": "Critical activity relies on forecast-only hard constraints: Finish carpentry labor mobilization. Forecasting may continue, but do not convert these dates into commitments.",
+            "activityIds": [
+              "finish_carpentry"
+            ]
+          },
+          {
+            "category": "CRITICAL_PATH",
+            "severity": "WARN",
+            "message": "Critical activity relies on unverified hard constraints: Final inspection availability",
+            "activityIds": [
+              "final_inspection"
+            ]
+          },
+          {
+            "category": "CRITICAL_PATH",
+            "severity": "WARN",
+            "message": "Critical-path movement detected in 18 activities. Recovery alternatives and trade remobilization exposure should be reviewed before publication.",
+            "activityIds": [
+              "masonry",
+              "structural_release",
+              "framing",
+              "roofing",
+              "dry_in_release",
+              "electrical_rough",
+              "rough_inspection",
+              "insulation",
+              "drywall_hang",
+              "drywall_finish",
+              "prime_paint",
+              "finish_carpentry",
+              "half_bath_finish",
+              "electrical_final",
+              "plumbing_final",
+              "hvac_startup",
+              "final_inspection",
+              "homeowner_walkthrough"
+            ]
+          },
+          {
+            "category": "CRITICAL_PATH",
+            "severity": "WARN",
+            "message": "Advisory recovery capacity detected: up to 1 workday(s), with modeled completion 2026-11-11. Recovery remains conditional until PM/trade/field evidence confirms the selected lever.",
+            "activityIds": [
+              "masonry",
+              "structural_release",
+              "framing",
+              "roofing",
+              "dry_in_release",
+              "electrical_rough",
+              "rough_inspection",
+              "insulation",
+              "drywall_hang",
+              "drywall_finish",
+              "prime_paint",
+              "finish_carpentry",
+              "half_bath_finish",
+              "electrical_final",
+              "plumbing_final",
+              "hvac_startup",
+              "final_inspection",
+              "homeowner_walkthrough"
+            ]
+          }
+        ],
+        "decision": "BLOCK"
+      },
+      "forecastable": true,
+      "commitmentEligible": false,
+      "oversightPublishable": false,
+      "publishable": false,
+      "reviewToken": "e66030ad8d1bc640bfea572e04fa806f31766f721348fd92ceb2b5e0fd2c9e02",
+      "persisted": false,
+      "mode": "shadow",
+      "stagingOnly": true
+    },
+    "contentType": "application/json; charset=utf-8",
+    "status": 200
+  }
+}
