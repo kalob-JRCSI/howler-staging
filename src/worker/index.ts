@@ -150,7 +150,10 @@ async function handle(request: Request, env: Env): Promise<Response> {
         const project = await repository.loadProject(route.projectId);
         if (!project) throw new HttpError(404, "Project not found");
         const latest = await repository.loadLatestForecast(route.projectId);
-        return json({ modelRevision: project.revision, latest: latest ?? null });
+        return json({
+          modelRevision: project.revision,
+          latest: latest ?? null,
+        });
       }
       if (request.method === "GET" && route.action === "forecast/health") {
         const project = await repository.loadProject(route.projectId);
