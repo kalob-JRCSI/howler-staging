@@ -10,7 +10,8 @@ export type VerificationState =
   | "STALE_REVERIFY"
   | "PM_CONFIRMED"
   | "CORROBORATED"
-  | "FIELD_VERIFIED";
+  | "FIELD_VERIFIED"
+  | "VERIFIED_ACTUAL";
 
 export interface DurationEstimateV094 {
   optimistic: number;
