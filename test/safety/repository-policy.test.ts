@@ -32,9 +32,20 @@ describe("repository policy: CI never receives Cloudflare credentials", () => {
     expect(ciWorkflow).not.toMatch(/CLOUDFLARE_ACCOUNT_ID/);
   });
 
-  it("ci.yml runs on every branch push and every pull request", () => {
-    expect(ciWorkflow).toMatch(/pull_request/);
-    expect(ciWorkflow).toMatch(/push:/);
+  it("ci.yml's push trigger covers every branch, not a restricted subset", () => {
+    // A plain /push:/ or /pull_request/ substring check would still pass if the push trigger
+    // were narrowed to e.g. `branches: [main]` — assert the actual wildcard is present instead.
+    expect(ciWorkflow).toMatch(/push:\s*\n\s*branches:\s*\n\s*-\s*"\*\*"/);
+  });
+
+  it("ci.yml's pull_request trigger has no branch restriction", () => {
+    const pullRequestBlock = /pull_request:([ \t]*\n(?:[ \t]+.*\n)*)/.exec(
+      ciWorkflow,
+    );
+    expect(pullRequestBlock, "pull_request trigger must be present").not.toBe(
+      null,
+    );
+    expect(pullRequestBlock?.[1] ?? "").not.toMatch(/branches:/);
   });
 });
 
