@@ -1,0 +1,525 @@
+{
+  "engineCompatibilityVersion": "0.9.4",
+  "routeCount": 14,
+  "routes": [
+    {
+      "method": "GET",
+      "pathPattern": "/",
+      "examplePath": "/",
+      "authentication": "public",
+      "probe": {
+        "status": 200,
+        "contentType": "text/html; charset=utf-8",
+        "bodyBytes": 10678,
+        "bodySha256": "6681c69ea24b578287cda750c268c2f499664da036367b7ece1b7c082f6d42d0"
+      }
+    },
+    {
+      "method": "GET",
+      "pathPattern": "/admin",
+      "examplePath": "/admin",
+      "authentication": "public",
+      "probe": {
+        "status": 200,
+        "contentType": "text/html; charset=utf-8",
+        "bodyBytes": 10678,
+        "bodySha256": "6681c69ea24b578287cda750c268c2f499664da036367b7ece1b7c082f6d42d0"
+      }
+    },
+    {
+      "method": "GET",
+      "pathPattern": "/health",
+      "examplePath": "/health",
+      "authentication": "public",
+      "probe": {
+        "status": 200,
+        "contentType": "application/json; charset=utf-8",
+        "bodyKeys": [
+          "ok",
+          "service",
+          "mode",
+          "version",
+          "database",
+          "adminConfigured",
+          "liveSystemsConnected"
+        ],
+        "body": {
+          "ok": false,
+          "service": "howler-scheduling-staging",
+          "mode": "shadow",
+          "version": "0.9.4",
+          "database": {
+            "bound": true,
+            "schemaReady": false
+          },
+          "adminConfigured": true,
+          "liveSystemsConnected": false
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "pathPattern": "/v1/admin/init-db",
+      "examplePath": "/v1/admin/init-db",
+      "authentication": "Bearer HOWLER_ADMIN_KEY",
+      "authenticatedProbe": {
+        "status": 200,
+        "contentType": "application/json; charset=utf-8",
+        "bodyKeys": [
+          "ok",
+          "expected",
+          "found",
+          "statementsApplied",
+          "stagingOnly"
+        ]
+      },
+      "unauthenticatedProbe": {
+        "status": 401,
+        "contentType": "application/json; charset=utf-8",
+        "bodyKeys": [
+          "error"
+        ],
+        "body": {
+          "error": "Unauthorized"
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "pathPattern": "/v1/projects/deboard-v091/seed",
+      "examplePath": "/v1/projects/deboard-v091/seed",
+      "authentication": "Bearer HOWLER_ADMIN_KEY",
+      "authenticatedProbe": {
+        "status": 201,
+        "contentType": "application/json; charset=utf-8",
+        "bodyKeys": [
+          "project",
+          "initialForecast",
+          "oversight",
+          "forecastable",
+          "commitmentEligible",
+          "oversightPublishable",
+          "publishable",
+          "stagingOnly"
+        ]
+      },
+      "unauthenticatedProbe": {
+        "status": 401,
+        "contentType": "application/json; charset=utf-8",
+        "bodyKeys": [
+          "error"
+        ],
+        "body": {
+          "error": "Unauthorized"
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "pathPattern": "/v1/projects/:projectId/forecast",
+      "examplePath": "/v1/projects/deboard-v091/forecast",
+      "authentication": "Bearer HOWLER_ADMIN_KEY",
+      "authenticatedProbe": {
+        "status": 200,
+        "contentType": "application/json; charset=utf-8",
+        "bodyKeys": [
+          "modelRevision",
+          "latest"
+        ]
+      },
+      "unauthenticatedProbe": {
+        "status": 401,
+        "contentType": "application/json; charset=utf-8",
+        "bodyKeys": [
+          "error"
+        ],
+        "body": {
+          "error": "Unauthorized"
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "pathPattern": "/v1/projects/:projectId/forecast/health",
+      "examplePath": "/v1/projects/deboard-v091/forecast/health",
+      "authentication": "Bearer HOWLER_ADMIN_KEY",
+      "authenticatedProbe": {
+        "status": 200,
+        "contentType": "application/json; charset=utf-8",
+        "bodyKeys": [
+          "projectId",
+          "revision",
+          "forecastVersion",
+          "completion",
+          "meanForecastConfidence",
+          "openConflicts",
+          "blockedConstraints",
+          "unverifiedHardConstraints",
+          "lowCoverage",
+          "accuracyByHorizon"
+        ]
+      },
+      "unauthenticatedProbe": {
+        "status": 401,
+        "contentType": "application/json; charset=utf-8",
+        "bodyKeys": [
+          "error"
+        ],
+        "body": {
+          "error": "Unauthorized"
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "pathPattern": "/v1/projects/:projectId/forecast/recovery",
+      "examplePath": "/v1/projects/deboard-v091/forecast/recovery",
+      "authentication": "Bearer HOWLER_ADMIN_KEY",
+      "authenticatedProbe": {
+        "status": 200,
+        "contentType": "application/json; charset=utf-8",
+        "bodyKeys": [
+          "projectId",
+          "projectRevision",
+          "latestVersion",
+          "baselineVersion",
+          "recovery",
+          "recoveryLayer",
+          "publicationGate",
+          "stagingOnly"
+        ]
+      },
+      "unauthenticatedProbe": {
+        "status": 401,
+        "contentType": "application/json; charset=utf-8",
+        "bodyKeys": [
+          "error"
+        ],
+        "body": {
+          "error": "Unauthorized"
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "pathPattern": "/v1/projects/:projectId/events",
+      "examplePath": "/v1/projects/deboard-v091/events?limit=100",
+      "authentication": "Bearer HOWLER_ADMIN_KEY",
+      "authenticatedProbe": {
+        "status": 200,
+        "contentType": "application/json; charset=utf-8",
+        "bodyKeys": [
+          "events"
+        ]
+      },
+      "unauthenticatedProbe": {
+        "status": 401,
+        "contentType": "application/json; charset=utf-8",
+        "bodyKeys": [
+          "error"
+        ],
+        "body": {
+          "error": "Unauthorized"
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "pathPattern": "/v1/projects/:projectId/learning",
+      "examplePath": "/v1/projects/deboard-v091/learning",
+      "authentication": "Bearer HOWLER_ADMIN_KEY",
+      "authenticatedProbe": {
+        "status": 200,
+        "contentType": "application/json; charset=utf-8",
+        "bodyKeys": [
+          "learning"
+        ]
+      },
+      "unauthenticatedProbe": {
+        "status": 401,
+        "contentType": "application/json; charset=utf-8",
+        "bodyKeys": [
+          "error"
+        ],
+        "body": {
+          "error": "Unauthorized"
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "pathPattern": "/v1/projects/:projectId/understanding/preview",
+      "examplePath": "/v1/projects/deboard-v091/understanding/preview",
+      "authentication": "Bearer HOWLER_ADMIN_KEY",
+      "authenticatedProbe": {
+        "status": 200,
+        "contentType": "application/json; charset=utf-8",
+        "bodyKeys": [
+          "valid",
+          "errors",
+          "warnings",
+          "event"
+        ],
+        "body": {
+          "valid": true,
+          "errors": [],
+          "warnings": [],
+          "event": {
+            "id": "deboard-v093-field-sim-1787832000000",
+            "baseRevision": 1,
+            "projectId": "deboard-v091",
+            "type": "FIELD_UPDATE",
+            "occurredAt": "2026-08-27T12:00:00.000Z",
+            "receivedAt": "2026-08-27T12:00:00.000Z",
+            "sourceIds": [
+              "src-v093-field-sim-1787832000000"
+            ],
+            "verification": "PM_CONFIRMED",
+            "impactSeedActivityIds": [
+              "masonry"
+            ],
+            "mutations": [
+              {
+                "op": "UPSERT_SOURCE",
+                "source": {
+                  "id": "src-v093-field-sim-1787832000000",
+                  "type": "FIELD_REPORT",
+                  "label": "v0.9.3 current masonry commitment - CMU verified and Aug 27 mobilization committed",
+                  "observedAt": "2026-08-27T12:00:00.000Z",
+                  "effectiveDate": "2026-08-27",
+                  "authority": 0.95,
+                  "reliability": 0.95
+                }
+              },
+              {
+                "op": "SUPERSEDE_SOURCE",
+                "sourceId": "src-masonry-calendar",
+                "supersededBySourceId": "src-v093-field-sim-1787832000000"
+              },
+              {
+                "op": "SET_CONSTRAINT_STATE",
+                "constraintId": "masonry-material",
+                "state": "SATISFIED",
+                "verification": "PM_CONFIRMED"
+              },
+              {
+                "op": "SET_CONSTRAINT_READINESS",
+                "constraintId": "masonry-material",
+                "readiness": {
+                  "optimistic": "2026-08-26",
+                  "likely": "2026-08-26",
+                  "conservative": "2026-08-26"
+                },
+                "verification": "PM_CONFIRMED"
+              },
+              {
+                "op": "SET_CONSTRAINT_STATE",
+                "constraintId": "masonry-trade",
+                "state": "COMMITTED",
+                "verification": "PM_CONFIRMED"
+              },
+              {
+                "op": "SET_CONSTRAINT_READINESS",
+                "constraintId": "masonry-trade",
+                "readiness": {
+                  "optimistic": "2026-08-27",
+                  "likely": "2026-08-27",
+                  "conservative": "2026-08-27"
+                },
+                "verification": "PM_CONFIRMED"
+              }
+            ],
+            "payload": {
+              "simulation": true,
+              "supersedesSourceId": "src-masonry-calendar",
+              "materialVerified": true,
+              "masonryStartCommitment": "2026-08-27"
+            },
+            "note": "Staging-only v0.9.4 supersession test. Retains the Aug 24 source in history, marks it superseded, and keeps the Aug 27 commitment current. Does not touch live systems."
+          }
+        }
+      },
+      "unauthenticatedProbe": {
+        "status": 401,
+        "contentType": "application/json; charset=utf-8",
+        "bodyKeys": [
+          "error"
+        ],
+        "body": {
+          "error": "Unauthorized"
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "pathPattern": "/v1/projects/:projectId/events/preview",
+      "examplePath": "/v1/projects/deboard-v091/events/preview",
+      "authentication": "Bearer HOWLER_ADMIN_KEY",
+      "authenticatedProbe": {
+        "status": 200,
+        "contentType": "application/json; charset=utf-8",
+        "bodyKeys": [
+          "projectRevision",
+          "baselineVersion",
+          "latestVersion",
+          "comparisonVersion",
+          "candidate",
+          "delta",
+          "recoveryAnalysis",
+          "supersededSources",
+          "impactActivityIds",
+          "oversight",
+          "forecastable",
+          "commitmentEligible",
+          "oversightPublishable",
+          "publishable",
+          "reviewToken",
+          "persisted",
+          "mode",
+          "stagingOnly"
+        ]
+      },
+      "unauthenticatedProbe": {
+        "status": 401,
+        "contentType": "application/json; charset=utf-8",
+        "bodyKeys": [
+          "error"
+        ],
+        "body": {
+          "error": "Unauthorized"
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "pathPattern": "/v1/projects/:projectId/events/apply-shadow",
+      "examplePath": "/v1/projects/deboard-v091/events/apply-shadow",
+      "authentication": "Bearer HOWLER_ADMIN_KEY",
+      "authenticatedProbe": {
+        "status": 201,
+        "contentType": "application/json; charset=utf-8",
+        "bodyKeys": [
+          "applied",
+          "stagingOnly",
+          "projectRevision",
+          "candidate",
+          "delta",
+          "recoveryAnalysis",
+          "supersededSources",
+          "impactActivityIds",
+          "oversight",
+          "publicationGate"
+        ]
+      },
+      "unauthenticatedProbe": {
+        "status": 401,
+        "contentType": "application/json; charset=utf-8",
+        "bodyKeys": [
+          "error"
+        ],
+        "body": {
+          "error": "Unauthorized"
+        }
+      }
+    },
+    {
+      "method": "POST",
+      "pathPattern": "/v1/projects/:projectId/events/publish",
+      "examplePath": "/v1/projects/deboard-v091/events/publish",
+      "authentication": "Bearer HOWLER_ADMIN_KEY",
+      "authenticatedProbe": {
+        "status": 403,
+        "contentType": "application/json; charset=utf-8",
+        "bodyKeys": [
+          "error"
+        ],
+        "body": {
+          "error": "Publishing is disabled while HOWLER_MODE=shadow"
+        }
+      },
+      "unauthenticatedProbe": {
+        "status": 401,
+        "contentType": "application/json; charset=utf-8",
+        "bodyKeys": [
+          "error"
+        ],
+        "body": {
+          "error": "Unauthorized"
+        }
+      }
+    }
+  ],
+  "authenticationProbe": {
+    "method": "POST",
+    "path": "/v1/admin/init-db",
+    "response": {
+      "body": {
+        "error": "Unauthorized"
+      },
+      "contentType": "application/json; charset=utf-8",
+      "status": 401
+    }
+  },
+  "orderingEvidence": {
+    "seedTopLevelKeys": [
+      "project",
+      "initialForecast",
+      "oversight",
+      "forecastable",
+      "commitmentEligible",
+      "oversightPublishable",
+      "publishable",
+      "stagingOnly"
+    ],
+    "initialForecastTopLevelKeys": [
+      "modelRevision",
+      "latest"
+    ],
+    "previewTopLevelKeys": [
+      "projectRevision",
+      "baselineVersion",
+      "latestVersion",
+      "comparisonVersion",
+      "candidate",
+      "delta",
+      "recoveryAnalysis",
+      "supersededSources",
+      "impactActivityIds",
+      "oversight",
+      "forecastable",
+      "commitmentEligible",
+      "oversightPublishable",
+      "publishable",
+      "reviewToken",
+      "persisted",
+      "mode",
+      "stagingOnly"
+    ],
+    "applyShadowTopLevelKeys": [
+      "applied",
+      "stagingOnly",
+      "projectRevision",
+      "candidate",
+      "delta",
+      "recoveryAnalysis",
+      "supersededSources",
+      "impactActivityIds",
+      "oversight",
+      "publicationGate"
+    ],
+    "recoveryTopLevelKeys": [
+      "projectId",
+      "projectRevision",
+      "latestVersion",
+      "baselineVersion",
+      "recovery",
+      "recoveryLayer",
+      "publicationGate",
+      "stagingOnly"
+    ],
+    "eventIdsAfterApply": [
+      "deboard-v091-baseline-evidence-2026-08-26",
+      "deboard-v093-field-sim-1787832000000"
+    ]
+  }
+}
