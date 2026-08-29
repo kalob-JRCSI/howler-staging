@@ -30,15 +30,20 @@ describe("v0.9.4 preserved route inventory", () => {
       {} as ExecutionContext,
     );
 
-    expect(response.status, `${method} ${path} must be registered`).not.toBe(404);
+    expect(response.status, `${method} ${path} must be registered`).not.toBe(
+      404,
+    );
   });
 
   it("keeps shadow publication disabled after authentication", async () => {
     const response = await worker.fetch(
-      new Request("https://howler.test/v1/projects/deboard-v091/events/publish", {
-        method: "POST",
-        headers: { Authorization: "Bearer test-admin-key" },
-      }),
+      new Request(
+        "https://howler.test/v1/projects/deboard-v091/events/publish",
+        {
+          method: "POST",
+          headers: { Authorization: "Bearer test-admin-key" },
+        },
+      ),
       {
         HOWLER_MODE: "shadow",
         HOWLER_ADMIN_KEY: "test-admin-key",
