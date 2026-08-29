@@ -1,0 +1,2115 @@
+{
+  "engineCompatibilityVersion": "0.9.4",
+  "request": {
+    "method": "POST",
+    "path": "/v1/projects/deboard-v091/seed"
+  },
+  "response": {
+    "status": 201,
+    "contentType": "application/json; charset=utf-8",
+    "body": {
+      "project": {
+        "projectId": "deboard-v091",
+        "revision": 1,
+        "name": "DeBoard - 227 Marengo Dr - v0.9.1 truth-semantics shadow",
+        "projectType": "Detached garage + mower storage + conditioned second-floor office/flex + half bath",
+        "timezone": "America/New_York",
+        "forecastAnchorDate": "2026-08-26",
+        "calendar": {
+          "workingWeekdays": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "holidays": []
+        },
+        "sources": {
+          "src-plans": {
+            "id": "src-plans",
+            "type": "PLAN",
+            "label": "DeBoard Tradewalk Plans - June 12, 2025",
+            "observedAt": "2026-08-26T18:00:00-04:00",
+            "authority": 0.9,
+            "reliability": 0.85
+          },
+          "src-scope": {
+            "id": "src-scope",
+            "type": "SCOPE",
+            "label": "Scope of Work and Rules - includes Footer -> Block -> Framing dry-in -> slab sequence",
+            "observedAt": "2026-08-26T18:00:00-04:00",
+            "authority": 0.95,
+            "reliability": 0.9
+          },
+          "src-engineering": {
+            "id": "src-engineering",
+            "type": "ENGINEERING",
+            "label": "DeBoard LVL calculations - Aug 17, 2026",
+            "observedAt": "2026-08-26T18:00:00-04:00",
+            "authority": 0.98,
+            "reliability": 0.95
+          },
+          "src-budget": {
+            "id": "src-budget",
+            "type": "BUDGET",
+            "label": "DeBoard Trade Budget & Estimate Tracker",
+            "observedAt": "2026-08-26T18:00:00-04:00",
+            "authority": 0.85,
+            "reliability": 0.8
+          },
+          "src-dashboard": {
+            "id": "src-dashboard",
+            "type": "PM_INPUT",
+            "label": "KF Live PM Intelligence Dashboard - DeBoard current status",
+            "observedAt": "2026-08-26T18:00:00-04:00",
+            "authority": 0.9,
+            "reliability": 0.9
+          },
+          "src-building-package": {
+            "id": "src-building-package",
+            "type": "CALENDAR",
+            "label": "Walls/subfloor building package committed for Aug 28; receipt still requires field verification",
+            "observedAt": "2026-08-26T18:00:00-04:00",
+            "effectiveDate": "2026-08-28",
+            "authority": 0.9,
+            "reliability": 0.9
+          },
+          "src-roof-action": {
+            "id": "src-roof-action",
+            "type": "CALENDAR",
+            "label": "Roof package vendor analysis / Tony - Aug 26",
+            "observedAt": "2026-08-26T18:00:00-04:00",
+            "effectiveDate": "2026-08-26",
+            "authority": 0.8,
+            "reliability": 0.85
+          },
+          "src-masonry-calendar": {
+            "id": "src-masonry-calendar",
+            "type": "CALENDAR",
+            "label": "Prior masonry target Aug 24; no independent field start verification attached",
+            "observedAt": "2026-08-26T18:00:00-04:00",
+            "effectiveDate": "2026-08-24",
+            "authority": 0.65,
+            "reliability": 0.65
+          },
+          "src-hvac": {
+            "id": "src-hvac",
+            "type": "ESTIMATE",
+            "label": "Revised multi-zone mini-split - $7,366",
+            "observedAt": "2026-08-26T18:00:00-04:00",
+            "authority": 0.9,
+            "reliability": 0.9
+          },
+          "src-plumbing": {
+            "id": "src-plumbing",
+            "type": "ESTIMATE",
+            "label": "Medyna Plumbing selected/comparable estimate - $7,800",
+            "observedAt": "2026-08-26T18:00:00-04:00",
+            "authority": 0.85,
+            "reliability": 0.85
+          },
+          "src-trades": {
+            "id": "src-trades",
+            "type": "PM_INPUT",
+            "label": "Current trade assignments: Elizabeth masonry; Jason Bonham electrical; Medina plumbing; Anthony Parker HVAC; Dylan Jasper paint",
+            "observedAt": "2026-08-26T18:00:00-04:00",
+            "authority": 0.9,
+            "reliability": 0.85
+          },
+          "src-brick-risk": {
+            "id": "src-brick-risk",
+            "type": "PM_INPUT",
+            "label": "Brick veneer matching discrepancy / Lee Block match task not verified; quote requires refresh",
+            "observedAt": "2026-08-26T18:00:00-04:00",
+            "authority": 0.92,
+            "reliability": 0.9
+          },
+          "src-material-quotes": {
+            "id": "src-material-quotes",
+            "type": "MATERIAL_ORDER",
+            "label": "Builders Choice / Lee material quotes and documented package contents; some quotes expired and require refresh",
+            "observedAt": "2026-08-26T18:00:00-04:00",
+            "authority": 0.85,
+            "reliability": 0.78
+          }
+        },
+        "activities": {
+          "masonry": {
+            "id": "masonry",
+            "name": "CMU foundation walls",
+            "phase": "Foundation",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 2,
+              "likely": 3,
+              "conservative": 5,
+              "sourceIds": [
+                "src-scope",
+                "src-masonry-calendar"
+              ]
+            },
+            "constraintIds": [
+              "masonry-material",
+              "masonry-trade"
+            ],
+            "sourceIds": [
+              "src-plans",
+              "src-scope",
+              "src-dashboard"
+            ]
+          },
+          "structural_release": {
+            "id": "structural_release",
+            "name": "CMU structural release / anchors / elevations",
+            "phase": "Foundation",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 1,
+              "likely": 1,
+              "conservative": 2,
+              "sourceIds": [
+                "src-plans",
+                "src-scope",
+                "src-engineering"
+              ]
+            },
+            "constraintIds": [
+              "structural-release-verify"
+            ],
+            "sourceIds": [
+              "src-plans",
+              "src-scope",
+              "src-engineering"
+            ]
+          },
+          "structural_reconcile": {
+            "id": "structural_reconcile",
+            "name": "Plan / LVL engineering reconciliation",
+            "phase": "Framing Readiness",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 1,
+              "likely": 1,
+              "conservative": 2,
+              "sourceIds": [
+                "src-plans",
+                "src-engineering"
+              ]
+            },
+            "constraintIds": [
+              "engineering-reconcile"
+            ],
+            "sourceIds": [
+              "src-plans",
+              "src-engineering",
+              "src-dashboard"
+            ]
+          },
+          "building_delivery": {
+            "id": "building_delivery",
+            "name": "Walls and subfloor package delivery",
+            "phase": "Procurement",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 1,
+              "likely": 1,
+              "conservative": 1,
+              "sourceIds": [
+                "src-building-package"
+              ]
+            },
+            "constraintIds": [
+              "building-delivery-ready"
+            ],
+            "sourceIds": [
+              "src-building-package",
+              "src-dashboard"
+            ]
+          },
+          "framing": {
+            "id": "framing",
+            "name": "Structural framing + second-floor/loft system",
+            "phase": "Framing",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 7,
+              "likely": 9,
+              "conservative": 12,
+              "sourceIds": [
+                "src-plans",
+                "src-scope",
+                "src-budget"
+              ]
+            },
+            "constraintIds": [
+              "framer-availability",
+              "framing-material"
+            ],
+            "sourceIds": [
+              "src-plans",
+              "src-scope",
+              "src-engineering",
+              "src-budget"
+            ]
+          },
+          "roof_procurement": {
+            "id": "roof_procurement",
+            "name": "Roof package selection / refresh / release",
+            "phase": "Procurement",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 1,
+              "likely": 2,
+              "conservative": 3,
+              "sourceIds": [
+                "src-roof-action",
+                "src-material-quotes"
+              ]
+            },
+            "constraintIds": [
+              "roof-action",
+              "roof-vendor"
+            ],
+            "sourceIds": [
+              "src-roof-action",
+              "src-material-quotes"
+            ]
+          },
+          "roofing": {
+            "id": "roofing",
+            "name": "Roof underlayment / shingles / flashings",
+            "phase": "Envelope",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 3,
+              "likely": 4,
+              "conservative": 6,
+              "sourceIds": [
+                "src-scope",
+                "src-material-quotes"
+              ]
+            },
+            "constraintIds": [
+              "roof-material"
+            ],
+            "sourceIds": [
+              "src-scope",
+              "src-material-quotes"
+            ]
+          },
+          "opening_protection": {
+            "id": "opening_protection",
+            "name": "Weather protection at windows / service door / garage openings",
+            "phase": "Envelope",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 1,
+              "likely": 2,
+              "conservative": 3,
+              "sourceIds": [
+                "src-scope"
+              ]
+            },
+            "constraintIds": [
+              "opening-protection-material"
+            ],
+            "sourceIds": [
+              "src-scope",
+              "src-material-quotes"
+            ]
+          },
+          "dry_in_release": {
+            "id": "dry_in_release",
+            "name": "Weather dry-in release",
+            "phase": "Envelope",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 1,
+              "likely": 1,
+              "conservative": 2,
+              "sourceIds": [
+                "src-scope"
+              ]
+            },
+            "constraintIds": [],
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "windows_ext_doors": {
+            "id": "windows_ext_doors",
+            "name": "Windows and exterior service door install",
+            "phase": "Envelope",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 2,
+              "likely": 3,
+              "conservative": 5,
+              "sourceIds": [
+                "src-scope",
+                "src-material-quotes"
+              ]
+            },
+            "constraintIds": [
+              "windows-doors-material"
+            ],
+            "sourceIds": [
+              "src-scope",
+              "src-material-quotes"
+            ]
+          },
+          "brick_veneer": {
+            "id": "brick_veneer",
+            "name": "Brick veneer / soldier courses / quoins",
+            "phase": "Exterior",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 5,
+              "likely": 7,
+              "conservative": 10,
+              "sourceIds": [
+                "src-scope",
+                "src-brick-risk"
+              ]
+            },
+            "constraintIds": [
+              "brick-match",
+              "brick-material"
+            ],
+            "sourceIds": [
+              "src-scope",
+              "src-brick-risk",
+              "src-material-quotes"
+            ]
+          },
+          "underslab_mep": {
+            "id": "underslab_mep",
+            "name": "Under-slab plumbing/electrical routing",
+            "phase": "MEP",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 2,
+              "likely": 3,
+              "conservative": 5,
+              "sourceIds": [
+                "src-scope",
+                "src-plumbing"
+              ]
+            },
+            "constraintIds": [
+              "mep-routing"
+            ],
+            "sourceIds": [
+              "src-scope",
+              "src-plumbing"
+            ]
+          },
+          "slab_prep": {
+            "id": "slab_prep",
+            "name": "Slab stone / vapor / reinforcement / concealed inspection",
+            "phase": "Concrete",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 2,
+              "likely": 3,
+              "conservative": 5,
+              "sourceIds": [
+                "src-scope",
+                "src-budget"
+              ]
+            },
+            "constraintIds": [
+              "slab-inspection"
+            ],
+            "sourceIds": [
+              "src-scope",
+              "src-budget"
+            ]
+          },
+          "slab": {
+            "id": "slab",
+            "name": "Garage and mower-storage slab pour / finish / cure release",
+            "phase": "Concrete",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 2,
+              "likely": 3,
+              "conservative": 5,
+              "sourceIds": [
+                "src-scope",
+                "src-budget"
+              ]
+            },
+            "constraintIds": [
+              "concrete-trade"
+            ],
+            "sourceIds": [
+              "src-scope",
+              "src-budget",
+              "src-dashboard"
+            ]
+          },
+          "electrical_rough": {
+            "id": "electrical_rough",
+            "name": "Electrical service and rough-in",
+            "phase": "MEP Rough",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 4,
+              "likely": 6,
+              "conservative": 9,
+              "sourceIds": [
+                "src-scope",
+                "src-trades"
+              ]
+            },
+            "constraintIds": [
+              "electrical-trade"
+            ],
+            "sourceIds": [
+              "src-scope",
+              "src-trades"
+            ]
+          },
+          "plumbing_rough": {
+            "id": "plumbing_rough",
+            "name": "Half-bath plumbing rough-in",
+            "phase": "MEP Rough",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 3,
+              "likely": 4,
+              "conservative": 7,
+              "sourceIds": [
+                "src-scope",
+                "src-plumbing"
+              ]
+            },
+            "constraintIds": [
+              "plumbing-trade"
+            ],
+            "sourceIds": [
+              "src-scope",
+              "src-plumbing",
+              "src-trades"
+            ]
+          },
+          "hvac_rough": {
+            "id": "hvac_rough",
+            "name": "Multi-zone mini-split rough-in / lines / condensate",
+            "phase": "MEP Rough",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 3,
+              "likely": 5,
+              "conservative": 8,
+              "sourceIds": [
+                "src-scope",
+                "src-hvac"
+              ]
+            },
+            "constraintIds": [
+              "hvac-trade",
+              "hvac-equipment"
+            ],
+            "sourceIds": [
+              "src-scope",
+              "src-hvac",
+              "src-trades"
+            ]
+          },
+          "rough_inspection": {
+            "id": "rough_inspection",
+            "name": "MEP rough inspections",
+            "phase": "Inspection",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 1,
+              "likely": 2,
+              "conservative": 4,
+              "sourceIds": [
+                "src-scope"
+              ]
+            },
+            "constraintIds": [
+              "inspection-ready"
+            ],
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "insulation": {
+            "id": "insulation",
+            "name": "Insulation and air sealing",
+            "phase": "Close-In",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 2,
+              "likely": 3,
+              "conservative": 5,
+              "sourceIds": [
+                "src-scope"
+              ]
+            },
+            "constraintIds": [
+              "insulation-trade"
+            ],
+            "sourceIds": [
+              "src-scope",
+              "src-dashboard"
+            ]
+          },
+          "drywall_hang": {
+            "id": "drywall_hang",
+            "name": "Drywall hang",
+            "phase": "Close-In",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 3,
+              "likely": 4,
+              "conservative": 6,
+              "sourceIds": [
+                "src-scope",
+                "src-budget"
+              ]
+            },
+            "constraintIds": [
+              "drywall-trade"
+            ],
+            "sourceIds": [
+              "src-scope",
+              "src-budget"
+            ]
+          },
+          "drywall_finish": {
+            "id": "drywall_finish",
+            "name": "Drywall tape / finish / sand",
+            "phase": "Close-In",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 4,
+              "likely": 6,
+              "conservative": 9,
+              "sourceIds": [
+                "src-scope",
+                "src-budget"
+              ]
+            },
+            "constraintIds": [],
+            "sourceIds": [
+              "src-scope",
+              "src-budget"
+            ]
+          },
+          "prime_paint": {
+            "id": "prime_paint",
+            "name": "Prime and interior paint",
+            "phase": "Finishes",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 4,
+              "likely": 6,
+              "conservative": 9,
+              "sourceIds": [
+                "src-scope",
+                "src-budget"
+              ]
+            },
+            "constraintIds": [
+              "paint-trade"
+            ],
+            "sourceIds": [
+              "src-scope",
+              "src-budget",
+              "src-trades"
+            ]
+          },
+          "finish_carpentry": {
+            "id": "finish_carpentry",
+            "name": "Interior doors / trim / stair finish / vanity setting",
+            "phase": "Finishes",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 4,
+              "likely": 6,
+              "conservative": 9,
+              "sourceIds": [
+                "src-scope",
+                "src-budget"
+              ]
+            },
+            "constraintIds": [
+              "finish-carpentry-trade"
+            ],
+            "sourceIds": [
+              "src-scope",
+              "src-budget"
+            ]
+          },
+          "flooring": {
+            "id": "flooring",
+            "name": "Second-floor flooring / transitions / stair finish",
+            "phase": "Finishes",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 2,
+              "likely": 3,
+              "conservative": 5,
+              "sourceIds": [
+                "src-scope",
+                "src-budget"
+              ]
+            },
+            "constraintIds": [
+              "flooring-trade"
+            ],
+            "sourceIds": [
+              "src-scope",
+              "src-budget"
+            ]
+          },
+          "half_bath_finish": {
+            "id": "half_bath_finish",
+            "name": "Half-bath vanity / top / fixtures / mirror / accessories",
+            "phase": "Finishes",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 2,
+              "likely": 3,
+              "conservative": 5,
+              "sourceIds": [
+                "src-scope",
+                "src-plumbing"
+              ]
+            },
+            "constraintIds": [
+              "bath-finish-materials"
+            ],
+            "sourceIds": [
+              "src-scope",
+              "src-plumbing"
+            ]
+          },
+          "garage_doors": {
+            "id": "garage_doors",
+            "name": "Overhead garage doors / openers / controls",
+            "phase": "Exterior",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 2,
+              "likely": 3,
+              "conservative": 5,
+              "sourceIds": [
+                "src-scope"
+              ]
+            },
+            "constraintIds": [
+              "garage-door-package"
+            ],
+            "sourceIds": [
+              "src-scope",
+              "src-budget"
+            ]
+          },
+          "electrical_final": {
+            "id": "electrical_final",
+            "name": "Electrical trim / devices / lighting / testing",
+            "phase": "MEP Final",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 2,
+              "likely": 3,
+              "conservative": 5,
+              "sourceIds": [
+                "src-scope",
+                "src-trades"
+              ]
+            },
+            "constraintIds": [],
+            "sourceIds": [
+              "src-scope",
+              "src-trades"
+            ]
+          },
+          "plumbing_final": {
+            "id": "plumbing_final",
+            "name": "Plumbing fixtures / trim / testing",
+            "phase": "MEP Final",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 1,
+              "likely": 2,
+              "conservative": 3,
+              "sourceIds": [
+                "src-scope",
+                "src-plumbing"
+              ]
+            },
+            "constraintIds": [],
+            "sourceIds": [
+              "src-scope",
+              "src-plumbing"
+            ]
+          },
+          "hvac_startup": {
+            "id": "hvac_startup",
+            "name": "HVAC startup / commissioning",
+            "phase": "MEP Final",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 1,
+              "likely": 2,
+              "conservative": 3,
+              "sourceIds": [
+                "src-scope",
+                "src-hvac"
+              ]
+            },
+            "constraintIds": [],
+            "sourceIds": [
+              "src-scope",
+              "src-hvac"
+            ]
+          },
+          "exterior_closeout": {
+            "id": "exterior_closeout",
+            "name": "Exterior trim / caulk / gutters / weatherproof closeout",
+            "phase": "Exterior",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 3,
+              "likely": 4,
+              "conservative": 6,
+              "sourceIds": [
+                "src-scope"
+              ]
+            },
+            "constraintIds": [],
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "final_grading_cleanup": {
+            "id": "final_grading_cleanup",
+            "name": "Final grading / lawn restoration / cleanup",
+            "phase": "Closeout",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 2,
+              "likely": 3,
+              "conservative": 5,
+              "sourceIds": [
+                "src-scope"
+              ]
+            },
+            "constraintIds": [],
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "final_inspection": {
+            "id": "final_inspection",
+            "name": "Final inspections / punch release",
+            "phase": "Closeout",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 1,
+              "likely": 2,
+              "conservative": 4,
+              "sourceIds": [
+                "src-scope"
+              ]
+            },
+            "constraintIds": [
+              "final-inspection"
+            ],
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "homeowner_walkthrough": {
+            "id": "homeowner_walkthrough",
+            "name": "Systems demonstration / homeowner walkthrough / closeout package",
+            "phase": "Closeout",
+            "state": "NOT_STARTED",
+            "duration": {
+              "optimistic": 1,
+              "likely": 1,
+              "conservative": 2,
+              "sourceIds": [
+                "src-scope"
+              ]
+            },
+            "constraintIds": [],
+            "sourceIds": [
+              "src-scope"
+            ]
+          }
+        },
+        "constraints": {
+          "masonry-material": {
+            "id": "masonry-material",
+            "activityId": "masonry",
+            "type": "MATERIAL",
+            "label": "Correct CMU/block package on site and verified",
+            "state": "UNVERIFIED",
+            "hard": true,
+            "sourceIds": [
+              "src-dashboard",
+              "src-material-quotes"
+            ],
+            "verification": "UNVERIFIED"
+          },
+          "masonry-trade": {
+            "id": "masonry-trade",
+            "activityId": "masonry",
+            "type": "TRADE_AVAILABILITY",
+            "label": "Masonry crew mobilization after stale Aug 24 target",
+            "state": "UNVERIFIED",
+            "hard": true,
+            "sourceIds": [
+              "src-masonry-calendar",
+              "src-trades"
+            ],
+            "verification": "UNVERIFIED"
+          },
+          "structural-release-verify": {
+            "id": "structural-release-verify",
+            "activityId": "structural_release",
+            "type": "INFORMATION",
+            "label": "Anchor / elevation / bearing conditions field-verified",
+            "state": "UNVERIFIED",
+            "hard": true,
+            "sourceIds": [
+              "src-engineering",
+              "src-dashboard"
+            ],
+            "verification": "UNVERIFIED"
+          },
+          "engineering-reconcile": {
+            "id": "engineering-reconcile",
+            "activityId": "structural_reconcile",
+            "type": "INFORMATION",
+            "label": "Plan/LVL/post reconciliation status",
+            "state": "STALE_REVERIFY",
+            "hard": true,
+            "readiness": {
+              "optimistic": "2026-08-26",
+              "likely": "2026-08-27",
+              "conservative": "2026-08-28"
+            },
+            "sourceIds": [
+              "src-plans",
+              "src-engineering",
+              "src-dashboard"
+            ],
+            "verification": "STALE_REVERIFY"
+          },
+          "building-delivery-ready": {
+            "id": "building-delivery-ready",
+            "activityId": "building_delivery",
+            "type": "MATERIAL",
+            "label": "Walls/subfloor delivery Aug 28",
+            "state": "COMMITTED",
+            "hard": true,
+            "readiness": {
+              "optimistic": "2026-08-28",
+              "likely": "2026-08-28",
+              "conservative": "2026-08-28"
+            },
+            "sourceIds": [
+              "src-building-package"
+            ],
+            "verification": "PM_CONFIRMED"
+          },
+          "framer-availability": {
+            "id": "framer-availability",
+            "activityId": "framing",
+            "type": "TRADE_AVAILABILITY",
+            "label": "Framer mobilization",
+            "state": "UNVERIFIED",
+            "hard": true,
+            "sourceIds": [
+              "src-dashboard",
+              "src-budget"
+            ],
+            "verification": "UNVERIFIED"
+          },
+          "framing-material": {
+            "id": "framing-material",
+            "activityId": "framing",
+            "type": "MATERIAL",
+            "label": "Walls/subfloor/LVL framing package received, counted, undamaged, staged",
+            "state": "UNVERIFIED",
+            "hard": true,
+            "readiness": {
+              "optimistic": "2026-08-28",
+              "likely": "2026-08-28",
+              "conservative": "2026-08-31"
+            },
+            "sourceIds": [
+              "src-building-package",
+              "src-engineering"
+            ],
+            "verification": "UNVERIFIED"
+          },
+          "roof-action": {
+            "id": "roof-action",
+            "activityId": "roof_procurement",
+            "type": "INFORMATION",
+            "label": "Roof vendor analysis / contact Tony on Aug 26",
+            "state": "COMMITTED",
+            "hard": false,
+            "readiness": {
+              "optimistic": "2026-08-26",
+              "likely": "2026-08-26",
+              "conservative": "2026-08-26"
+            },
+            "sourceIds": [
+              "src-roof-action"
+            ],
+            "verification": "PM_CONFIRMED"
+          },
+          "roof-vendor": {
+            "id": "roof-vendor",
+            "activityId": "roof_procurement",
+            "type": "INFORMATION",
+            "label": "Roof vendor/package decision and release",
+            "state": "UNVERIFIED",
+            "hard": true,
+            "readiness": {
+              "optimistic": "2026-08-26",
+              "likely": "2026-08-27",
+              "conservative": "2026-08-28"
+            },
+            "sourceIds": [
+              "src-roof-action",
+              "src-material-quotes"
+            ],
+            "verification": "UNVERIFIED"
+          },
+          "roof-material": {
+            "id": "roof-material",
+            "activityId": "roofing",
+            "type": "MATERIAL",
+            "label": "Roof package refreshed, ordered and available",
+            "state": "UNVERIFIED",
+            "hard": true,
+            "sourceIds": [
+              "src-material-quotes",
+              "src-roof-action"
+            ],
+            "verification": "UNVERIFIED"
+          },
+          "opening-protection-material": {
+            "id": "opening-protection-material",
+            "activityId": "opening_protection",
+            "type": "MATERIAL",
+            "label": "Temporary/permanent opening protection available",
+            "state": "UNVERIFIED",
+            "hard": true,
+            "sourceIds": [
+              "src-scope",
+              "src-material-quotes"
+            ],
+            "verification": "UNVERIFIED"
+          },
+          "windows-doors-material": {
+            "id": "windows-doors-material",
+            "activityId": "windows_ext_doors",
+            "type": "MATERIAL",
+            "label": "Window/service-door package availability and opening counts verified",
+            "state": "UNVERIFIED",
+            "hard": true,
+            "sourceIds": [
+              "src-material-quotes",
+              "src-scope"
+            ],
+            "verification": "UNVERIFIED"
+          },
+          "brick-match": {
+            "id": "brick-match",
+            "activityId": "brick_veneer",
+            "type": "MATERIAL",
+            "label": "Brick veneer match approved against existing residence",
+            "state": "BLOCKED",
+            "hard": true,
+            "sourceIds": [
+              "src-brick-risk",
+              "src-scope"
+            ],
+            "verification": "UNVERIFIED"
+          },
+          "brick-material": {
+            "id": "brick-material",
+            "activityId": "brick_veneer",
+            "type": "MATERIAL",
+            "label": "Lee masonry material quote refreshed / package released",
+            "state": "UNVERIFIED",
+            "hard": true,
+            "sourceIds": [
+              "src-brick-risk",
+              "src-material-quotes"
+            ],
+            "verification": "UNVERIFIED"
+          },
+          "mep-routing": {
+            "id": "mep-routing",
+            "activityId": "underslab_mep",
+            "type": "INFORMATION",
+            "label": "Under-slab plumbing/electrical routing field-confirmed",
+            "state": "UNVERIFIED",
+            "hard": true,
+            "sourceIds": [
+              "src-scope",
+              "src-plumbing",
+              "src-trades"
+            ],
+            "verification": "UNVERIFIED"
+          },
+          "slab-inspection": {
+            "id": "slab-inspection",
+            "activityId": "slab_prep",
+            "type": "INSPECTION",
+            "label": "Required under-slab/concealed inspection release",
+            "state": "UNVERIFIED",
+            "hard": true,
+            "sourceIds": [
+              "src-scope"
+            ],
+            "verification": "UNVERIFIED"
+          },
+          "concrete-trade": {
+            "id": "concrete-trade",
+            "activityId": "slab",
+            "type": "TRADE_AVAILABILITY",
+            "label": "Concrete crew remobilization after dry-in",
+            "state": "FORECASTED",
+            "hard": true,
+            "sourceIds": [
+              "src-dashboard",
+              "src-budget"
+            ],
+            "verification": "CORROBORATED"
+          },
+          "electrical-trade": {
+            "id": "electrical-trade",
+            "activityId": "electrical_rough",
+            "type": "TRADE_AVAILABILITY",
+            "label": "Jason Bonham electrical rough-in mobilization",
+            "state": "FORECASTED",
+            "hard": true,
+            "sourceIds": [
+              "src-trades"
+            ],
+            "verification": "CORROBORATED"
+          },
+          "plumbing-trade": {
+            "id": "plumbing-trade",
+            "activityId": "plumbing_rough",
+            "type": "TRADE_AVAILABILITY",
+            "label": "Medina plumbing rough-in mobilization",
+            "state": "FORECASTED",
+            "hard": true,
+            "sourceIds": [
+              "src-trades",
+              "src-plumbing"
+            ],
+            "verification": "CORROBORATED"
+          },
+          "hvac-trade": {
+            "id": "hvac-trade",
+            "activityId": "hvac_rough",
+            "type": "TRADE_AVAILABILITY",
+            "label": "Anthony Parker HVAC rough-in mobilization",
+            "state": "FORECASTED",
+            "hard": true,
+            "sourceIds": [
+              "src-trades",
+              "src-hvac"
+            ],
+            "verification": "CORROBORATED"
+          },
+          "hvac-equipment": {
+            "id": "hvac-equipment",
+            "activityId": "hvac_rough",
+            "type": "MATERIAL",
+            "label": "Multi-zone HVAC equipment / route / condensate plan ready",
+            "state": "UNVERIFIED",
+            "hard": true,
+            "sourceIds": [
+              "src-hvac",
+              "src-scope"
+            ],
+            "verification": "CORROBORATED"
+          },
+          "inspection-ready": {
+            "id": "inspection-ready",
+            "activityId": "rough_inspection",
+            "type": "INSPECTION",
+            "label": "All rough trades inspection-ready and inspection slot confirmed",
+            "state": "UNVERIFIED",
+            "hard": true,
+            "sourceIds": [
+              "src-scope"
+            ],
+            "verification": "UNVERIFIED"
+          },
+          "insulation-trade": {
+            "id": "insulation-trade",
+            "activityId": "insulation",
+            "type": "TRADE_AVAILABILITY",
+            "label": "Insulation trade quote / mobilization",
+            "state": "UNVERIFIED",
+            "hard": true,
+            "sourceIds": [
+              "src-dashboard"
+            ],
+            "verification": "UNVERIFIED"
+          },
+          "drywall-trade": {
+            "id": "drywall-trade",
+            "activityId": "drywall_hang",
+            "type": "TRADE_AVAILABILITY",
+            "label": "Drywall crew mobilization",
+            "state": "UNVERIFIED",
+            "hard": true,
+            "sourceIds": [
+              "src-budget",
+              "src-dashboard"
+            ],
+            "verification": "UNVERIFIED"
+          },
+          "paint-trade": {
+            "id": "paint-trade",
+            "activityId": "prime_paint",
+            "type": "TRADE_AVAILABILITY",
+            "label": "Dylan Jasper painting mobilization",
+            "state": "FORECASTED",
+            "hard": true,
+            "sourceIds": [
+              "src-trades",
+              "src-budget"
+            ],
+            "verification": "CORROBORATED"
+          },
+          "finish-carpentry-trade": {
+            "id": "finish-carpentry-trade",
+            "activityId": "finish_carpentry",
+            "type": "TRADE_AVAILABILITY",
+            "label": "Finish carpentry labor mobilization",
+            "state": "FORECASTED",
+            "hard": true,
+            "sourceIds": [
+              "src-budget"
+            ],
+            "verification": "CORROBORATED"
+          },
+          "flooring-trade": {
+            "id": "flooring-trade",
+            "activityId": "flooring",
+            "type": "TRADE_AVAILABILITY",
+            "label": "Flooring labor mobilization",
+            "state": "FORECASTED",
+            "hard": true,
+            "sourceIds": [
+              "src-budget"
+            ],
+            "verification": "CORROBORATED"
+          },
+          "bath-finish-materials": {
+            "id": "bath-finish-materials",
+            "activityId": "half_bath_finish",
+            "type": "MATERIAL",
+            "label": "Vanity/top/fixtures/mirror/accessories ready",
+            "state": "UNVERIFIED",
+            "hard": false,
+            "sourceIds": [
+              "src-scope",
+              "src-plumbing"
+            ],
+            "verification": "UNVERIFIED"
+          },
+          "garage-door-package": {
+            "id": "garage-door-package",
+            "activityId": "garage_doors",
+            "type": "MATERIAL",
+            "label": "Double + single overhead door/openers package ordered and available",
+            "state": "UNVERIFIED",
+            "hard": true,
+            "sourceIds": [
+              "src-scope",
+              "src-budget"
+            ],
+            "verification": "UNVERIFIED"
+          },
+          "final-inspection": {
+            "id": "final-inspection",
+            "activityId": "final_inspection",
+            "type": "INSPECTION",
+            "label": "Final inspection availability",
+            "state": "UNVERIFIED",
+            "hard": true,
+            "sourceIds": [
+              "src-scope"
+            ],
+            "verification": "UNVERIFIED"
+          }
+        },
+        "dependencies": {
+          "d01": {
+            "id": "d01",
+            "active": true,
+            "predecessorId": "masonry",
+            "successorId": "structural_release",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "CMU walls must complete before anchor/elevation release",
+            "sourceIds": [
+              "src-scope",
+              "src-engineering"
+            ]
+          },
+          "d02": {
+            "id": "d02",
+            "active": true,
+            "predecessorId": "structural_release",
+            "successorId": "framing",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Framing bears on released CMU/anchors",
+            "sourceIds": [
+              "src-plans",
+              "src-scope"
+            ]
+          },
+          "d03": {
+            "id": "d03",
+            "active": true,
+            "predecessorId": "structural_reconcile",
+            "successorId": "framing",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "LVL/post condition must be reconciled before framing",
+            "sourceIds": [
+              "src-plans",
+              "src-engineering"
+            ]
+          },
+          "d04": {
+            "id": "d04",
+            "active": true,
+            "predecessorId": "building_delivery",
+            "successorId": "framing",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Framing package must be received before mobilization",
+            "sourceIds": [
+              "src-building-package"
+            ]
+          },
+          "d05": {
+            "id": "d05",
+            "active": true,
+            "predecessorId": "framing",
+            "successorId": "roofing",
+            "type": "START_TO_START",
+            "lagWorkdays": 6,
+            "hard": true,
+            "reason": "Roofing can start after sufficient roof framing release",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d06": {
+            "id": "d06",
+            "active": true,
+            "predecessorId": "roof_procurement",
+            "successorId": "roofing",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Roof package must be released before install",
+            "sourceIds": [
+              "src-roof-action",
+              "src-material-quotes"
+            ]
+          },
+          "d07": {
+            "id": "d07",
+            "active": true,
+            "predecessorId": "framing",
+            "successorId": "opening_protection",
+            "type": "START_TO_START",
+            "lagWorkdays": 5,
+            "hard": true,
+            "reason": "Openings can be weather-protected as framing advances",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d08": {
+            "id": "d08",
+            "active": true,
+            "predecessorId": "roofing",
+            "successorId": "dry_in_release",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Roof completion is required for dry-in release",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d09": {
+            "id": "d09",
+            "active": true,
+            "predecessorId": "opening_protection",
+            "successorId": "dry_in_release",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Openings must be weather-protected for dry-in release",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d10": {
+            "id": "d10",
+            "active": true,
+            "predecessorId": "framing",
+            "successorId": "windows_ext_doors",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Permanent openings follow completed structural framing",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d11": {
+            "id": "d11",
+            "active": true,
+            "predecessorId": "windows_ext_doors",
+            "successorId": "brick_veneer",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Brick detailing requires opening geometry/flashing coordination",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d12": {
+            "id": "d12",
+            "active": true,
+            "predecessorId": "dry_in_release",
+            "successorId": "underslab_mep",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Scope requires framing dried-in before slab sequence",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d13": {
+            "id": "d13",
+            "active": true,
+            "predecessorId": "underslab_mep",
+            "successorId": "slab_prep",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Concealed MEP routing must release slab preparation",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d14": {
+            "id": "d14",
+            "active": true,
+            "predecessorId": "slab_prep",
+            "successorId": "slab",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Prepared/inspected slab base releases pour",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d15": {
+            "id": "d15",
+            "active": true,
+            "predecessorId": "dry_in_release",
+            "successorId": "electrical_rough",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Interior electrical rough follows dry-in",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d16": {
+            "id": "d16",
+            "active": true,
+            "predecessorId": "dry_in_release",
+            "successorId": "plumbing_rough",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Interior plumbing rough follows dry-in",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d17": {
+            "id": "d17",
+            "active": true,
+            "predecessorId": "dry_in_release",
+            "successorId": "hvac_rough",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "HVAC rough follows dry-in",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d18": {
+            "id": "d18",
+            "active": true,
+            "predecessorId": "electrical_rough",
+            "successorId": "rough_inspection",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Electrical rough must complete before combined rough inspection",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d19": {
+            "id": "d19",
+            "active": true,
+            "predecessorId": "plumbing_rough",
+            "successorId": "rough_inspection",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Plumbing rough must complete before combined rough inspection",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d20": {
+            "id": "d20",
+            "active": true,
+            "predecessorId": "hvac_rough",
+            "successorId": "rough_inspection",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "HVAC rough must complete before combined rough inspection",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d21": {
+            "id": "d21",
+            "active": true,
+            "predecessorId": "rough_inspection",
+            "successorId": "insulation",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Rough inspection release required before close-in",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d22": {
+            "id": "d22",
+            "active": true,
+            "predecessorId": "insulation",
+            "successorId": "drywall_hang",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Insulation and air sealing precede drywall",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d23": {
+            "id": "d23",
+            "active": true,
+            "predecessorId": "slab",
+            "successorId": "drywall_hang",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Garage slab must be released before garage drywall close-in",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d24": {
+            "id": "d24",
+            "active": true,
+            "predecessorId": "drywall_hang",
+            "successorId": "drywall_finish",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Board hang precedes tape/finish",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d25": {
+            "id": "d25",
+            "active": true,
+            "predecessorId": "drywall_finish",
+            "successorId": "prime_paint",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Finished drywall releases prime/paint",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d26": {
+            "id": "d26",
+            "active": true,
+            "predecessorId": "prime_paint",
+            "successorId": "finish_carpentry",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Base paint releases finished carpentry",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d27": {
+            "id": "d27",
+            "active": true,
+            "predecessorId": "finish_carpentry",
+            "successorId": "flooring",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Trim/stair substrate coordination precedes flooring closeout",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d28": {
+            "id": "d28",
+            "active": true,
+            "predecessorId": "finish_carpentry",
+            "successorId": "half_bath_finish",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Vanity/trim readiness precedes half-bath finish",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d29": {
+            "id": "d29",
+            "active": true,
+            "predecessorId": "slab",
+            "successorId": "garage_doors",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Finished/cured slab supports garage-door install access",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d30": {
+            "id": "d30",
+            "active": true,
+            "predecessorId": "framing",
+            "successorId": "garage_doors",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Garage-door openings must be structurally complete",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d31": {
+            "id": "d31",
+            "active": true,
+            "predecessorId": "finish_carpentry",
+            "successorId": "electrical_final",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Trim/paint surfaces must be ready for electrical devices/fixtures",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d32": {
+            "id": "d32",
+            "active": true,
+            "predecessorId": "half_bath_finish",
+            "successorId": "plumbing_final",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Bath finish must be ready for plumbing trim/testing",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d33": {
+            "id": "d33",
+            "active": true,
+            "predecessorId": "electrical_final",
+            "successorId": "hvac_startup",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "HVAC startup requires final electrical power/disconnect",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d34": {
+            "id": "d34",
+            "active": true,
+            "predecessorId": "roofing",
+            "successorId": "exterior_closeout",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Roof edge details precede exterior closeout",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d35": {
+            "id": "d35",
+            "active": true,
+            "predecessorId": "brick_veneer",
+            "successorId": "exterior_closeout",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Brick veneer precedes exterior caulk/trim closeout",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d36": {
+            "id": "d36",
+            "active": true,
+            "predecessorId": "garage_doors",
+            "successorId": "exterior_closeout",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Garage doors/openers are part of envelope closeout",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d37": {
+            "id": "d37",
+            "active": true,
+            "predecessorId": "exterior_closeout",
+            "successorId": "final_grading_cleanup",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Exterior work should be substantially complete before final restoration",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d38": {
+            "id": "d38",
+            "active": true,
+            "predecessorId": "slab",
+            "successorId": "final_grading_cleanup",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Concrete operations complete before final grading/cleanup",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d39": {
+            "id": "d39",
+            "active": true,
+            "predecessorId": "flooring",
+            "successorId": "final_inspection",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Interior flooring/trim must be complete for final",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d40": {
+            "id": "d40",
+            "active": true,
+            "predecessorId": "plumbing_final",
+            "successorId": "final_inspection",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Plumbing final must complete before final inspection",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d41": {
+            "id": "d41",
+            "active": true,
+            "predecessorId": "electrical_final",
+            "successorId": "final_inspection",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Electrical final must complete before final inspection",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d42": {
+            "id": "d42",
+            "active": true,
+            "predecessorId": "hvac_startup",
+            "successorId": "final_inspection",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "HVAC startup/testing must complete before final inspection",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d43": {
+            "id": "d43",
+            "active": true,
+            "predecessorId": "final_grading_cleanup",
+            "successorId": "final_inspection",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Closeout site conditions precede final inspection",
+            "sourceIds": [
+              "src-scope"
+            ]
+          },
+          "d44": {
+            "id": "d44",
+            "active": true,
+            "predecessorId": "final_inspection",
+            "successorId": "homeowner_walkthrough",
+            "type": "FINISH_TO_START",
+            "lagWorkdays": 0,
+            "hard": true,
+            "reason": "Final inspection/punch release precedes homeowner closeout",
+            "sourceIds": [
+              "src-scope"
+            ]
+          }
+        },
+        "conflicts": {
+          "conf-plan-engineering": {
+            "id": "conf-plan-engineering",
+            "category": "PLAN_ENGINEERING",
+            "description": "Tradewalk plan set and newer LVL/post engineering must be reconciled before framing commitment.",
+            "activityIds": [
+              "structural_reconcile",
+              "framing"
+            ],
+            "sourceIds": [
+              "src-plans",
+              "src-engineering",
+              "src-dashboard"
+            ],
+            "severity": "HIGH",
+            "status": "OPEN"
+          },
+          "conf-brick-match": {
+            "id": "conf-brick-match",
+            "category": "MATERIAL_SELECTION",
+            "description": "Brick veneer match task is not verified against the existing residence and the Lee material quote requires refresh.",
+            "activityIds": [
+              "brick_veneer"
+            ],
+            "sourceIds": [
+              "src-brick-risk",
+              "src-material-quotes"
+            ],
+            "severity": "HIGH",
+            "status": "OPEN"
+          }
+        },
+        "commercialSignals": {
+          "sig-framing": {
+            "id": "sig-framing",
+            "kind": "ESTIMATE",
+            "activityIds": [
+              "framing"
+            ],
+            "workPackage": "Rough carpentry labor",
+            "amount": 13500.72,
+            "currency": "USD",
+            "selected": true,
+            "scopeCoverage": "FULL",
+            "sourceIds": [
+              "src-budget"
+            ]
+          },
+          "sig-building-material": {
+            "id": "sig-building-material",
+            "kind": "ESTIMATE",
+            "activityIds": [
+              "building_delivery",
+              "framing",
+              "opening_protection"
+            ],
+            "workPackage": "Builders Choice multi-trade building package",
+            "amount": 17692.84,
+            "currency": "USD",
+            "selected": false,
+            "scopeCoverage": "PARTIAL",
+            "sourceIds": [
+              "src-budget",
+              "src-material-quotes"
+            ]
+          },
+          "sig-brick-material": {
+            "id": "sig-brick-material",
+            "kind": "ESTIMATE",
+            "activityIds": [
+              "brick_veneer"
+            ],
+            "workPackage": "Lee Building Products brick/masonry materials - expired quote",
+            "amount": 12409.21,
+            "currency": "USD",
+            "selected": true,
+            "scopeCoverage": "PARTIAL",
+            "sourceIds": [
+              "src-budget",
+              "src-material-quotes"
+            ]
+          },
+          "sig-roof-material": {
+            "id": "sig-roof-material",
+            "kind": "ESTIMATE",
+            "activityIds": [
+              "roof_procurement",
+              "roofing"
+            ],
+            "workPackage": "Builders Choice shingles package - expired quote",
+            "amount": 2936.45,
+            "currency": "USD",
+            "selected": false,
+            "scopeCoverage": "PARTIAL",
+            "sourceIds": [
+              "src-budget",
+              "src-material-quotes"
+            ]
+          },
+          "sig-plumbing": {
+            "id": "sig-plumbing",
+            "kind": "ESTIMATE",
+            "activityIds": [
+              "underslab_mep",
+              "plumbing_rough",
+              "plumbing_final"
+            ],
+            "workPackage": "Medina Plumbing",
+            "amount": 7800,
+            "currency": "USD",
+            "selected": true,
+            "scopeCoverage": "FULL",
+            "sourceIds": [
+              "src-plumbing",
+              "src-budget"
+            ]
+          },
+          "sig-hvac": {
+            "id": "sig-hvac",
+            "kind": "ESTIMATE",
+            "activityIds": [
+              "hvac_rough",
+              "hvac_startup"
+            ],
+            "workPackage": "Multi-zone mini-split",
+            "amount": 7366,
+            "currency": "USD",
+            "selected": true,
+            "scopeCoverage": "FULL",
+            "sourceIds": [
+              "src-hvac"
+            ]
+          },
+          "sig-floor": {
+            "id": "sig-floor",
+            "kind": "ESTIMATE",
+            "activityIds": [
+              "flooring"
+            ],
+            "workPackage": "Flooring labor",
+            "amount": 2700,
+            "currency": "USD",
+            "selected": true,
+            "scopeCoverage": "FULL",
+            "sourceIds": [
+              "src-budget"
+            ]
+          },
+          "sig-paint": {
+            "id": "sig-paint",
+            "kind": "ESTIMATE",
+            "activityIds": [
+              "prime_paint"
+            ],
+            "workPackage": "Painting labor",
+            "amount": 4000,
+            "currency": "USD",
+            "selected": true,
+            "scopeCoverage": "FULL",
+            "sourceIds": [
+              "src-budget",
+              "src-trades"
+            ]
+          }
+        },
+        "workloadSignals": {
+          "work-floor": {
+            "id": "work-floor",
+            "activityIds": [
+              "flooring"
+            ],
+            "dimension": "AREA",
+            "value": 900,
+            "unit": "SF",
+            "label": "Documented flooring labor area",
+            "sourceIds": [
+              "src-budget"
+            ]
+          },
+          "work-floor-joists": {
+            "id": "work-floor-joists",
+            "activityIds": [
+              "framing"
+            ],
+            "dimension": "COUNT",
+            "value": 70,
+            "unit": "pieces",
+            "label": "Approximate 2x12 floor joist package count",
+            "sourceIds": [
+              "src-building-package"
+            ]
+          },
+          "work-roof-rafters": {
+            "id": "work-roof-rafters",
+            "activityIds": [
+              "framing",
+              "roofing"
+            ],
+            "dimension": "COUNT",
+            "value": 97,
+            "unit": "pieces",
+            "label": "Documented roof framing members in material package",
+            "sourceIds": [
+              "src-building-package"
+            ]
+          }
+        },
+        "eventLedger": [
+          {
+            "id": "deboard-v091-baseline-evidence-2026-08-26",
+            "baseRevision": 0,
+            "projectId": "deboard-v091",
+            "type": "BASELINE_EVIDENCE",
+            "occurredAt": "2026-08-26T18:00:00-04:00",
+            "receivedAt": "2026-08-26T18:00:00-04:00",
+            "sourceIds": [
+              "src-plans",
+              "src-scope",
+              "src-engineering",
+              "src-budget",
+              "src-dashboard",
+              "src-building-package",
+              "src-roof-action",
+              "src-masonry-calendar",
+              "src-hvac",
+              "src-plumbing",
+              "src-trades",
+              "src-brick-risk",
+              "src-material-quotes"
+            ],
+            "verification": "PM_CONFIRMED",
+            "impactSeedActivityIds": [
+              "masonry",
+              "structural_release",
+              "structural_reconcile",
+              "building_delivery",
+              "framing",
+              "roof_procurement",
+              "roofing",
+              "opening_protection",
+              "dry_in_release",
+              "windows_ext_doors",
+              "brick_veneer",
+              "underslab_mep",
+              "slab_prep",
+              "slab",
+              "electrical_rough",
+              "plumbing_rough",
+              "hvac_rough",
+              "rough_inspection",
+              "insulation",
+              "drywall_hang",
+              "drywall_finish",
+              "prime_paint",
+              "finish_carpentry",
+              "flooring",
+              "half_bath_finish",
+              "garage_doors",
+              "electrical_final",
+              "plumbing_final",
+              "hvac_startup",
+              "exterior_closeout",
+              "final_grading_cleanup",
+              "final_inspection",
+              "homeowner_walkthrough"
+            ],
+            "mutations": [],
+            "payload": {
+              "purpose": "v0.9.1 truth-semantics baseline",
+              "rule": "Calendar commitments are not actual starts; future deliveries are COMMITTED until field-verified; forecast dates remain distinct from production commitments."
+            },
+            "note": "Bootstrap provenance event. No live system is modified."
+          }
+        ]
+      }
+    }
+  }
+}
