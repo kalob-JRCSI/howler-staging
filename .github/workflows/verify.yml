@@ -30,6 +30,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Prettier diagnostic
+        run: npx prettier src/worker/index.ts
+
       - name: Format check
         run: npm run format:check
 
