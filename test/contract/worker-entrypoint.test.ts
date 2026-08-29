@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { env } from "cloudflare:workers";
 import worker from "../../src/worker/index";
-import { applySchema, baselineMigrationSql, dropAllTables } from "../helpers/d1";
+import {
+  applySchema,
+  baselineMigrationSql,
+  dropAllTables,
+} from "../helpers/d1";
 
 describe("worker entrypoint", () => {
   beforeEach(async () => {
@@ -17,7 +21,7 @@ describe("worker entrypoint", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("application/json");
-    const body = await response.json() as Record<string, unknown>;
+    const body = (await response.json()) as Record<string, unknown>;
     expect(body.service).toBe("howler-scheduling-staging");
     expect(body.version).toBe("0.9.5");
     expect(body.engineCompatibilityVersion).toBe("0.9.4");
@@ -30,6 +34,8 @@ describe("worker entrypoint", () => {
       { ...env, HOWLER_MODE: "shadow", HOWLER_ADMIN_KEY: "test-admin-key" },
     );
     expect(response.status).toBe(404);
-    await expect(response.json()).resolves.toMatchObject({ error: "Not found" });
+    await expect(response.json()).resolves.toMatchObject({
+      error: "Not found",
+    });
   });
 });
