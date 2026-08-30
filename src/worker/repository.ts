@@ -12,9 +12,12 @@ import {
   validateTerminalInvariants,
 } from "../operator/workflow";
 import type {
+  StepState,
   WorkflowProblem,
   WorkflowRunV1,
   WorkflowState,
+  WorkflowStepName,
+  WorkflowStepV1,
 } from "../operator/workflow";
 import type { ResultV1 } from "../operator/result";
 import { sha256Hex, stableStringify } from "./hash";
@@ -75,6 +78,10 @@ export interface UpdateWorkflowRunStateInput {
   resultId?: string;
   markStarted?: boolean;
   markCompleted?: boolean;
+  /** True only while INTERRUPTED and its problem is retryable (design §10.4); false otherwise. */
+  resumable?: boolean;
+  /** Set only on an INTERRUPTED -> RUNNING resume — a new workflow attempt (design §10.3). */
+  incrementAttempt?: boolean;
 }
 
 export interface FinalizeWorkflowRunInput {
@@ -158,6 +165,54 @@ function mapWorkflowRunRow(row: WorkflowRunRow): WorkflowRunV1 {
 
 const WORKFLOW_RUN_COLUMNS =
   "workflow_id, intent_id, intent_hash, project_id, workflow_type, workflow_version, state, current_step, attempt, max_attempts, resumable, interruption_json, blocked_reason_json, failure_json, result_id, created_at, started_at, updated_at, completed_at";
+
+interface WorkflowStepRow {
+  workflow_id: string;
+  step_name: string;
+  ordinal: number;
+  state: StepState;
+  attempt: number;
+  input_hash: string;
+  output_json: string | null;
+  output_hash: string | null;
+  problem_json: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+const WORKFLOW_STEP_COLUMNS =
+  "workflow_id, step_name, ordinal, state, attempt, input_hash, output_json, output_hash, problem_json, started_at, completed_at";
+
+function mapWorkflowStepRow(row: WorkflowStepRow): WorkflowStepV1 {
+  return {
+    schemaVersion: "1",
+    workflowId: row.workflow_id,
+    stepName: row.step_name,
+    ordinal: row.ordinal,
+    state: row.state,
+    attempt: row.attempt,
+    inputHash: row.input_hash,
+    ...(row.output_json !== null
+      ? {
+          output: parseJson(
+            row.output_json,
+            `workflow step ${row.workflow_id}/${row.step_name} output`,
+          ),
+        }
+      : {}),
+    ...(row.output_hash ? { outputHash: row.output_hash } : {}),
+    ...(row.problem_json
+      ? {
+          problem: parseJson(
+            row.problem_json,
+            `workflow step ${row.workflow_id}/${row.step_name} problem`,
+          ) as WorkflowProblem,
+        }
+      : {}),
+    ...(row.started_at ? { startedAt: row.started_at } : {}),
+    ...(row.completed_at ? { completedAt: row.completed_at } : {}),
+  };
+}
 
 /**
  * Canonicalizes IntentV1's own `source` field to its fixed, declared shape (channel and the
@@ -939,6 +994,8 @@ export class D1HowlerRepository {
             interruption_json = ?,
             blocked_reason_json = ?,
             failure_json = ?,
+            resumable = ?,
+            attempt = attempt + ?,
             started_at = CASE WHEN ? THEN COALESCE(started_at, ?) ELSE started_at END,
             updated_at = ?
         WHERE workflow_id = ? AND state = ?`,
@@ -949,6 +1006,8 @@ export class D1HowlerRepository {
         input.interruption ? JSON.stringify(input.interruption) : null,
         input.blockedReason ? JSON.stringify(input.blockedReason) : null,
         input.failure ? JSON.stringify(input.failure) : null,
+        input.resumable ? 1 : 0,
+        input.incrementAttempt ? 1 : 0,
         input.markStarted ? 1 : 0,
         input.now,
         input.now,
@@ -968,7 +1027,18 @@ export class D1HowlerRepository {
    * against the run's row — observes the already-terminal state, not the pre-transition one.
    * Returns false (no SQL executed) if the run is no longer in `expectedState`.
    */
-  async finalizeWorkflowRun(input: FinalizeWorkflowRunInput): Promise<boolean> {
+  /**
+   * Shared preconditions for both `finalizeWorkflowRun` and `finalizeWorkflowRunStep`: validates
+   * the transition/result shape and loads the run, throwing on any genuine invariant violation.
+   * Returns `undefined` (not an error) when the run is simply no longer in `expectedState` — the
+   * ordinary "someone already finalized this, or it moved on" guard case, not a defect.
+   */
+  private async loadAndValidateFinalizeInputs(input: {
+    workflowId: string;
+    expectedState: WorkflowState;
+    terminalState: "SUCCEEDED" | "BLOCKED" | "FAILED";
+    result: ResultV1;
+  }): Promise<WorkflowRunV1 | undefined> {
     if (!isValidTransition(input.expectedState, input.terminalState)) {
       throw new Error(
         `Invalid terminal transition: ${input.expectedState} -> ${input.terminalState}`,
@@ -998,7 +1068,13 @@ export class D1HowlerRepository {
         "Result projectId does not match the workflow's projectId",
       );
     }
-    if (current.state !== input.expectedState) return false;
+    if (current.state !== input.expectedState) return undefined;
+    return current;
+  }
+
+  async finalizeWorkflowRun(input: FinalizeWorkflowRunInput): Promise<boolean> {
+    const current = await this.loadAndValidateFinalizeInputs(input);
+    if (!current) return false;
 
     const statements: D1PreparedStatement[] = [
       this.db
@@ -1047,5 +1123,257 @@ export class D1HowlerRepository {
       throw error;
     }
     return true;
+  }
+
+  /**
+   * Task 13: the same atomic terminal transition + immutable result insert as
+   * `finalizeWorkflowRun`, plus a guarded FINALIZE step completion in the *same* D1 batch — so a
+   * failure completing the FINALIZE step can never leave a committed terminal run/result behind
+   * with FINALIZE still incomplete. `finalizeWorkflowRun` itself is untouched for existing
+   * callers; this is an additive sibling operation, not a replacement.
+   */
+  async finalizeWorkflowRunStep(input: {
+    workflowId: string;
+    expectedState: WorkflowState;
+    terminalState: "SUCCEEDED" | "BLOCKED" | "FAILED";
+    result: ResultV1;
+    stepOutput: unknown;
+    stepOutputHash: string;
+    now: string;
+  }): Promise<boolean> {
+    const current = await this.loadAndValidateFinalizeInputs(input);
+    if (!current) return false;
+
+    const statements: D1PreparedStatement[] = [
+      this.db
+        .prepare(
+          `UPDATE workflow_runs
+          SET state = ?, result_id = ?, updated_at = ?, completed_at = ?
+          WHERE workflow_id = ? AND state = ?`,
+        )
+        .bind(
+          input.terminalState,
+          input.result.resultId,
+          input.now,
+          input.now,
+          input.workflowId,
+          input.expectedState,
+        ),
+      this.db
+        .prepare(
+          `INSERT INTO workflow_results
+          (result_id, workflow_id, intent_id, project_id, status, result_json, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          input.result.resultId,
+          input.result.workflowId,
+          input.result.intentId,
+          input.result.projectId,
+          input.result.status,
+          JSON.stringify(input.result),
+          input.result.createdAt,
+        ),
+      this.db
+        .prepare(
+          `UPDATE workflow_steps
+          SET state = 'SUCCEEDED', output_json = ?, output_hash = ?, completed_at = ?
+          WHERE workflow_id = ? AND step_name = 'FINALIZE'`,
+        )
+        .bind(
+          JSON.stringify(input.stepOutput ?? null),
+          input.stepOutputHash,
+          input.now,
+          input.workflowId,
+        ),
+    ];
+    try {
+      await this.db.batch(statements);
+    } catch (error) {
+      const stillCurrent = await this.loadWorkflowRun(input.workflowId);
+      if (stillCurrent && stillCurrent.state !== input.expectedState) {
+        return false;
+      }
+      throw error;
+    }
+    return true;
+  }
+
+  /** Loads one immutable canonical result (design §9's "load immutable results" primitive). */
+  async loadWorkflowResult(resultId: string): Promise<ResultV1 | undefined> {
+    const row = await this.db
+      .prepare(
+        "SELECT result_json FROM workflow_results WHERE result_id = ? LIMIT 1",
+      )
+      .bind(resultId)
+      .first<{ result_json: string }>();
+    return row
+      ? (parseJson(row.result_json, `workflow result ${resultId}`) as ResultV1)
+      : undefined;
+  }
+
+  async loadWorkflowStep(
+    workflowId: string,
+    stepName: WorkflowStepName,
+  ): Promise<WorkflowStepV1 | undefined> {
+    const row = await this.db
+      .prepare(
+        `SELECT ${WORKFLOW_STEP_COLUMNS} FROM workflow_steps WHERE workflow_id = ? AND step_name = ? LIMIT 1`,
+      )
+      .bind(workflowId, stepName)
+      .first<WorkflowStepRow>();
+    return row ? mapWorkflowStepRow(row) : undefined;
+  }
+
+  async loadWorkflowSteps(workflowId: string): Promise<WorkflowStepV1[]> {
+    const result = await this.db
+      .prepare(
+        `SELECT ${WORKFLOW_STEP_COLUMNS} FROM workflow_steps WHERE workflow_id = ? ORDER BY ordinal ASC`,
+      )
+      .bind(workflowId)
+      .all<WorkflowStepRow>();
+    return result.results.map(mapWorkflowStepRow);
+  }
+
+  /**
+   * Idempotently ensures a step row exists as PENDING (insert-if-absent), then returns whatever is
+   * actually persisted. Verifies a pre-existing row's ordinal/inputHash still match what this call
+   * expects — either drifting between attempts of the same intent is an invariant violation
+   * ("verify ordinal/input-hash definitions on reuse"), not a normal resumability case.
+   */
+  async ensureWorkflowStep(input: {
+    workflowId: string;
+    stepName: WorkflowStepName;
+    ordinal: number;
+    inputHash: string;
+    attempt: number;
+  }): Promise<WorkflowStepV1> {
+    await this.db
+      .prepare(
+        `INSERT INTO workflow_steps
+        (workflow_id, step_name, ordinal, state, attempt, input_hash, started_at, completed_at)
+        VALUES (?, ?, ?, 'PENDING', ?, ?, NULL, NULL)
+        ON CONFLICT(workflow_id, step_name) DO NOTHING`,
+      )
+      .bind(
+        input.workflowId,
+        input.stepName,
+        input.ordinal,
+        input.attempt,
+        input.inputHash,
+      )
+      .run();
+    const row = await this.loadWorkflowStep(input.workflowId, input.stepName);
+    if (!row) {
+      throw new Error(
+        `Failed to ensure workflow step ${input.workflowId}/${input.stepName}`,
+      );
+    }
+    if (row.ordinal !== input.ordinal) {
+      throw new Error(
+        `Workflow step ${input.workflowId}/${input.stepName} ordinal changed between attempts: persisted ${String(row.ordinal)}, expected ${String(input.ordinal)}`,
+      );
+    }
+    if (row.inputHash !== input.inputHash) {
+      throw new Error(
+        `Workflow step ${input.workflowId}/${input.stepName} input hash changed between attempts — replay is unsafe`,
+      );
+    }
+    return row;
+  }
+
+  /**
+   * `attempt` records the *workflow* attempt this step is (re)executing under — the run's own
+   * `attempt` at the moment it entered RUNNING, not this call's retry count. An already-completed
+   * step is never restarted (its persisted output is reused instead), so this only ever advances
+   * `attempt` on a step that is genuinely being (re)run, satisfying "already-completed steps
+   * retain their original attempt."
+   */
+  async startWorkflowStep(input: {
+    workflowId: string;
+    stepName: WorkflowStepName;
+    attempt: number;
+    now: string;
+  }): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE workflow_steps
+        SET state = 'RUNNING', attempt = ?, started_at = COALESCE(started_at, ?)
+        WHERE workflow_id = ? AND step_name = ?`,
+      )
+      .bind(input.attempt, input.now, input.workflowId, input.stepName)
+      .run();
+  }
+
+  async completeWorkflowStep(input: {
+    workflowId: string;
+    stepName: WorkflowStepName;
+    output: unknown;
+    outputHash: string;
+    now: string;
+  }): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE workflow_steps
+        SET state = 'SUCCEEDED', output_json = ?, output_hash = ?, completed_at = ?
+        WHERE workflow_id = ? AND step_name = ?`,
+      )
+      .bind(
+        JSON.stringify(input.output ?? null),
+        input.outputHash,
+        input.now,
+        input.workflowId,
+        input.stepName,
+      )
+      .run();
+  }
+
+  /** Idempotently persists a conditional step as SKIPPED — never simply omitted. */
+  async skipWorkflowStep(input: {
+    workflowId: string;
+    stepName: WorkflowStepName;
+    ordinal: number;
+    inputHash: string;
+    now: string;
+  }): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO workflow_steps
+        (workflow_id, step_name, ordinal, state, attempt, input_hash, started_at, completed_at)
+        VALUES (?, ?, ?, 'SKIPPED', 1, ?, ?, ?)
+        ON CONFLICT(workflow_id, step_name) DO NOTHING`,
+      )
+      .bind(
+        input.workflowId,
+        input.stepName,
+        input.ordinal,
+        input.inputHash,
+        input.now,
+        input.now,
+      )
+      .run();
+  }
+
+  async failWorkflowStep(input: {
+    workflowId: string;
+    stepName: WorkflowStepName;
+    state: "BLOCKED" | "FAILED";
+    problem: WorkflowProblem;
+    now: string;
+  }): Promise<void> {
+    await this.db
+      .prepare(
+        `UPDATE workflow_steps
+        SET state = ?, problem_json = ?, completed_at = ?
+        WHERE workflow_id = ? AND step_name = ?`,
+      )
+      .bind(
+        input.state,
+        JSON.stringify(input.problem),
+        input.now,
+        input.workflowId,
+        input.stepName,
+      )
+      .run();
   }
 }
