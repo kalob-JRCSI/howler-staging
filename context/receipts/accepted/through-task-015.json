@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "1",
+  "id": "through-task-015",
+  "kind": "acceptedReceipt",
+  "throughTask": 15,
+  "baseSha": "877589ec033780144f9cb3627450b32c31789a8c",
+  "acceptedAt": "2026-08-30T00:00:00.000Z",
+  "summary": "Layered on top of through-task-014 (Tasks 1-13, the Context + Skill Fabric, and Task 14, unchanged): Task 15 is now accepted history. The operator intent/workflow/result system is exposed through thin authenticated HTTP adapters: POST /v1/intents, GET /v1/workflows/:workflowId, GET /v1/results/:resultId, POST /v1/workflows/:workflowId/resume. All four require the existing HOWLER_ADMIN_KEY Bearer check before any parsing/persistence; none duplicate workflow/domain logic (a single respondToWorkflowOutcome maps ExecuteWorkflowResult to HTTP status). No browser/admin UI work yet (Task 16A/16B).",
+  "evidence": [
+    {
+      "authority": "ACCEPTED_RECEIPT",
+      "path": "context/receipts/accepted/through-task-014.json",
+      "note": "Prior accepted layer: Tasks 1-13, Context + Skill Fabric, and Task 14, unchanged."
+    },
+    {
+      "authority": "GIT_CANONICAL",
+      "path": "src/worker/index.ts",
+      "note": "Task 15 routes: POST /v1/intents, GET /v1/workflows/:workflowId, GET /v1/results/:resultId, POST /v1/workflows/:workflowId/resume; buildWorkflowExecutorDeps, respondToWorkflowOutcome."
+    },
+    {
+      "authority": "GIT_CANONICAL",
+      "path": "src/worker/repository.ts",
+      "note": "Task 15: loadIntentByWorkflowId, the resume route's canonical-intent reload."
+    },
+    {
+      "authority": "GIT_CANONICAL",
+      "path": "test/contract/operator-routes.test.ts",
+      "note": "Task 15 HTTP contract regression coverage: auth-before-parse, duplicate/replay, resume, concurrent-resume 409, no-stack/secrets, no-duplicated-mutation-logic."
+    },
+    {
+      "authority": "RUNTIME_TRUTH",
+      "path": "wrangler.jsonc",
+      "note": "Staging-only, HOWLER_MODE=shadow, canonical deploy config, unchanged."
+    },
+    {
+      "authority": "GIT_CANONICAL",
+      "path": "sha:877589ec033780144f9cb3627450b32c31789a8c",
+      "note": "Merge commit for PR #8 (Task 15), the accepted baseline tip this receipt describes."
+    }
+  ],
+  "notAccepted": [
+    "Task 16A (staging one-action operator panel) and Task 16B (field PM dashboard pilot) are not represented by this receipt and are not accepted history."
+  ]
+}

@@ -86,6 +86,15 @@
       "summary": "Compact receipt: Task 14 (shadow mutation/resumability) accepted through c484a1c, layered on through-phase0-2."
     },
     {
+      "id": "receipt-through-task-015",
+      "kind": "receipt",
+      "path": "context/receipts/accepted/through-task-015.json",
+      "authority": "ACCEPTED_RECEIPT",
+      "tags": ["accepted-history"],
+      "taskTypes": ["accepted-history-lookup", "implementation-handoff"],
+      "summary": "Compact receipt: Task 15 (operator HTTP contracts) accepted through 877589e, layered on through-task-014."
+    },
+    {
       "id": "spec-foundation-design",
       "kind": "spec",
       "path": "docs/superpowers/specs/2026-08-27-howler-v095-foundation-design.md",
