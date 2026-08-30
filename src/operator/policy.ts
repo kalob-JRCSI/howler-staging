@@ -104,3 +104,25 @@ export function assertPermittedEffect(
   }
   return undefined;
 }
+
+/**
+ * Design §11: "Only EVIDENCE_APPLY_SHADOW can invoke commitShadowTransition." Defense-in-depth
+ * beyond the executor's own switch statement (which only ever reaches COMMIT_SHADOW from the
+ * EVIDENCE_APPLY_SHADOW branch) and beyond the type boundary (`WorkflowExecutorRepository` never
+ * exposes the live/controlled-publish commit method at all) — a third, independent guard so no
+ * future edit can silently route another kind into a domain mutation.
+ */
+export function assertShadowCommitPermitted(
+  kind: IntentKind,
+): WorkflowProblem | undefined {
+  if (kind !== "EVIDENCE_APPLY_SHADOW") {
+    return {
+      code: "POLICY_SHADOW_COMMIT_NOT_PERMITTED",
+      category: "POLICY",
+      message: `Only EVIDENCE_APPLY_SHADOW may invoke a shadow-domain commit; ${kind} may not`,
+      retryable: false,
+      details: { kind },
+    };
+  }
+  return undefined;
+}

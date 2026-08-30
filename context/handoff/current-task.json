@@ -3,10 +3,10 @@
   "kind": "handoffRecord",
   "taskId": "task-14",
   "title": "Task 14: Implement revision-safe shadow mutation and resumability",
-  "status": "BLOCKED",
+  "status": "IN_PROGRESS",
   "baseSha": "6df623cd1e2ff0f0d4c2e877b36dc9380f3033fa",
-  "blocks": [],
-  "summary": "Context activation for Task 14 is complete: the Context + Skill Fabric Phase 0-2 is accepted (see context/receipts/accepted/through-phase0-2.json), and a deterministic Task 14 context pack has been generated and measured. Task 14 itself (EVIDENCE_APPLY_SHADOW execution, concurrent resume leasing, shadow-commit reconciliation, resume HTTP route) has NOT been implemented. This handoff is blocked on explicit authorization to begin implementation.",
+  "blocks": ["task-15"],
+  "summary": "Task 14 (EVIDENCE_APPLY_SHADOW execution, revision-safe shadow-commit persistence, commit-time revision-race and ambiguous-commit-evidence handling, concurrent resume ownership) is implemented and verified on branch codex/v095-task14-context-activation: full repository test suite, context-pack tests, typecheck, lint, format, and build:dry all pass. Not yet merged, not yet accepted history, and not yet deployed. Task 15 (additive operator HTTP contracts, including the resume route) remains blocked until this is reviewed and merged.",
   "relevantPaths": [
     "src/operator/workflow.ts",
     "src/operator/policy.ts",

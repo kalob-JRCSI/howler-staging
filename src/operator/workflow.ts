@@ -3,23 +3,30 @@
 // §8.2 and §10.4. Pure types and deterministic checks only — no persistence, no HTTP, no D1.
 //
 // Task 13 additionally implements the transport-independent executor for read-only and preview
-// intent kinds (design §7.2's canonical ten-step workflow). It accepts a canonical IntentV1 plus
-// injected dependencies only — never Request, Response, HTTP routing, UI, microphone code,
-// bearer-token parsing, or fetch — so any future adapter (HTTP, voice, watch, desktop, glasses,
-// ...) can submit the same intent into it unchanged.
+// intent kinds, and Task 14 extends it with the one revision-safe shadow mutation
+// (EVIDENCE_APPLY_SHADOW's COMMIT_SHADOW step — design §7.2's canonical ten-step workflow, §11).
+// It accepts a canonical IntentV1 plus injected dependencies only — never Request, Response, HTTP
+// routing, UI, microphone code, bearer-token parsing, or fetch — so any future adapter (HTTP,
+// voice, watch, desktop, glasses, ...) can submit the same intent into it unchanged.
 
-import type { ProjectModelV094 } from "../domain/types";
+import type { ProjectEventV094, ProjectModelV094 } from "../domain/types";
 import { forecastAfterEvent } from "../engine/engine";
 import type { ForecastRunV094 } from "../engine/engine";
+import type { OversightReviewV094 } from "../engine/oversight";
 import { analyzeRecovery } from "../engine/solver";
 import type { ForecastSnapshotV094 } from "../engine/solver";
 import type { PredictionOutcomeV094 } from "../engine/learning";
+import { RevisionConflictError } from "../engine/storage";
 import { projectHealth } from "../worker/health";
 import type { ProjectHealthV094 } from "../worker/health";
 import { sha256Hex } from "../worker/hash";
 import { validateIntent } from "./intent";
 import type { IntentV1, ProjectEventInput } from "./intent";
-import { assertPermittedEffect, assertStagingShadowPolicy } from "./policy";
+import {
+  assertPermittedEffect,
+  assertShadowCommitPermitted,
+  assertStagingShadowPolicy,
+} from "./policy";
 import type { StagingShadowContext } from "./policy";
 import { buildResult } from "./result";
 import type {
@@ -27,6 +34,7 @@ import type {
   RecoveryResponseV094,
   ResultOutput,
   ResultV1,
+  ShadowTransitionResponseV094,
 } from "./result";
 
 export type WorkflowState =
@@ -248,6 +256,15 @@ export class TransientRepositoryReadError extends Error {
 }
 
 /**
+ * Thrown by COMMIT_SHADOW's reconciliation check when domain evidence is partially or
+ * inconsistently present — e.g. a committed event whose matching forecast snapshot or oversight
+ * review cannot be found or does not cross-reference it. Design §10.4: this is terminal,
+ * non-resumable `FAILED/COMMIT_STATE_AMBIGUOUS`; an operator investigates rather than the
+ * workflow risking a duplicate mutation by guessing.
+ */
+export class CommitStateAmbiguousError extends Error {}
+
+/**
  * Retries one repository read up to MAX_READ_ATTEMPTS total calls (the initial call plus two
  * retries — design §10.3), synchronously, with no timer and no sleep. Only
  * `TransientRepositoryReadError` is retried; anything else propagates on its first occurrence.
@@ -382,6 +399,28 @@ export interface WorkflowExecutorRepository {
     snapshotId: string,
   ): Promise<ForecastSnapshotV094 | undefined>;
   loadPredictionOutcomes(projectId?: string): Promise<PredictionOutcomeV094[]>;
+  /**
+   * Task 14: the only operator domain mutation. Deliberately the sole write method this
+   * structural interface exposes — the live/controlled-publish commit variant is never part of
+   * this type, so no operator code can reach it even by accident (design §11's "no IntentKind
+   * maps to" that variant, enforced at the type boundary).
+   */
+  commitShadowTransition(transition: {
+    expectedRevision: number;
+    modelAfterEvent: ProjectModelV094;
+    event: ProjectEventV094;
+    candidate: ForecastSnapshotV094;
+    oversight: OversightReviewV094;
+  }): Promise<void>;
+  /** COMMIT_SHADOW reconciliation: has this exact event already been committed by a prior attempt? */
+  loadEventById(
+    projectId: string,
+    eventId: string,
+  ): Promise<ProjectEventV094 | undefined>;
+  /** COMMIT_SHADOW reconciliation: the paired oversight-review half of the same evidence check. */
+  loadOversightReviewById(
+    reviewId: string,
+  ): Promise<OversightReviewV094 | undefined>;
 }
 
 export interface WorkflowExecutorDeps {
@@ -397,18 +436,6 @@ export type ExecuteWorkflowResult =
   | { outcome: "INTERRUPTED"; run: WorkflowRunV1 }
   | { outcome: "CONCURRENT_RESUME_LOST"; run: WorkflowRunV1 }
   | { outcome: "COMPLETED"; run: WorkflowRunV1; result: ResultV1 };
-
-/** Task 13 implements only the read-only and preview kinds; EVIDENCE_APPLY_SHADOW is Task 14. */
-export type SupportedIntentKind = Exclude<
-  IntentV1["kind"],
-  "EVIDENCE_APPLY_SHADOW"
->;
-
-export function isSupportedIntentKind(
-  kind: IntentV1["kind"],
-): kind is SupportedIntentKind {
-  return kind !== "EVIDENCE_APPLY_SHADOW";
-}
 
 function nowString(deps: WorkflowExecutorDeps): string {
   return deps.clock.now().toISOString();
@@ -653,6 +680,113 @@ async function markStepTerminal(
     problem,
     now,
   });
+}
+
+interface CommitShadowOutput {
+  persisted: true;
+  alreadyCommitted: boolean;
+}
+
+/**
+ * COMMIT_SHADOW cannot use `runStep`'s generic reuse semantics: a non-SUCCEEDED persisted row does
+ * NOT mean "safe to recompute", because the underlying atomic D1 write may already have landed
+ * durably even though this step's own ledger row never recorded it (e.g. a crash between the
+ * commit and `completeWorkflowStep`). Design §10.3/§10.4: "A domain commit is never blindly
+ * retried. Resume first checks the stable event ID, project revision, forecast ID/version, and
+ * oversight record to determine whether the atomic batch committed." A found-but-inconsistent
+ * event (matching forecast/oversight missing or cross-referenced wrongly) throws
+ * `CommitStateAmbiguousError` rather than guessing; a genuinely absent event is safe to commit.
+ */
+async function runCommitShadowStep(
+  deps: WorkflowExecutorDeps,
+  run: WorkflowRunV1,
+  intent: IntentV1,
+  event: ProjectEventInput,
+  forecastRun: ForecastRunV094,
+): Promise<CommitShadowOutput> {
+  const stepName: WorkflowStepName = "COMMIT_SHADOW";
+  const { candidate, oversight, modelAfterEvent } = forecastRun;
+  const inputHash = await sha256Hex({
+    eventId: event.id,
+    candidateId: candidate.id,
+    oversightId: oversight.id,
+  });
+  const persisted = await deps.repo.loadWorkflowStep(run.workflowId, stepName);
+  if (persisted) {
+    assertOrdinalNotDrifted(run.workflowId, stepName, persisted.ordinal);
+    if (persisted.state === "SUCCEEDED") {
+      if (persisted.inputHash !== inputHash) {
+        throw new Error(
+          `Workflow step ${run.workflowId}/${stepName} input hash changed between attempts — replay is unsafe`,
+        );
+      }
+      return persisted.output as CommitShadowOutput;
+    }
+  } else {
+    await deps.repo.ensureWorkflowStep({
+      workflowId: run.workflowId,
+      stepName,
+      ordinal: WORKFLOW_STEP_ORDINALS[stepName],
+      inputHash,
+      attempt: run.attempt,
+    });
+  }
+  await deps.repo.startWorkflowStep({
+    workflowId: run.workflowId,
+    stepName,
+    attempt: run.attempt,
+    now: nowString(deps),
+  });
+
+  const existingEvent = await readWithRetry(() =>
+    deps.repo.loadEventById(intent.projectId, event.id),
+  );
+
+  let output: CommitShadowOutput;
+  if (existingEvent) {
+    const existingCandidate = await readWithRetry(() =>
+      deps.repo.loadForecastById(intent.projectId, candidate.id),
+    );
+    const existingOversight = await readWithRetry(() =>
+      deps.repo.loadOversightReviewById(oversight.id),
+    );
+    if (
+      !existingCandidate ||
+      !existingOversight ||
+      existingOversight.candidateSnapshotId !== existingCandidate.id
+    ) {
+      throw new CommitStateAmbiguousError(
+        `Workflow ${run.workflowId}: event ${event.id} already exists but its forecast/oversight evidence is missing or inconsistent`,
+      );
+    }
+    output = { persisted: true, alreadyCommitted: true };
+  } else {
+    const policyProblem = assertShadowCommitPermitted(intent.kind);
+    if (policyProblem) {
+      // Unreachable in practice — runSteps only ever calls this from the EVIDENCE_APPLY_SHADOW
+      // branch — but kept as a genuine runtime assertion, not a comment, per this codebase's
+      // established defense-in-depth pattern.
+      throw new Error(policyProblem.message);
+    }
+    await deps.repo.commitShadowTransition({
+      expectedRevision: event.baseRevision,
+      modelAfterEvent,
+      event: event as unknown as ProjectEventV094,
+      candidate,
+      oversight,
+    });
+    output = { persisted: true, alreadyCommitted: false };
+  }
+
+  const outputHash = await sha256Hex(output);
+  await deps.repo.completeWorkflowStep({
+    workflowId: run.workflowId,
+    stepName,
+    output,
+    outputHash,
+    now: nowString(deps),
+  });
+  return output;
 }
 
 /**
@@ -1323,6 +1457,226 @@ async function runEvidencePreview(
   return { outcome: "COMPLETED", run: finalRun, result };
 }
 
+/**
+ * Task 14: the only intent kind that mutates domain state. Shares LOAD_PROJECT / CHECK_REVISION /
+ * PREPARE / EXECUTE_ENGINE with `runEvidencePreview` (design §7.2's steps 4-7 are identical for
+ * both evidence kinds), then adds COMMIT_SHADOW — persisting the event/candidate/oversight
+ * atomically via `runCommitShadowStep`, only when oversight did not BLOCK (design §11: "An
+ * oversight BLOCK yields a blocked result and no domain mutation").
+ */
+async function runEvidenceApplyShadow(
+  deps: WorkflowExecutorDeps,
+  intent: IntentV1,
+  run: WorkflowRunV1,
+): Promise<ExecuteWorkflowResult> {
+  if (intent.payload.type !== "EVIDENCE") {
+    throw new Error(
+      `EVIDENCE_APPLY_SHADOW intent ${intent.intentId} does not carry an EVIDENCE payload`,
+    );
+  }
+  const event: ProjectEventInput = intent.payload.event;
+
+  let loaded: LoadedProject;
+  try {
+    loaded = await runStep(
+      deps,
+      run.workflowId,
+      run.attempt,
+      "LOAD_PROJECT",
+      { projectId: intent.projectId },
+      async (): Promise<LoadedProject> => {
+        const model = await readWithRetry(() =>
+          deps.repo.loadProject(intent.projectId),
+        );
+        if (!model)
+          return { model: undefined, latest: undefined, published: undefined };
+        const [latest, published] = await Promise.all([
+          readWithRetry(() => deps.repo.loadLatestForecast(intent.projectId)),
+          readWithRetry(() =>
+            deps.repo.loadLatestPublishedForecast(intent.projectId),
+          ),
+        ]);
+        return { model, latest, published };
+      },
+    );
+  } catch (error) {
+    if (error instanceof ReadRetryExhaustedError) {
+      return interruptRun(deps, intent, run, "LOAD_PROJECT");
+    }
+    throw error;
+  }
+
+  const { model, latest, published } = loaded;
+  if (!model) {
+    return failRun(
+      deps,
+      intent,
+      run,
+      projectNotFoundProblem(intent.projectId),
+      "CHECK_REVISION",
+    );
+  }
+  const currentRevision = model.revision;
+
+  const revisionCheck = await runStep(
+    deps,
+    run.workflowId,
+    run.attempt,
+    "CHECK_REVISION",
+    { expected: intent.expectedProjectRevision, current: currentRevision },
+    () => ({ ok: intent.expectedProjectRevision === currentRevision }),
+  );
+
+  if (!revisionCheck.ok) {
+    const problem: WorkflowProblem = {
+      code: "REVISION_CONFLICT",
+      category: "REVISION",
+      message: `Expected project revision ${String(intent.expectedProjectRevision)} does not match current revision ${String(currentRevision)}`,
+      retryable: false,
+      details: {
+        currentRevision,
+        expectedRevision: intent.expectedProjectRevision,
+      },
+    };
+    return blockRun(deps, intent, run, problem, "PREPARE", currentRevision);
+  }
+
+  const preparedEvent = await runStep(
+    deps,
+    run.workflowId,
+    run.attempt,
+    "PREPARE",
+    { event },
+    () => event,
+  );
+
+  const comparisonBaseline = latest ?? published;
+  const nextForecastVersion = (latest?.version ?? 0) + 1;
+
+  const engineOutput = await runStep(
+    deps,
+    run.workflowId,
+    run.attempt,
+    "EXECUTE_ENGINE",
+    {
+      revision: currentRevision,
+      latestVersion: latest?.version ?? null,
+      event: preparedEvent,
+    },
+    () => {
+      const forecastRun: ForecastRunV094 = forecastAfterEvent(
+        model,
+        preparedEvent as unknown as Parameters<typeof forecastAfterEvent>[1],
+        preparedEvent.receivedAt,
+        nextForecastVersion,
+        comparisonBaseline,
+      );
+      return { forecastRun };
+    },
+  );
+  const { forecastRun } = engineOutput;
+
+  if (forecastRun.oversight.decision === "BLOCK") {
+    const problem: WorkflowProblem = {
+      code: "OVERSIGHT_BLOCKED",
+      category: "POLICY",
+      message: `Oversight review ${forecastRun.oversight.id} blocked this shadow evidence application`,
+      retryable: false,
+      details: { oversightId: forecastRun.oversight.id },
+    };
+    return blockRun(
+      deps,
+      intent,
+      run,
+      problem,
+      "COMMIT_SHADOW",
+      currentRevision,
+    );
+  }
+
+  try {
+    await runCommitShadowStep(deps, run, intent, preparedEvent, forecastRun);
+  } catch (error) {
+    if (error instanceof ReadRetryExhaustedError) {
+      return interruptRun(deps, intent, run, "COMMIT_SHADOW");
+    }
+    if (error instanceof RevisionConflictError) {
+      const problem: WorkflowProblem = {
+        code: "REVISION_CONFLICT",
+        category: "REVISION",
+        message: `Project ${intent.projectId} revision changed concurrently before the shadow commit could apply`,
+        retryable: false,
+        details: { currentRevision },
+      };
+      return blockRun(
+        deps,
+        intent,
+        run,
+        problem,
+        "COMMIT_SHADOW",
+        currentRevision,
+      );
+    }
+    if (error instanceof CommitStateAmbiguousError) {
+      const problem: WorkflowProblem = {
+        code: "COMMIT_STATE_AMBIGUOUS",
+        category: "INTERNAL",
+        message: error.message,
+        retryable: false,
+      };
+      return failRun(deps, intent, run, problem, "COMMIT_SHADOW");
+    }
+    throw error;
+  }
+
+  const nextRevision = currentRevision + 1;
+  const data: ShadowTransitionResponseV094 = {
+    applied: true,
+    stagingOnly: true,
+    projectRevision: nextRevision,
+    candidate: forecastRun.candidate,
+    delta: forecastRun.candidate.delta ?? null,
+    recoveryAnalysis: forecastRun.candidate.recoveryAnalysis,
+    supersededSources: forecastRun.candidate.supersededSources,
+    impactActivityIds: forecastRun.candidate.impactActivityIds,
+    oversight: forecastRun.oversight,
+    publicationGate: {
+      forecastAllowed: true,
+      commitmentEligible: forecastRun.commitmentEligible,
+      publishable: false,
+      mode: "shadow",
+    },
+  };
+  const output: ResultOutput = { type: "SHADOW_TRANSITION", data };
+
+  const now = nowString(deps);
+  const result = await runStep(
+    deps,
+    run.workflowId,
+    run.attempt,
+    "BUILD_RESULT",
+    { output },
+    () =>
+      buildResult({
+        resultId: deps.resultIds.next(),
+        intentId: intent.intentId,
+        workflowId: run.workflowId,
+        projectId: intent.projectId,
+        intentKind: intent.kind,
+        status: "SUCCEEDED",
+        persisted: true,
+        projectRevisionBefore: currentRevision,
+        projectRevisionAfter: nextRevision,
+        forecastVersion: forecastRun.candidate.version,
+        output,
+        oversight: forecastRun.oversight,
+        createdAt: now,
+      }),
+  );
+  const finalRun = await finalizeStep(deps, run, result);
+  return { outcome: "COMPLETED", run: finalRun, result };
+}
+
 async function runSteps(
   deps: WorkflowExecutorDeps,
   intent: IntentV1,
@@ -1386,11 +1740,7 @@ async function runSteps(
     case "EVIDENCE_PREVIEW":
       return runEvidencePreview(deps, intent, run);
     case "EVIDENCE_APPLY_SHADOW":
-      // Defense-in-depth only: executeWorkflow rejects EVIDENCE_APPLY_SHADOW before any claim or
-      // persistence occurs, so this branch should be unreachable.
-      throw new Error(
-        "EVIDENCE_APPLY_SHADOW execution is Task 14 scope and is not implemented by this executor",
-      );
+      return runEvidenceApplyShadow(deps, intent, run);
   }
 }
 
@@ -1470,14 +1820,6 @@ export async function executeWorkflow(
   deps: WorkflowExecutorDeps,
   intent: IntentV1,
 ): Promise<ExecuteWorkflowResult> {
-  if (!isSupportedIntentKind(intent.kind)) {
-    // Rejected before any claim/persistence — zero intents, runs, steps, or results for an
-    // unsupported kind (Task 14 scope).
-    throw new Error(
-      `EVIDENCE_APPLY_SHADOW execution is Task 14 scope and is not implemented by this executor`,
-    );
-  }
-
   const claim = await deps.repo.claimIntent({
     intent,
     workflowId: deps.workflowIds.next(),

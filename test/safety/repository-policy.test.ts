@@ -128,6 +128,21 @@ describe("repository policy: no manual bundle-shuttle scripts", () => {
   });
 });
 
+describe("repository policy: operator code never references the live-publish commit path", () => {
+  const operatorSources = import.meta.glob<string>("../../src/operator/*.ts", {
+    eager: true,
+    import: "default",
+    query: "?raw",
+  });
+
+  it("no src/operator source references commitForecastTransition (design §11/Task 14)", () => {
+    expect(Object.keys(operatorSources).length).toBeGreaterThan(0);
+    for (const [path, source] of Object.entries(operatorSources)) {
+      expect(source, path).not.toMatch(/commitForecastTransition/);
+    }
+  });
+});
+
 describe("repository policy: CI concurrency is isolated from deployment", () => {
   it("ci.yml declares its own concurrency group distinct from deploy.yml", () => {
     expect(ciWorkflow).toMatch(/concurrency:/);

@@ -3,13 +3,13 @@
   "taskType": "implementation-handoff",
   "baseline": {
     "fileCount": 11,
-    "chars": 95776,
-    "approxTokens": 23944
+    "chars": 95878,
+    "approxTokens": 23970
   },
   "routed": {
     "fileCount": 9,
-    "chars": 92286,
-    "approxTokens": 23072
+    "chars": 92388,
+    "approxTokens": 23097
   },
   "measuredReductionPercent": 3.6
 }
