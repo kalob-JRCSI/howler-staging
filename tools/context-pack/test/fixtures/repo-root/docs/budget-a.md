@@ -1,0 +1,1 @@
+This fixture document exists solely to have a large, deterministic character count for budget-pruning tests. It is not meant to be read for its content, only measured. Repeating filler text: alpha bravo charlie delta echo foxtrot golf hotel.

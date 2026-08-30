@@ -1,0 +1,107 @@
+{
+  "schemaVersion": "1",
+  "entries": [
+    {
+      "id": "skill-cloudflare-safety",
+      "kind": "skill",
+      "path": ".agents/skills/howler-cloudflare-safety/SKILL.md",
+      "authority": "ACCEPTED_RECEIPT",
+      "tags": ["safety", "cloudflare", "deploy"],
+      "taskTypes": ["cloudflare-safety"],
+      "mandatory": true,
+      "summary": "Mandatory Cloudflare/D1/deploy safety invariants for Howler."
+    },
+    {
+      "id": "runtime-wrangler-config",
+      "kind": "spec",
+      "path": "wrangler.jsonc",
+      "authority": "RUNTIME_TRUTH",
+      "tags": ["safety", "deploy", "staging"],
+      "taskTypes": ["cloudflare-safety"],
+      "mandatory": true,
+      "summary": "Canonical deploy config: worker name, HOWLER_MODE, D1 binding."
+    },
+    {
+      "id": "handoff-current",
+      "kind": "handoff",
+      "path": "context/handoff/current-task.json",
+      "authority": "ACCEPTED_RECEIPT",
+      "tags": ["handoff"],
+      "taskTypes": [],
+      "alwaysInclude": true,
+      "summary": "The current in-progress Howler task and what it blocks."
+    },
+    {
+      "id": "skill-task-handoff",
+      "kind": "skill",
+      "path": ".agents/skills/howler-task-handoff/SKILL.md",
+      "authority": "ACCEPTED_RECEIPT",
+      "tags": ["handoff"],
+      "taskTypes": ["implementation-handoff"],
+      "summary": "Procedure for picking up or closing out the current handoff."
+    },
+    {
+      "id": "skill-accepted-history",
+      "kind": "skill",
+      "path": ".agents/skills/howler-accepted-history/SKILL.md",
+      "authority": "ACCEPTED_RECEIPT",
+      "tags": ["accepted-history"],
+      "taskTypes": ["accepted-history-lookup"],
+      "summary": "Procedure for looking up accepted history without re-auditing it."
+    },
+    {
+      "id": "skill-parity-review",
+      "kind": "skill",
+      "path": ".agents/skills/howler-parity-review/SKILL.md",
+      "authority": "ACCEPTED_RECEIPT",
+      "tags": ["parity"],
+      "taskTypes": ["parity-review"],
+      "summary": "Procedure for verifying v0.9.4 engine/domain parity is preserved."
+    },
+    {
+      "id": "receipt-through-task-013",
+      "kind": "receipt",
+      "path": "context/receipts/accepted/through-task-013.json",
+      "authority": "ACCEPTED_RECEIPT",
+      "tags": ["accepted-history"],
+      "taskTypes": ["accepted-history-lookup", "implementation-handoff"],
+      "summary": "Compact receipt: Tasks 1-13 accepted through 2ffc939."
+    },
+    {
+      "id": "spec-foundation-design",
+      "kind": "spec",
+      "path": "docs/superpowers/specs/2026-08-27-howler-v095-foundation-design.md",
+      "authority": "GIT_CANONICAL",
+      "tags": ["spec", "design"],
+      "taskTypes": ["implementation-handoff", "parity-review"],
+      "summary": "Normative design doc for schemas/behavior/workflow."
+    },
+    {
+      "id": "plan-foundation",
+      "kind": "plan",
+      "path": "docs/superpowers/plans/2026-08-27-howler-v095-foundation-plan.md",
+      "authority": "GIT_CANONICAL",
+      "tags": ["plan"],
+      "taskTypes": ["implementation-handoff"],
+      "summary": "Governing task-by-task plan for the foundation recovery."
+    },
+    {
+      "id": "test-dir-parity",
+      "kind": "test-dir",
+      "path": "test/parity/",
+      "authority": "GIT_CANONICAL",
+      "tags": ["parity", "fixtures"],
+      "taskTypes": ["parity-review"],
+      "summary": "Golden v0.9.4 parity tests and fixtures."
+    },
+    {
+      "id": "migration-0002",
+      "kind": "spec",
+      "path": "migrations/0002_operator_runs.sql",
+      "authority": "RUNTIME_TRUTH",
+      "tags": ["schema", "operator"],
+      "taskTypes": ["implementation-handoff"],
+      "summary": "Additive operator persistence schema."
+    }
+  ]
+}

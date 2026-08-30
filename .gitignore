@@ -1,3 +1,4 @@
 .worktrees/
 dist/
 node_modules/
+tools/context-pack/.local/
