@@ -3,7 +3,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildPack } from "../src/pack.js";
 import type { PackInput } from "../src/schemas.js";
-import { TEST_CATALOG } from "./fixtures/test-catalog.js";
+import {
+  MISSING_MANDATORY_CATALOG,
+  TEST_CATALOG,
+} from "./fixtures/test-catalog.js";
 
 const FIXTURE_REPO_ROOT = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -80,6 +83,30 @@ describe("measurement", () => {
       output.measurement.acceptedHistoryRefsSelected,
     ).toBeGreaterThanOrEqual(1);
     expect(output.measurement.mandatoryIncluded).toBe(true);
+  });
+
+  it("mandatoryIncluded is false end-to-end when a mandatory catalog entry is missing from disk (Finding 2 regression)", async () => {
+    const output = await buildPack(
+      { taskOrStage: "s1", taskType: "anything" },
+      {
+        repoRoot: FIXTURE_REPO_ROOT,
+        catalog: MISSING_MANDATORY_CATALOG,
+        now: FIXED_NOW,
+      },
+    );
+    // The pack does not silently select the missing mandatory entry.
+    expect(
+      output.selected.some((f) => f.id === "fixture-mandatory-missing"),
+    ).toBe(false);
+    // The omission explicitly identifies it as missing.
+    const omission = output.omitted.find(
+      (o) => o.id === "fixture-mandatory-missing",
+    );
+    expect(omission).toBeDefined();
+    expect(omission?.reason).toMatch(/missing/i);
+    expect(omission?.mandatory).toBe(true);
+    // Measurement reflects the true state: mandatory material is NOT included.
+    expect(output.measurement.mandatoryIncluded).toBe(false);
   });
 });
 

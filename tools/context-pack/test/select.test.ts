@@ -207,6 +207,61 @@ describe("progressive skill disclosure", () => {
       selected.some((f) => f.id === "fixture-skill-handoff-ref-checklist"),
     ).toBe(false);
   });
+
+  it("omits the reference with an explicit budget reason when remaining budget is insufficient (Finding 3 regression)", () => {
+    // Main selection (mandatory + handoff + receipt + spec + skill) totals 426 chars; the
+    // checklist reference is 107 chars. A budget of 450 leaves only 24 chars remaining — not
+    // enough for the reference, which must therefore be omitted for a budget reason, not
+    // silently included regardless of budget.
+    const { selected, omitted } = selectForPack(
+      TEST_CATALOG,
+      input({
+        taskType: "implementation-handoff",
+        tags: ["handoff-checklist"],
+        budgetChars: 450,
+      }),
+      FIXTURE_REPO_ROOT,
+    );
+    expect(selected.some((f) => f.id === "fixture-skill-handoff")).toBe(true);
+    expect(
+      selected.some((f) => f.id === "fixture-skill-handoff-ref-checklist"),
+    ).toBe(false);
+    const prunedRef = omitted.find(
+      (o) => o.id === "fixture-skill-handoff-ref-checklist",
+    );
+    expect(prunedRef).toBeDefined();
+    expect(prunedRef?.reason).toMatch(/budget/i);
+  });
+
+  it("still includes the reference when remaining budget is sufficient", () => {
+    const { selected } = selectForPack(
+      TEST_CATALOG,
+      input({
+        taskType: "implementation-handoff",
+        tags: ["handoff-checklist"],
+        budgetChars: 600,
+      }),
+      FIXTURE_REPO_ROOT,
+    );
+    expect(
+      selected.some((f) => f.id === "fixture-skill-handoff-ref-checklist"),
+    ).toBe(true);
+  });
+
+  it("mandatory material is exempt from the budget even when a reference is pruned", () => {
+    const { selected } = selectForPack(
+      TEST_CATALOG,
+      input({
+        taskType: "implementation-handoff",
+        tags: ["handoff-checklist"],
+        budgetChars: 450,
+      }),
+      FIXTURE_REPO_ROOT,
+    );
+    expect(
+      selected.some((f) => f.id === "fixture-mandatory-safety" && f.mandatory),
+    ).toBe(true);
+  });
 });
 
 describe("stale source behavior", () => {

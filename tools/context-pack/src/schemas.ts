@@ -120,6 +120,8 @@ export interface OmittedEntry {
   id: string;
   path: string;
   reason: string;
+  /** True if the omitted catalog entry was mandatory — measurement must never mask this. */
+  mandatory: boolean;
 }
 
 export interface PackMeasurement {

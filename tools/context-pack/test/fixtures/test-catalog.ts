@@ -142,6 +142,28 @@ export const LOW_PRIORITY_BUDGET_B: CatalogEntry = {
   summary: "Fixture budget-test doc B (large).",
 };
 
+export const MANDATORY_MISSING: CatalogEntry = {
+  id: "fixture-mandatory-missing",
+  kind: "spec",
+  path: "safety/does-not-exist-invariants.md",
+  authority: "RUNTIME_TRUTH",
+  tags: ["safety"],
+  taskTypes: [],
+  mandatory: true,
+  summary:
+    "Fixture mandatory entry whose target does not exist on disk (Finding 2 regression).",
+};
+
+/**
+ * Isolated from TEST_CATALOG on purpose: this catalog's own mandatory entry is deliberately
+ * missing, which would otherwise poison every other test's `mandatoryIncluded`/recall assertions
+ * if mixed into the shared fixture catalog.
+ */
+export const MISSING_MANDATORY_CATALOG: CatalogFile = {
+  schemaVersion: "1",
+  entries: [MANDATORY_MISSING],
+};
+
 export const TEST_CATALOG: CatalogFile = {
   schemaVersion: "1",
   entries: [

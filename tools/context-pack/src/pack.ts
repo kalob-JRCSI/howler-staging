@@ -26,7 +26,7 @@ export async function buildPack(
       .filter((entry) => ACCEPTED_HISTORY_KINDS.has(entry.kind))
       .map((entry) => entry.id),
   );
-  const measurement = measurePack(selected, acceptedHistoryIds);
+  const measurement = measurePack(selected, omitted, acceptedHistoryIds);
 
   const canonical: CanonicalPack = {
     schemaVersion: "1",

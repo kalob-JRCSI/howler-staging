@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { approxTokenCount, measurePack } from "../src/measure.js";
-import type { SelectedFile } from "../src/schemas.js";
+import type { OmittedEntry, SelectedFile } from "../src/schemas.js";
 
 describe("approxTokenCount", () => {
   it("is a deterministic ceil(chars/4) approximation, not a real tokenizer", () => {
@@ -33,18 +33,52 @@ describe("measurePack", () => {
       file({ id: "a", chars: 100 }),
       file({ id: "b", chars: 50 }),
     ];
-    const measurement = measurePack(selected, new Set(["a"]));
+    const measurement = measurePack(selected, [], new Set(["a"]));
     expect(measurement.selectedFileCount).toBe(2);
     expect(measurement.selectedChars).toBe(150);
     expect(measurement.approxTokens).toBe(38);
     expect(measurement.acceptedHistoryRefsSelected).toBe(1);
   });
 
-  it("mandatoryIncluded is false only if a mandatory entry is present but missing", () => {
+  it("mandatoryIncluded is true for a healthy catalog with no omissions", () => {
     const ok = measurePack(
       [file({ id: "m", mandatory: true, missing: false })],
+      [],
       new Set(),
     );
     expect(ok.mandatoryIncluded).toBe(true);
+  });
+
+  it("mandatoryIncluded is false when a mandatory entry is missing from disk (moved to omitted, never in selected)", () => {
+    // Regression: a missing mandatory entry never appears in `selected` at all (select.ts moves
+    // it to `omitted`), so checking only `selected` for missing mandatory entries is a vacuous
+    // truth that silently false-passes. measurePack must also inspect `omitted`.
+    const omitted: OmittedEntry[] = [
+      {
+        id: "m",
+        path: "does/not/exist.md",
+        reason: "missing: catalog entry's target does not exist on disk",
+        mandatory: true,
+      },
+    ];
+    const measurement = measurePack([], omitted, new Set());
+    expect(measurement.mandatoryIncluded).toBe(false);
+  });
+
+  it("mandatoryIncluded stays true when only non-mandatory entries are omitted", () => {
+    const omitted: OmittedEntry[] = [
+      {
+        id: "n",
+        path: "some/optional.md",
+        reason: "budget pruned",
+        mandatory: false,
+      },
+    ];
+    const measurement = measurePack(
+      [file({ id: "m", mandatory: true, missing: false })],
+      omitted,
+      new Set(),
+    );
+    expect(measurement.mandatoryIncluded).toBe(true);
   });
 });

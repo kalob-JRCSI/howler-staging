@@ -92,6 +92,7 @@ function buildSelectedFile(
         id: entry.id,
         path: entry.path,
         reason: "missing: catalog entry's target does not exist on disk",
+        mandatory: entry.mandatory === true,
       },
     };
   }
@@ -126,6 +127,7 @@ function buildReferenceFile(
         id: reference.id,
         path: reference.path,
         reason: "missing: referenced support file does not exist on disk",
+        mandatory: false,
       },
     };
   }
@@ -185,6 +187,7 @@ export function selectForPack(
         id: item.file.id,
         path: item.file.path,
         reason: `budget pruned: would exceed budgetChars=${String(input.budgetChars)}`,
+        mandatory: false,
       });
       continue;
     }
@@ -195,6 +198,8 @@ export function selectForPack(
   // Progressive disclosure: expand references only for entries that actually made it into the
   // final selection (post-budget), and only the references whose own tags match the request —
   // catalog metadata -> the skill -> its references, never references without their skill.
+  // Optional tier-6 references respect whatever budget remains after tiers 1-5 — only mandatory
+  // (tier 1) material is exempt from the budget; a reference is not.
   const requestTags = input.tags ?? [];
   const selectedIds = new Set(selected.map((f) => f.id));
   for (const entry of candidates) {
@@ -204,9 +209,22 @@ export function selectForPack(
       const built = buildReferenceFile(reference, entry.id, repoRoot);
       if (built.omitted) {
         omitted.push(built.omitted);
-      } else {
-        selected.push(built.file);
+        continue;
       }
+      if (
+        input.budgetChars !== undefined &&
+        runningChars + built.file.chars > input.budgetChars
+      ) {
+        omitted.push({
+          id: built.file.id,
+          path: built.file.path,
+          reason: `budget pruned: would exceed budgetChars=${String(input.budgetChars)}`,
+          mandatory: false,
+        });
+        continue;
+      }
+      selected.push(built.file);
+      runningChars += built.file.chars;
     }
   }
 

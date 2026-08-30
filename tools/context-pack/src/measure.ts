@@ -2,7 +2,12 @@
 // module — only counts of what a given pack actually selected, computed now.
 
 import { entryExistsOnDisk, readEntryContent } from "./catalog.js";
-import type { CatalogFile, PackMeasurement, SelectedFile } from "./schemas.js";
+import type {
+  CatalogFile,
+  OmittedEntry,
+  PackMeasurement,
+  SelectedFile,
+} from "./schemas.js";
 
 export interface BaselineMeasurement {
   fileCount: number;
@@ -40,8 +45,14 @@ export function approxTokenCount(chars: number): number {
   return Math.ceil(chars / 4);
 }
 
+/**
+ * `mandatoryIncluded` must be false whenever ANY mandatory catalog entry the request matched is
+ * unavailable — including one moved to `omitted` (e.g. missing from disk), which `selected` alone
+ * can never reveal, since a missing mandatory entry is never present in `selected` at all.
+ */
 export function measurePack(
   selected: SelectedFile[],
+  omitted: OmittedEntry[],
   acceptedHistoryEntryIds: ReadonlySet<string>,
 ): PackMeasurement {
   const selectedChars = selected.reduce((sum, file) => sum + file.chars, 0);
@@ -52,8 +63,8 @@ export function measurePack(
     acceptedHistoryRefsSelected: selected.filter((file) =>
       acceptedHistoryEntryIds.has(file.id),
     ).length,
-    mandatoryIncluded: selected.every(
-      (file) => !file.mandatory || !file.missing,
-    ),
+    mandatoryIncluded:
+      selected.every((file) => !file.mandatory || !file.missing) &&
+      omitted.every((entry) => !entry.mandatory),
   };
 }
