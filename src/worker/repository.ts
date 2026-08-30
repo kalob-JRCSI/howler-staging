@@ -6,7 +6,7 @@ import type {
   LearningRecordV094,
   PredictionOutcomeV094,
 } from "../engine/learning";
-import type { IntentV1 } from "../operator/intent";
+import type { IntentV1, ProjectEventInput } from "../operator/intent";
 import {
   isValidTransition,
   validateTerminalInvariants,
@@ -160,10 +160,69 @@ const WORKFLOW_RUN_COLUMNS =
   "workflow_id, intent_id, intent_hash, project_id, workflow_type, workflow_version, state, current_step, attempt, max_attempts, resumable, interruption_json, blocked_reason_json, failure_json, result_id, created_at, started_at, updated_at, completed_at";
 
 /**
+ * Canonicalizes IntentV1's own `source` field to its fixed, declared shape (channel and the
+ * optional operatorLabel audit tag). Guards against an extra property — e.g. a smuggled
+ * credential — riding along on the same nested object reference, since `validateIntent` checks
+ * `source.channel` but returns the original object rather than reconstructing it.
+ */
+function toCanonicalSource(
+  source: IntentV1["source"],
+): Record<string, unknown> {
+  return {
+    channel: source.channel,
+    ...(source.operatorLabel !== undefined
+      ? { operatorLabel: source.operatorLabel }
+      : {}),
+  };
+}
+
+/**
+ * Canonicalizes a v0.9.4 evidence event's own top-level fields — the shape IntentV1's payload
+ * union declares for `event` — guarding the same nested-object-reference risk one level deeper.
+ * `event.payload` and `event.mutations` are the pre-existing, intentionally free-form v0.9.4
+ * domain contract (not part of IntentV1 itself) and are passed through unchanged.
+ */
+function toCanonicalEvent(event: ProjectEventInput): Record<string, unknown> {
+  return {
+    id: event.id,
+    baseRevision: event.baseRevision,
+    projectId: event.projectId,
+    type: event.type,
+    occurredAt: event.occurredAt,
+    receivedAt: event.receivedAt,
+    sourceIds: event.sourceIds,
+    verification: event.verification,
+    impactSeedActivityIds: event.impactSeedActivityIds,
+    mutations: event.mutations,
+    payload: event.payload,
+    ...(event.note !== undefined ? { note: event.note } : {}),
+    ...(event.causeCode !== undefined ? { causeCode: event.causeCode } : {}),
+    ...(event.causeVerification !== undefined
+      ? { causeVerification: event.causeVerification }
+      : {}),
+  };
+}
+
+/**
+ * Canonicalizes IntentV1's own `payload` discriminated union to its fixed, declared shape,
+ * guarding the same nested-object-reference risk as `toCanonicalSource`.
+ */
+function toCanonicalPayload(
+  payload: IntentV1["payload"],
+): Record<string, unknown> {
+  if (payload.type === "EVIDENCE") {
+    return { type: "EVIDENCE", event: toCanonicalEvent(payload.event) };
+  }
+  return { type: "QUERY" };
+}
+
+/**
  * Explicit allow-list of IntentV1's own fields, matching the interface exactly. Guards against
  * hashing/persisting anything beyond it — e.g. an Authorization header or admin key accidentally
  * spread onto the same object reference upstream — regardless of what extra enumerable
- * properties the runtime object might carry beyond its declared type.
+ * properties the runtime object might carry beyond its declared type. `source` and `payload` are
+ * themselves nested objects that `validateIntent` checks but does not reconstruct, so they are
+ * canonicalized recursively rather than passed through by reference.
  */
 function toCanonicalIntentRecord(intent: IntentV1): Record<string, unknown> {
   return {
@@ -175,8 +234,8 @@ function toCanonicalIntentRecord(intent: IntentV1): Record<string, unknown> {
     requestedEffect: intent.requestedEffect,
     expectedProjectRevision: intent.expectedProjectRevision,
     submittedAt: intent.submittedAt,
-    source: intent.source,
-    payload: intent.payload,
+    source: toCanonicalSource(intent.source),
+    payload: toCanonicalPayload(intent.payload),
   };
 }
 

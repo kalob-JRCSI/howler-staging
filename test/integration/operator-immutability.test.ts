@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { env } from "cloudflare:workers";
 import {
   applySchema,
@@ -601,37 +601,79 @@ describe("finalizeWorkflowRun: atomic, relationally consistent terminal transiti
     expect(run?.state).toBe("FAILED");
   });
 
-  it("a genuine concurrent double-finalize race: the loser returns false rather than rejecting", async () => {
+  it("a genuine concurrent double-finalize race, deterministically barriered at the pre-finalization read: the loser returns false rather than rejecting", async () => {
     const repo = new D1HowlerRepository(env.HOWLER_DB);
     const intent = await claimSampleIntent(repo);
     await advanceToRunning(repo);
 
-    // Both calls read/act on the same expectedState ("RUNNING") and race to finalize the same
-    // workflowId concurrently — this exercises the actual catch-path race classification, not the
-    // pre-check (which only catches a *stale* expectedState read before either call starts).
-    const [a, b] = await Promise.all([
-      repo.finalizeWorkflowRun({
-        workflowId: "wf-1",
-        expectedState: "RUNNING",
-        terminalState: "SUCCEEDED",
-        result: sampleResult({
-          intentId: intent.intentId,
-          resultId: "result-A",
-        }),
-        now: NOW,
-      }),
-      repo.finalizeWorkflowRun({
-        workflowId: "wf-1",
-        expectedState: "RUNNING",
-        terminalState: "SUCCEEDED",
-        result: sampleResult({
-          intentId: intent.intentId,
-          resultId: "result-B",
-        }),
-        now: NOW,
-      }),
-    ]);
+    // finalizeWorkflowRun's very first async step is `await this.loadWorkflowRun(workflowId)` —
+    // the pre-finalization read whose result feeds the `current.state !== expectedState`
+    // pre-check. Without a barrier, nothing guarantees both concurrent calls actually reach that
+    // read before either one completes its full write — one caller's entire finalize could race
+    // ahead and commit before the other's pre-check even runs, in which case the loser would
+    // return false via the early pre-check and never touch the catch-path fix at all. Barriering
+    // this call forces both contenders to observe the same pre-finalization state ("RUNNING")
+    // before either is released to proceed, so the test deterministically exercises the
+    // catch-path race recovery every run, not just incidentally.
+    const originalLoadWorkflowRun = repo.loadWorkflowRun.bind(repo);
+    const observedPreCheckStates: (string | undefined)[] = [];
+    let arrivals = 0;
+    let releaseBarrier: () => void = () => {};
+    const barrier = new Promise<void>((resolve) => {
+      releaseBarrier = resolve;
+    });
+    const loadWorkflowRunSpy = vi
+      .spyOn(repo, "loadWorkflowRun")
+      .mockImplementation(async (workflowId: string) => {
+        const result = await originalLoadWorkflowRun(workflowId);
+        arrivals += 1;
+        if (arrivals <= 2) {
+          // Only the first two arrivals are the two callers' pre-finalization reads; barrier
+          // exactly those two, then let everything after (including a loser's later catch-path
+          // re-check) through immediately — the barrier promise is already resolved by then.
+          observedPreCheckStates.push(result?.state);
+          if (arrivals === 2) releaseBarrier();
+          await barrier;
+        }
+        return result;
+      });
 
+    let a: boolean;
+    let b: boolean;
+    try {
+      [a, b] = await Promise.all([
+        repo.finalizeWorkflowRun({
+          workflowId: "wf-1",
+          expectedState: "RUNNING",
+          terminalState: "SUCCEEDED",
+          result: sampleResult({
+            intentId: intent.intentId,
+            resultId: "result-A",
+          }),
+          now: NOW,
+        }),
+        repo.finalizeWorkflowRun({
+          workflowId: "wf-1",
+          expectedState: "RUNNING",
+          terminalState: "SUCCEEDED",
+          result: sampleResult({
+            intentId: intent.intentId,
+            resultId: "result-B",
+          }),
+          now: NOW,
+        }),
+      ]);
+    } finally {
+      loadWorkflowRunSpy.mockRestore();
+    }
+
+    // Both contenders observed the same pre-finalization state before either was released —
+    // proof the barrier actually held both at the intended point rather than letting one race
+    // ahead of the other's read.
+    expect(observedPreCheckStates).toEqual(["RUNNING", "RUNNING"]);
+
+    // Exactly one true, one false; neither call rejected (Promise.all itself proves that — a
+    // rejection here would fail this test with an uncaught error instead).
     expect([a, b].sort()).toEqual([false, true]);
 
     const resultRow = await env.HOWLER_DB.prepare(
@@ -641,6 +683,11 @@ describe("finalizeWorkflowRun: atomic, relationally consistent terminal transiti
 
     const run = await repo.loadWorkflowRun("wf-1");
     expect(run?.state).toBe("SUCCEEDED");
+
+    // The losing caller must have gone through finalizeWorkflowRun's catch-path re-check (a third
+    // loadWorkflowRun call beyond the two barriered pre-checks), not merely returned false from
+    // some other guard — proving the intended race-recovery path was the one actually exercised.
+    expect(arrivals).toBe(3);
   });
 });
 

@@ -10,7 +10,7 @@ import {
 import { D1HowlerRepository } from "../../src/worker/repository";
 import { sha256Hex, stableStringify } from "../../src/worker/hash";
 import { validateIntent } from "../../src/operator/intent";
-import type { IntentV1 } from "../../src/operator/intent";
+import type { IntentV1, ProjectEventInput } from "../../src/operator/intent";
 
 const operatorMigrationSources = import.meta.glob<string>(
   "../../migrations/*.sql",
@@ -159,6 +159,136 @@ describe("claimIntent: derives identity/hash from the trusted IntentV1 boundary"
       .first<{ request_json: string }>();
     expect(row?.request_json ?? "").not.toMatch(
       /super-secret-admin-key|Authorization|HOWLER_ADMIN_KEY/i,
+    );
+  });
+});
+
+function validEvent(
+  overrides: Partial<ProjectEventInput> = {},
+): ProjectEventInput {
+  return {
+    id: "event-1",
+    baseRevision: 1,
+    projectId: "deboard-v091",
+    type: "FIELD_UPDATE",
+    occurredAt: NOW,
+    receivedAt: NOW,
+    sourceIds: ["src-1"],
+    verification: "PM_CONFIRMED",
+    impactSeedActivityIds: ["masonry"],
+    mutations: [],
+    payload: {},
+    ...overrides,
+  };
+}
+
+describe("claimIntent: canonicalizes nested source/payload structures (no unknown-field leak)", () => {
+  it("a field smuggled onto source does not survive into the persisted canonical JSON or the hash", async () => {
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    const clean = validIntent();
+    const contaminated = validIntent({
+      source: {
+        ...clean.source,
+        HOWLER_ADMIN_KEY: "super-secret-in-source",
+      } as IntentV1["source"],
+    });
+
+    await repo.claimIntent({
+      intent: contaminated,
+      workflowId: "wf-1",
+      maxAttempts: 3,
+      now: NOW,
+    });
+    const row = await env.HOWLER_DB.prepare(
+      "SELECT request_json, request_hash FROM operator_intents WHERE intent_id = ?",
+    )
+      .bind(clean.intentId)
+      .first<{ request_json: string; request_hash: string }>();
+
+    expect(row?.request_json ?? "").not.toMatch(/super-secret-in-source/);
+    const persistedRequest = JSON.parse(row?.request_json ?? "{}") as Record<
+      string,
+      unknown
+    >;
+    expect(persistedRequest.source).toEqual({
+      channel: "API",
+    });
+    // The hash is over the canonicalized (filtered) record, not the raw contaminated object, so
+    // it matches a second claim built from the clean intent alone.
+    expect(row?.request_hash).toBe(
+      await sha256Hex(JSON.parse(row?.request_json ?? "null")),
+    );
+  });
+
+  it("a field smuggled onto a QUERY payload does not survive into the persisted canonical JSON or the hash", async () => {
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    const clean = validIntent();
+    const contaminated = validIntent({
+      payload: {
+        ...clean.payload,
+        HOWLER_ADMIN_KEY: "super-secret-in-payload",
+      } as unknown as IntentV1["payload"],
+    });
+
+    await repo.claimIntent({
+      intent: contaminated,
+      workflowId: "wf-1",
+      maxAttempts: 3,
+      now: NOW,
+    });
+    const row = await env.HOWLER_DB.prepare(
+      "SELECT request_json, request_hash FROM operator_intents WHERE intent_id = ?",
+    )
+      .bind(clean.intentId)
+      .first<{ request_json: string; request_hash: string }>();
+
+    expect(row?.request_json ?? "").not.toMatch(/super-secret-in-payload/);
+    const persistedRequest = JSON.parse(row?.request_json ?? "{}") as Record<
+      string,
+      unknown
+    >;
+    expect(persistedRequest.payload).toEqual({
+      type: "QUERY",
+    });
+    expect(row?.request_hash).toBe(
+      await sha256Hex(JSON.parse(row?.request_json ?? "null")),
+    );
+  });
+
+  it("a field smuggled onto a nested EVIDENCE payload.event does not survive into the persisted canonical JSON or the hash", async () => {
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    const event = validEvent({
+      // @ts-expect-error deliberately smuggling an unknown field onto the event object
+      HOWLER_ADMIN_KEY: "super-secret-in-event",
+    });
+    const intent = validIntent({
+      kind: "EVIDENCE_PREVIEW",
+      requestedEffect: "PREVIEW",
+      expectedProjectRevision: 1,
+      payload: { type: "EVIDENCE", event },
+    });
+
+    await repo.claimIntent({
+      intent,
+      workflowId: "wf-1",
+      maxAttempts: 3,
+      now: NOW,
+    });
+    const row = await env.HOWLER_DB.prepare(
+      "SELECT request_json, request_hash FROM operator_intents WHERE intent_id = ?",
+    )
+      .bind(intent.intentId)
+      .first<{ request_json: string; request_hash: string }>();
+
+    expect(row?.request_json ?? "").not.toMatch(/super-secret-in-event/);
+    const persistedRequest = JSON.parse(row?.request_json ?? "{}") as {
+      payload: { event: unknown };
+    };
+    const persistedEvent = persistedRequest.payload.event;
+    expect(persistedEvent).not.toHaveProperty("HOWLER_ADMIN_KEY");
+    expect(persistedEvent).toEqual(validEvent());
+    expect(row?.request_hash).toBe(
+      await sha256Hex(JSON.parse(row?.request_json ?? "null")),
     );
   });
 });
