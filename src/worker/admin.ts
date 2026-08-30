@@ -247,6 +247,16 @@ interface SubmissionIdentity {
   submittedAt: string;
 }
 
+/**
+ * The sessionStorage-persisted record backing one submission's identity lifecycle. PENDING means
+ * no definitive server response has arrived yet for this identity (safe to retry-reuse);
+ * RESOLVED means one has (a later Run with the same form content mints a new identity instead).
+ */
+interface StoredSubmission extends SubmissionIdentity {
+  formSignature: string;
+  state: "PENDING" | "RESOLVED";
+}
+
 interface FormFields {
   kind: string;
   projectId: string;
@@ -262,6 +272,7 @@ export interface OperatorPanelTestHooks {
     nowIso: () => string,
     makeId: () => string,
   ) => SubmissionIdentity;
+  markSubmissionResolved?: (storage: OperatorPanelStorage) => void;
   buildIntentPayload?: (
     fields: FormFields,
     identity: SubmissionIdentity,
@@ -300,12 +311,26 @@ export function operatorPanelClientScript(
     return JSON.stringify(fields);
   }
 
+  function readStoredSubmission(
+    storage: OperatorPanelStorage,
+  ): StoredSubmission | null {
+    const storedRaw = storage.getItem(PENDING_KEY);
+    if (!storedRaw) return null;
+    try {
+      return JSON.parse(storedRaw) as StoredSubmission;
+    } catch {
+      return null;
+    }
+  }
+
   /**
-   * Design: "Do NOT generate a new logical intent merely because fetch failed / response was
-   * lost / user presses retry for the same submission. A NEW deliberate user action may create
-   * new identifiers." Keyed purely by whether the form's own content changed since the last
-   * submission attempt -- unchanged content always reuses the stored identity, regardless of why
-   * the operator is submitting again.
+   * Design: two distinct states. While PENDING (no definitive server response has been received
+   * yet for this identity), "Do NOT generate a new logical intent merely because fetch failed /
+   * response was lost / user presses retry for the same submission" -- unchanged form content
+   * always reuses the stored identity, regardless of why the operator is submitting again. Once
+   * `markSubmissionResolved` has run (a definitive server response arrived), the identity is
+   * RESOLVED: a later deliberate Run with the identical form content is a NEW logical action, not
+   * a replay of the resolved one, and mints a fresh identity even though the signature matches.
    */
   function resolveSubmissionIdentity(
     formSignature: string,
@@ -313,30 +338,24 @@ export function operatorPanelClientScript(
     nowIso: () => string,
     makeId: () => string,
   ): SubmissionIdentity {
-    const storedRaw = storage.getItem(PENDING_KEY);
-    if (storedRaw) {
-      let stored: (SubmissionIdentity & { formSignature: string }) | null =
-        null;
-      try {
-        stored = JSON.parse(storedRaw) as SubmissionIdentity & {
-          formSignature: string;
-        };
-      } catch {
-        stored = null;
-      }
-      if (stored && stored.formSignature === formSignature) {
-        return {
-          intentId: stored.intentId,
-          idempotencyKey: stored.idempotencyKey,
-          submittedAt: stored.submittedAt,
-        };
-      }
+    const stored = readStoredSubmission(storage);
+    if (
+      stored &&
+      stored.state === "PENDING" &&
+      stored.formSignature === formSignature
+    ) {
+      return {
+        intentId: stored.intentId,
+        idempotencyKey: stored.idempotencyKey,
+        submittedAt: stored.submittedAt,
+      };
     }
-    const fresh = {
+    const fresh: StoredSubmission = {
       formSignature,
       intentId: makeId(),
       idempotencyKey: makeId(),
       submittedAt: nowIso(),
+      state: "PENDING",
     };
     storage.setItem(PENDING_KEY, JSON.stringify(fresh));
     return {
@@ -344,6 +363,24 @@ export function operatorPanelClientScript(
       idempotencyKey: fresh.idempotencyKey,
       submittedAt: fresh.submittedAt,
     };
+  }
+
+  /**
+   * Marks whatever identity is currently pending as RESOLVED: called the moment a submission
+   * receives ANY definitive server response (the fetch settled -- regardless of HTTP status or
+   * whether the body was a recognized run/result shape). A 202 INTERRUPTED response counts as
+   * definitive too: it is known server acceptance of the intent/workflow, and the correct way to
+   * continue it is the explicit Resume workflow action, not a coincidental identity match on a
+   * later Run click. A network exception never reaches this function, so a lost/ambiguous
+   * response leaves the identity PENDING and still retryable. A no-op if nothing is pending.
+   */
+  function markSubmissionResolved(storage: OperatorPanelStorage): void {
+    const stored = readStoredSubmission(storage);
+    if (!stored) return;
+    storage.setItem(
+      PENDING_KEY,
+      JSON.stringify({ ...stored, state: "RESOLVED" }),
+    );
   }
 
   function buildIntentPayload(
@@ -408,6 +445,7 @@ export function operatorPanelClientScript(
   if (testHooks) {
     testHooks.computeFormSignature = computeFormSignature;
     testHooks.resolveSubmissionIdentity = resolveSubmissionIdentity;
+    testHooks.markSubmissionResolved = markSubmissionResolved;
     testHooks.buildIntentPayload = buildIntentPayload;
     testHooks.mapOutcomeToDisplay = mapOutcomeToDisplay;
   }
@@ -527,6 +565,11 @@ export function operatorPanelClientScript(
   ): Promise<void> {
     return promise
       .then((result) => {
+        // The fetch settled with a definitive server response (any HTTP status, any body shape)
+        // -- this identity is resolved regardless of whether the response was one we can render.
+        // A network exception never reaches this branch, so a lost/ambiguous response (the
+        // `.catch` below) leaves the identity PENDING and still safely retryable.
+        markSubmissionResolved(sessionStorage);
         const body = result.body as
           { run?: unknown; result?: unknown; error?: string } | undefined;
         if (body && (body.run ?? body.result)) {

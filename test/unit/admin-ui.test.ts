@@ -294,6 +294,67 @@ describe("pure logic: computeFormSignature / resolveSubmissionIdentity", () => {
   });
 });
 
+describe("pending/resolved submission identity lifecycle", () => {
+  function makeIdSequence(): () => string {
+    let counter = 0;
+    return () => {
+      counter += 1;
+      return `id-${String(counter)}`;
+    };
+  }
+
+  it("an unresolved (PENDING) identity is reused across repeated calls with the same signature", () => {
+    const { testHooks } = mount(() => jsonResponse(202, {}));
+    const storage = makeStorage();
+    const signature = testHooks.computeFormSignature(formFields());
+    const first = testHooks.resolveSubmissionIdentity(
+      signature,
+      storage,
+      () => "t1",
+      makeIdSequence(),
+    );
+    // Never resolved -- a genuine retry of the same unresolved submission.
+    const retry = testHooks.resolveSubmissionIdentity(
+      signature,
+      storage,
+      () => "t2-must-not-win",
+      makeIdSequence(),
+    );
+    expect(retry).toEqual(first);
+  });
+
+  it("marking the identity resolved makes the next call with the SAME signature mint a brand-new identity", () => {
+    const { testHooks } = mount(() => jsonResponse(202, {}));
+    const storage = makeStorage();
+    const signature = testHooks.computeFormSignature(formFields());
+    const makeId = makeIdSequence(); // one shared sequence across both mints
+    const first = testHooks.resolveSubmissionIdentity(
+      signature,
+      storage,
+      () => "t1",
+      makeId,
+    );
+    testHooks.markSubmissionResolved(storage);
+    const second = testHooks.resolveSubmissionIdentity(
+      signature,
+      storage,
+      () => "t2",
+      makeId,
+    );
+    expect(second.intentId).not.toBe(first.intentId);
+    expect(second.idempotencyKey).not.toBe(first.idempotencyKey);
+    expect(second).not.toEqual(first);
+  });
+
+  it("markSubmissionResolved is a harmless no-op when nothing is pending", () => {
+    const { testHooks } = mount(() => jsonResponse(202, {}));
+    const storage = makeStorage();
+    expect(() => {
+      testHooks.markSubmissionResolved(storage);
+    }).not.toThrow();
+  });
+});
+
 describe("pure logic: buildIntentPayload", () => {
   it("builds a QUERY payload with expectedProjectRevision null for a read-only kind", () => {
     const { testHooks } = mount(() => jsonResponse(202, {}));
@@ -469,6 +530,73 @@ describe("DOM wiring: submit", () => {
     expect(fetchCalls).toHaveLength(1);
     expect(els.runButton.disabled).toBe(true);
   });
+
+  it("a repeated network failure keeps reusing the same identity indefinitely (never resolved)", async () => {
+    const { els, fetchCalls } = mount(() => ({
+      reject: new Error("network error"),
+    }));
+    els.form.trigger("submit", { preventDefault: () => undefined });
+    await flushMicrotasks();
+    els.form.trigger("submit", { preventDefault: () => undefined });
+    await flushMicrotasks();
+    els.form.trigger("submit", { preventDefault: () => undefined });
+    await flushMicrotasks();
+
+    const bodies = fetchCalls.map(
+      (c) => JSON.parse(c.body ?? "{}") as Record<string, unknown>,
+    );
+    expect(bodies).toHaveLength(3);
+    expect(bodies[1]?.intentId).toBe(bodies[0]?.intentId);
+    expect(bodies[2]?.intentId).toBe(bodies[0]?.intentId);
+  });
+
+  it("a deliberate second Run with IDENTICAL form values after a completed (terminal) response mints a brand-new intent -- it is never treated as a replay", async () => {
+    const { els, fetchCalls } = mount(() =>
+      jsonResponse(201, {
+        run: { intentId: "i1", workflowId: "w1", state: "SUCCEEDED" },
+        result: { resultId: "r1", status: "SUCCEEDED", persisted: false },
+      }),
+    );
+    els.form.trigger("submit", { preventDefault: () => undefined });
+    await flushMicrotasks();
+    // Deliberate second click, form completely unchanged.
+    els.form.trigger("submit", { preventDefault: () => undefined });
+    await flushMicrotasks();
+
+    const bodies = fetchCalls.map(
+      (c) => JSON.parse(c.body ?? "{}") as Record<string, unknown>,
+    );
+    expect(bodies).toHaveLength(2);
+    // Identity is proven distinct by the (test-controlled, monotonically distinct) intentId and
+    // idempotencyKey; submittedAt uses the real system clock in this DOM-wired path and can
+    // legitimately collide at millisecond resolution between two synchronous test steps.
+    expect(bodies[1]?.intentId).not.toBe(bodies[0]?.intentId);
+    expect(bodies[1]?.idempotencyKey).not.toBe(bodies[0]?.idempotencyKey);
+  });
+
+  it("a BLOCKED/409 terminal response also resolves the identity (not just SUCCEEDED)", async () => {
+    const { els, fetchCalls } = mount(() =>
+      jsonResponse(409, {
+        run: { intentId: "i1", workflowId: "w1", state: "BLOCKED" },
+        result: {
+          resultId: "r1",
+          status: "BLOCKED",
+          persisted: false,
+          problem: { code: "REVISION_CONFLICT" },
+        },
+      }),
+    );
+    els.form.trigger("submit", { preventDefault: () => undefined });
+    await flushMicrotasks();
+    els.form.trigger("submit", { preventDefault: () => undefined });
+    await flushMicrotasks();
+
+    const bodies = fetchCalls.map(
+      (c) => JSON.parse(c.body ?? "{}") as Record<string, unknown>,
+    );
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]?.intentId).not.toBe(bodies[0]?.intentId);
+  });
 });
 
 describe("DOM wiring: resume", () => {
@@ -505,6 +633,26 @@ describe("DOM wiring: resume", () => {
     const { els, fetchCalls } = mount(() => jsonResponse(202, {}));
     els.resumeButton.trigger("click");
     expect(fetchCalls).toHaveLength(0);
+  });
+
+  it("202 INTERRUPTED is known server acceptance: it resolves the identity too, so a subsequent deliberate Run (not Resume) with identical form values mints a new intent rather than silently reusing the interrupted one", async () => {
+    const { els, fetchCalls } = mount(() =>
+      jsonResponse(202, {
+        run: { intentId: "i1", workflowId: "wf-123", state: "INTERRUPTED" },
+      }),
+    );
+    els.form.trigger("submit", { preventDefault: () => undefined });
+    await flushMicrotasks();
+    // Deliberate second Run (not Resume), identical form values.
+    els.form.trigger("submit", { preventDefault: () => undefined });
+    await flushMicrotasks();
+
+    const intentCalls = fetchCalls.filter((c) => c.path === "/v1/intents");
+    expect(intentCalls).toHaveLength(2);
+    const bodies = intentCalls.map(
+      (c) => JSON.parse(c.body ?? "{}") as Record<string, unknown>,
+    );
+    expect(bodies[1]?.intentId).not.toBe(bodies[0]?.intentId);
   });
 });
 
