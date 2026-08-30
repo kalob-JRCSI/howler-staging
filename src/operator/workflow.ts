@@ -1419,6 +1419,14 @@ async function advanceToRunning(
   deps: WorkflowExecutorDeps,
   run: WorkflowRunV1,
 ): Promise<{ run: WorkflowRunV1 } | { lostRace: true }> {
+  // A claim can only observe RUNNING already, at entry, if some other call performed the
+  // transition — a brand-new claim always starts RECEIVED, and this function's own loop is what
+  // ever moves a run *to* RUNNING. Observing RUNNING here therefore never grants execution
+  // ownership by itself: this caller did not win any CAS to get here, so it must not proceed into
+  // runSteps any more than a caller that loses the loop's own CAS below does.
+  if (run.state === "RUNNING") {
+    return { lostRace: true };
+  }
   let current = run;
   while (current.state !== "RUNNING") {
     const nextState = LINEAR_PATH_TO_RUNNING[current.state];

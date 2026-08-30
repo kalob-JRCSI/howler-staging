@@ -647,3 +647,62 @@ describe("BUILD_RESULT executes on terminal non-success paths too", () => {
     expect(byName.FINALIZE?.state).toBe("SUCCEEDED");
   });
 });
+
+describe("a duplicate caller merely observing an already-RUNNING run gains no execution ownership", () => {
+  it("Caller B's claim resolving after Caller A has already transitioned INTERRUPTED -> RUNNING must not enter runSteps", async () => {
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    await seedProject(repo);
+    const intent = queryIntent();
+
+    // Set up: an interrupted run, exactly as "Caller A" would have left it after losing its own
+    // read budget once.
+    const interrupted = await executeWorkflow(
+      buildDeps(flakyRepo(repo, Infinity, [])),
+      intent,
+    );
+    expect(interrupted.outcome).toBe("INTERRUPTED");
+    if (interrupted.outcome !== "INTERRUPTED") return;
+
+    // Simulate "Caller A wins the CAS and is now RUNNING, mid-execution" deterministically, by
+    // performing exactly that one transition directly through the repository — bypassing the
+    // executor entirely, so nothing here calls into runSteps. This reproduces "Caller B's
+    // duplicate claim resolves only after the run is RUNNING" without any timing race: the run is
+    // already, unambiguously RUNNING before Caller B (the executor call below) ever starts.
+    const casApplied = await repo.updateWorkflowRunState({
+      workflowId: interrupted.run.workflowId,
+      expectedState: "INTERRUPTED",
+      nextState: "RUNNING",
+      now: NOW,
+      markStarted: true,
+      resumable: false,
+      incrementAttempt: true,
+    });
+    expect(casApplied).toBe(true);
+    const midFlight = await repo.loadWorkflowRun(interrupted.run.workflowId);
+    expect(midFlight?.state).toBe("RUNNING");
+    expect(midFlight?.attempt).toBe(2);
+
+    // Caller B: a fresh executeWorkflow call for the identical intent. Its own claimIntent call
+    // resolves as REPLAY of the same run, which it observes directly in RUNNING state — it did
+    // not perform any transition to get there itself.
+    const callerBCallLog: number[] = [];
+    const callerB = await executeWorkflow(
+      buildDeps(flakyRepo(repo, 0, callerBCallLog)),
+      intent,
+    );
+
+    // Caller B must never have entered runSteps: no engine execution, no second attempt
+    // increment, no result — it must return a typed non-execution outcome.
+    expect(callerB.outcome).toBe("CONCURRENT_RESUME_LOST");
+    expect(callerBCallLog.length).toBe(0);
+
+    const afterCallerB = await repo.loadWorkflowRun(interrupted.run.workflowId);
+    // Still exactly the mid-flight state Caller A left it in — Caller B changed nothing.
+    expect(afterCallerB?.state).toBe("RUNNING");
+    expect(afterCallerB?.attempt).toBe(2);
+    const resultCount = await env.HOWLER_DB.prepare(
+      "SELECT COUNT(*) AS count FROM workflow_results",
+    ).first<{ count: number }>();
+    expect(resultCount?.count).toBe(0);
+  });
+});
