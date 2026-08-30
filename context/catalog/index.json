@@ -68,6 +68,15 @@
       "summary": "Compact receipt: Tasks 1-13 accepted through 2ffc939."
     },
     {
+      "id": "receipt-through-phase0-2",
+      "kind": "receipt",
+      "path": "context/receipts/accepted/through-phase0-2.json",
+      "authority": "ACCEPTED_RECEIPT",
+      "tags": ["accepted-history"],
+      "taskTypes": ["accepted-history-lookup", "implementation-handoff"],
+      "summary": "Compact receipt: Context + Skill Fabric Phase 0-2 accepted through 6df623c, layered on through-task-013."
+    },
+    {
       "id": "spec-foundation-design",
       "kind": "spec",
       "path": "docs/superpowers/specs/2026-08-27-howler-v095-foundation-design.md",
