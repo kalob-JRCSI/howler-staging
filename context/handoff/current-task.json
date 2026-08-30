@@ -1,0 +1,17 @@
+{
+  "schemaVersion": "1",
+  "kind": "handoffRecord",
+  "taskId": "howler-context-skill-fabric-phase0-2",
+  "title": "Howler Context + Skill Fabric, Phase 0-2",
+  "status": "IN_PROGRESS",
+  "baseSha": "2ffc939a94d97d7f19b6f9f5885d1f407df9eb1e",
+  "blocks": ["task-14"],
+  "summary": "Development-infrastructure-only work: a lean AGENTS.md router, a compact accepted-history receipt through Task 13, a routable context catalog, four canonical repo-local development skills under .agents/skills/, and a deterministic context packer (tools/context-pack/) with no embeddings/vector search. Does not modify Howler runtime behavior and does not start Task 14.",
+  "relevantPaths": [
+    "AGENTS.md",
+    "context/",
+    ".agents/skills/",
+    "tools/context-pack/",
+    "docs/superpowers/plans/2026-08-30-howler-context-skill-fabric-phase0-2.md"
+  ]
+}

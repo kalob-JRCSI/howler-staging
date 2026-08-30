@@ -1,0 +1,54 @@
+{
+  "schemaVersion": "1",
+  "id": "through-task-013",
+  "kind": "acceptedReceipt",
+  "throughTask": 13,
+  "baseSha": "2ffc939a94d97d7f19b6f9f5885d1f407df9eb1e",
+  "acceptedAt": "2026-08-30T00:00:00.000Z",
+  "summary": "Tasks 1-13 of the Howler v0.9.5 foundation recovery are accepted history: v0.9.4 engine/domain recovery and characterization, the v1 operator contracts (intent/workflow/policy/result), additive operator persistence (migration 0002, claim/idempotency, step ledger), and the resumable read-only + preview workflow executor (FORECAST_QUERY, FORECAST_HEALTH_QUERY, RECOVERY_QUERY, EVIDENCE_PREVIEW), including three review-correction passes. EVIDENCE_APPLY_SHADOW execution is explicitly not yet implemented (Task 14).",
+  "evidence": [
+    {
+      "authority": "GIT_CANONICAL",
+      "path": "docs/superpowers/plans/2026-08-27-howler-v095-foundation-plan.md",
+      "note": "Governing plan for Tasks 1-13."
+    },
+    {
+      "authority": "GIT_CANONICAL",
+      "path": "docs/superpowers/specs/2026-08-27-howler-v095-foundation-design.md",
+      "note": "Governing design doc; normative for schemas/behavior."
+    },
+    {
+      "authority": "GIT_CANONICAL",
+      "path": "src/operator/workflow.ts",
+      "note": "Task 13 executor + Task 11 workflow contracts."
+    },
+    {
+      "authority": "GIT_CANONICAL",
+      "path": "src/worker/repository.ts",
+      "note": "Task 12/13 persistence: claim/idempotency, step ledger, atomic finalize."
+    },
+    {
+      "authority": "GIT_CANONICAL",
+      "path": "migrations/0002_operator_runs.sql",
+      "note": "Additive operator schema (Task 12)."
+    },
+    {
+      "authority": "RUNTIME_TRUTH",
+      "path": "wrangler.jsonc",
+      "note": "Staging-only, HOWLER_MODE=shadow, canonical deploy config."
+    },
+    {
+      "authority": "GIT_CANONICAL",
+      "path": "test/integration/",
+      "note": "Task 12/13 integration coverage (claim, immutability, readonly/preview/interruption workflows)."
+    },
+    {
+      "authority": "GIT_CANONICAL",
+      "path": "sha:2ffc939a94d97d7f19b6f9f5885d1f407df9eb1e",
+      "note": "Merge commit for PR #5 (Task 13), the accepted baseline tip this receipt describes."
+    }
+  ],
+  "notAccepted": [
+    "Task 14 (EVIDENCE_APPLY_SHADOW execution, concurrent resume leasing, shadow-commit reconciliation, resume HTTP route) is not represented by this receipt and is not accepted history."
+  ]
+}

@@ -1,0 +1,4 @@
+{
+  "id": "stale",
+  "summary": "Fixture receipt that exists on disk but is marked stale in the catalog."
+}

@@ -1,0 +1,1 @@
+This second fixture document also exists solely to have a large, deterministic character count for budget-pruning tests. It is not meant to be read for its content, only measured. More filler text: india juliet kilo lima mike november oscar papa quebec romeo.
