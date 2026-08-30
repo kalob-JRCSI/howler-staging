@@ -1027,7 +1027,18 @@ export class D1HowlerRepository {
    * against the run's row — observes the already-terminal state, not the pre-transition one.
    * Returns false (no SQL executed) if the run is no longer in `expectedState`.
    */
-  async finalizeWorkflowRun(input: FinalizeWorkflowRunInput): Promise<boolean> {
+  /**
+   * Shared preconditions for both `finalizeWorkflowRun` and `finalizeWorkflowRunStep`: validates
+   * the transition/result shape and loads the run, throwing on any genuine invariant violation.
+   * Returns `undefined` (not an error) when the run is simply no longer in `expectedState` — the
+   * ordinary "someone already finalized this, or it moved on" guard case, not a defect.
+   */
+  private async loadAndValidateFinalizeInputs(input: {
+    workflowId: string;
+    expectedState: WorkflowState;
+    terminalState: "SUCCEEDED" | "BLOCKED" | "FAILED";
+    result: ResultV1;
+  }): Promise<WorkflowRunV1 | undefined> {
     if (!isValidTransition(input.expectedState, input.terminalState)) {
       throw new Error(
         `Invalid terminal transition: ${input.expectedState} -> ${input.terminalState}`,
@@ -1057,7 +1068,13 @@ export class D1HowlerRepository {
         "Result projectId does not match the workflow's projectId",
       );
     }
-    if (current.state !== input.expectedState) return false;
+    if (current.state !== input.expectedState) return undefined;
+    return current;
+  }
+
+  async finalizeWorkflowRun(input: FinalizeWorkflowRunInput): Promise<boolean> {
+    const current = await this.loadAndValidateFinalizeInputs(input);
+    if (!current) return false;
 
     const statements: D1PreparedStatement[] = [
       this.db
@@ -1099,6 +1116,80 @@ export class D1HowlerRepository {
       // actual state rather than guess from the error text. A state that has moved away from
       // expectedState means someone else won the race; a state that is still expectedState means
       // this failure is unexplained by a race and must not be swallowed.
+      const stillCurrent = await this.loadWorkflowRun(input.workflowId);
+      if (stillCurrent && stillCurrent.state !== input.expectedState) {
+        return false;
+      }
+      throw error;
+    }
+    return true;
+  }
+
+  /**
+   * Task 13: the same atomic terminal transition + immutable result insert as
+   * `finalizeWorkflowRun`, plus a guarded FINALIZE step completion in the *same* D1 batch — so a
+   * failure completing the FINALIZE step can never leave a committed terminal run/result behind
+   * with FINALIZE still incomplete. `finalizeWorkflowRun` itself is untouched for existing
+   * callers; this is an additive sibling operation, not a replacement.
+   */
+  async finalizeWorkflowRunStep(input: {
+    workflowId: string;
+    expectedState: WorkflowState;
+    terminalState: "SUCCEEDED" | "BLOCKED" | "FAILED";
+    result: ResultV1;
+    stepOutput: unknown;
+    stepOutputHash: string;
+    now: string;
+  }): Promise<boolean> {
+    const current = await this.loadAndValidateFinalizeInputs(input);
+    if (!current) return false;
+
+    const statements: D1PreparedStatement[] = [
+      this.db
+        .prepare(
+          `UPDATE workflow_runs
+          SET state = ?, result_id = ?, updated_at = ?, completed_at = ?
+          WHERE workflow_id = ? AND state = ?`,
+        )
+        .bind(
+          input.terminalState,
+          input.result.resultId,
+          input.now,
+          input.now,
+          input.workflowId,
+          input.expectedState,
+        ),
+      this.db
+        .prepare(
+          `INSERT INTO workflow_results
+          (result_id, workflow_id, intent_id, project_id, status, result_json, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .bind(
+          input.result.resultId,
+          input.result.workflowId,
+          input.result.intentId,
+          input.result.projectId,
+          input.result.status,
+          JSON.stringify(input.result),
+          input.result.createdAt,
+        ),
+      this.db
+        .prepare(
+          `UPDATE workflow_steps
+          SET state = 'SUCCEEDED', output_json = ?, output_hash = ?, completed_at = ?
+          WHERE workflow_id = ? AND step_name = 'FINALIZE'`,
+        )
+        .bind(
+          JSON.stringify(input.stepOutput ?? null),
+          input.stepOutputHash,
+          input.now,
+          input.workflowId,
+        ),
+    ];
+    try {
+      await this.db.batch(statements);
+    } catch (error) {
       const stillCurrent = await this.loadWorkflowRun(input.workflowId);
       if (stillCurrent && stillCurrent.state !== input.expectedState) {
         return false;
@@ -1155,15 +1246,22 @@ export class D1HowlerRepository {
     stepName: WorkflowStepName;
     ordinal: number;
     inputHash: string;
+    attempt: number;
   }): Promise<WorkflowStepV1> {
     await this.db
       .prepare(
         `INSERT INTO workflow_steps
         (workflow_id, step_name, ordinal, state, attempt, input_hash, started_at, completed_at)
-        VALUES (?, ?, ?, 'PENDING', 1, ?, NULL, NULL)
+        VALUES (?, ?, ?, 'PENDING', ?, ?, NULL, NULL)
         ON CONFLICT(workflow_id, step_name) DO NOTHING`,
       )
-      .bind(input.workflowId, input.stepName, input.ordinal, input.inputHash)
+      .bind(
+        input.workflowId,
+        input.stepName,
+        input.ordinal,
+        input.attempt,
+        input.inputHash,
+      )
       .run();
     const row = await this.loadWorkflowStep(input.workflowId, input.stepName);
     if (!row) {
@@ -1184,18 +1282,26 @@ export class D1HowlerRepository {
     return row;
   }
 
+  /**
+   * `attempt` records the *workflow* attempt this step is (re)executing under — the run's own
+   * `attempt` at the moment it entered RUNNING, not this call's retry count. An already-completed
+   * step is never restarted (its persisted output is reused instead), so this only ever advances
+   * `attempt` on a step that is genuinely being (re)run, satisfying "already-completed steps
+   * retain their original attempt."
+   */
   async startWorkflowStep(input: {
     workflowId: string;
     stepName: WorkflowStepName;
+    attempt: number;
     now: string;
   }): Promise<void> {
     await this.db
       .prepare(
         `UPDATE workflow_steps
-        SET state = 'RUNNING', started_at = COALESCE(started_at, ?)
+        SET state = 'RUNNING', attempt = ?, started_at = COALESCE(started_at, ?)
         WHERE workflow_id = ? AND step_name = ?`,
       )
-      .bind(input.now, input.workflowId, input.stepName)
+      .bind(input.attempt, input.now, input.workflowId, input.stepName)
       .run();
   }
 

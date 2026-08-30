@@ -218,7 +218,8 @@ export const WORKFLOW_STEP_ORDINALS: Readonly<
 ) as Record<WorkflowStepName, number>;
 
 const MAX_READ_ATTEMPTS = 3;
-const DEFAULT_MAX_WORKFLOW_ATTEMPTS = 3;
+/** Task 13's workflow attempt budget is a fixed invariant, never caller-configurable. */
+export const TASK13_MAX_WORKFLOW_ATTEMPTS = 3;
 
 /**
  * Thrown by `readWithRetry` only after genuinely exhausting the full read budget on an error
@@ -232,18 +233,25 @@ export class ReadRetryExhaustedError extends Error {
   }
 }
 
-/** Malformed persisted JSON is a data-integrity defect, never a transient condition to retry. */
-function isRetryableReadError(error: unknown): boolean {
-  return !(
-    error instanceof Error && error.message.startsWith("Invalid persisted JSON")
-  );
+/**
+ * The *only* error type `readWithRetry` treats as retryable. A repository read (or a test double
+ * standing in for one) must explicitly throw this to signal a genuinely transient condition —
+ * anything else (a generic Error, a programming error, malformed SQL, an invariant failure, a
+ * malformed-persisted-JSON defect, ...) fails immediately on its first occurrence. This replaces
+ * message-sniffing (e.g. excluding only "Invalid persisted JSON") with an explicit, closed
+ * classification: retryable is opt-in, not the default.
+ */
+export class TransientRepositoryReadError extends Error {
+  constructor(public readonly cause?: unknown) {
+    super("Transient repository read failure");
+  }
 }
 
 /**
  * Retries one repository read up to MAX_READ_ATTEMPTS total calls (the initial call plus two
- * retries — design §10.3), synchronously, with no timer and no sleep. Only errors classified as
- * transient are retried; anything else propagates on its first occurrence. Writes are never
- * passed through this helper.
+ * retries — design §10.3), synchronously, with no timer and no sleep. Only
+ * `TransientRepositoryReadError` is retried; anything else propagates on its first occurrence.
+ * Writes are never passed through this helper.
  */
 async function readWithRetry<T>(read: () => Promise<T>): Promise<T> {
   let lastError: unknown;
@@ -251,7 +259,7 @@ async function readWithRetry<T>(read: () => Promise<T>): Promise<T> {
     try {
       return await read();
     } catch (error) {
-      if (!isRetryableReadError(error)) throw error;
+      if (!(error instanceof TransientRepositoryReadError)) throw error;
       lastError = error;
     }
   }
@@ -314,6 +322,15 @@ export interface WorkflowExecutorRepository {
     result: ResultV1;
     now: string;
   }): Promise<boolean>;
+  finalizeWorkflowRunStep(input: {
+    workflowId: string;
+    expectedState: WorkflowState;
+    terminalState: "SUCCEEDED" | "BLOCKED" | "FAILED";
+    result: ResultV1;
+    stepOutput: unknown;
+    stepOutputHash: string;
+    now: string;
+  }): Promise<boolean>;
   loadWorkflowResult(resultId: string): Promise<ResultV1 | undefined>;
   loadWorkflowStep(
     workflowId: string,
@@ -324,10 +341,12 @@ export interface WorkflowExecutorRepository {
     stepName: WorkflowStepName;
     ordinal: number;
     inputHash: string;
+    attempt: number;
   }): Promise<WorkflowStepV1>;
   startWorkflowStep(input: {
     workflowId: string;
     stepName: WorkflowStepName;
+    attempt: number;
     now: string;
   }): Promise<void>;
   completeWorkflowStep(input: {
@@ -371,50 +390,82 @@ export interface WorkflowExecutorDeps {
   workflowIds: WorkflowExecutorIds;
   resultIds: WorkflowExecutorIds;
   authorization: AuthorizationAttestation;
-  /** Total workflow attempts allowed, including the first (design §10.3 default: 3). */
-  maxAttempts?: number;
 }
 
 export type ExecuteWorkflowResult =
   | { outcome: "IDEMPOTENCY_KEY_REUSE" | "INTENT_ID_REUSE" }
   | { outcome: "INTERRUPTED"; run: WorkflowRunV1 }
+  | { outcome: "CONCURRENT_RESUME_LOST"; run: WorkflowRunV1 }
   | { outcome: "COMPLETED"; run: WorkflowRunV1; result: ResultV1 };
+
+/** Task 13 implements only the read-only and preview kinds; EVIDENCE_APPLY_SHADOW is Task 14. */
+export type SupportedIntentKind = Exclude<
+  IntentV1["kind"],
+  "EVIDENCE_APPLY_SHADOW"
+>;
+
+export function isSupportedIntentKind(
+  kind: IntentV1["kind"],
+): kind is SupportedIntentKind {
+  return kind !== "EVIDENCE_APPLY_SHADOW";
+}
 
 function nowString(deps: WorkflowExecutorDeps): string {
   return deps.clock.now().toISOString();
 }
 
+function assertOrdinalNotDrifted(
+  workflowId: string,
+  stepName: WorkflowStepName,
+  persistedOrdinal: number,
+): void {
+  const expected = WORKFLOW_STEP_ORDINALS[stepName];
+  if (persistedOrdinal !== expected) {
+    throw new Error(
+      `Workflow step ${workflowId}/${stepName} ordinal drifted: persisted ${String(persistedOrdinal)}, expected ${String(expected)} — refusing to reuse or accept it`,
+    );
+  }
+}
+
 /**
  * Idempotently ensures a step row exists (insert-if-absent), reusing an already-SUCCEEDED
- * persisted output when its input hash still matches — "completed steps do not rerun" — and
- * otherwise (re-)running `compute`. Verifies ordinal/input-hash consistency on reuse via the
- * repository's own `ensureWorkflowStep` guard.
+ * persisted output when its ordinal and input hash still match — "completed steps do not rerun"
+ * — and otherwise (re-)running `compute` under the current workflow attempt. Ordinal/input-hash
+ * are verified *before* any reuse, not only on the repository's own insert-time guard (which never
+ * runs at all on the reuse path) — a persisted definition may never silently drift.
  */
 async function runStep<TOutput>(
   deps: WorkflowExecutorDeps,
   workflowId: string,
+  runAttempt: number,
   stepName: WorkflowStepName,
   hashInput: unknown,
   compute: () => TOutput | Promise<TOutput>,
 ): Promise<TOutput> {
   const inputHash = await sha256Hex(hashInput);
   const persisted = await deps.repo.loadWorkflowStep(workflowId, stepName);
-  if (
-    persisted &&
-    persisted.state === "SUCCEEDED" &&
-    persisted.inputHash === inputHash
-  ) {
-    return persisted.output as TOutput;
+  if (persisted) {
+    assertOrdinalNotDrifted(workflowId, stepName, persisted.ordinal);
+    if (persisted.state === "SUCCEEDED") {
+      if (persisted.inputHash !== inputHash) {
+        throw new Error(
+          `Workflow step ${workflowId}/${stepName} input hash changed between attempts — replay is unsafe`,
+        );
+      }
+      return persisted.output as TOutput;
+    }
   }
   await deps.repo.ensureWorkflowStep({
     workflowId,
     stepName,
     ordinal: WORKFLOW_STEP_ORDINALS[stepName],
     inputHash,
+    attempt: runAttempt,
   });
   await deps.repo.startWorkflowStep({
     workflowId,
     stepName,
+    attempt: runAttempt,
     now: nowString(deps),
   });
   const output = await compute();
@@ -429,13 +480,26 @@ async function runStep<TOutput>(
   return output;
 }
 
-/** Idempotently persists a conditionally-inapplicable step as SKIPPED — never simply omitted. */
+/**
+ * Idempotently persists a conditionally-inapplicable step as SKIPPED — never simply omitted.
+ * Verifies ordinal/input-hash before accepting an already-SKIPPED row, the same as `runStep` does
+ * for a completed one — a persisted SKIPPED definition may never silently drift either.
+ */
 async function skipStep(
   deps: WorkflowExecutorDeps,
   workflowId: string,
   stepName: WorkflowStepName,
 ): Promise<void> {
   const inputHash = await sha256Hex({ workflowId, stepName, skipped: true });
+  const existing = await deps.repo.loadWorkflowStep(workflowId, stepName);
+  if (existing) {
+    assertOrdinalNotDrifted(workflowId, stepName, existing.ordinal);
+    if (existing.state === "SKIPPED" && existing.inputHash !== inputHash) {
+      throw new Error(
+        `Workflow step ${workflowId}/${stepName} input hash changed between attempts of a SKIPPED step — replay is unsafe`,
+      );
+    }
+  }
   await deps.repo.skipWorkflowStep({
     workflowId,
     stepName,
@@ -478,33 +542,69 @@ function noForecastProblem(projectId: string): WorkflowProblem {
   };
 }
 
-/** BUILD_RESULT + FINALIZE, atomically recording the terminal run state and result reference. */
+/**
+ * FINALIZE, atomically recording the terminal run state, the immutable result, and the FINALIZE
+ * step's own completion in one D1 batch (`finalizeWorkflowRunStep`) — a failure completing the
+ * step can never leave a committed terminal run/result with FINALIZE still incomplete, because
+ * there is no separate "complete the step" write left to fail after the commit.
+ */
 async function finalizeStep(
   deps: WorkflowExecutorDeps,
   run: WorkflowRunV1,
   result: ResultV1,
 ): Promise<WorkflowRunV1> {
-  await runStep(
-    deps,
-    run.workflowId,
-    "FINALIZE",
-    { resultId: result.resultId },
-    async () => {
-      const applied = await deps.repo.finalizeWorkflowRun({
-        workflowId: run.workflowId,
-        expectedState: "RUNNING",
-        terminalState: result.status,
-        result,
-        now: nowString(deps),
-      });
-      if (!applied) {
+  const stepName: WorkflowStepName = "FINALIZE";
+  const hashInput = { resultId: result.resultId };
+  const inputHash = await sha256Hex(hashInput);
+  const persisted = await deps.repo.loadWorkflowStep(run.workflowId, stepName);
+  if (persisted) {
+    assertOrdinalNotDrifted(run.workflowId, stepName, persisted.ordinal);
+    if (persisted.state === "SUCCEEDED") {
+      if (persisted.inputHash !== inputHash) {
         throw new Error(
-          `finalizeWorkflowRun did not apply for workflow ${run.workflowId} (expected RUNNING)`,
+          `Workflow step ${run.workflowId}/${stepName} input hash changed between attempts — replay is unsafe`,
         );
       }
-      return { finalized: true };
-    },
-  );
+      const finalRun = await deps.repo.loadWorkflowRun(run.workflowId);
+      if (!finalRun) {
+        throw new Error(
+          `Workflow run ${run.workflowId} vanished after finalize`,
+        );
+      }
+      return finalRun;
+    }
+  } else {
+    await deps.repo.ensureWorkflowStep({
+      workflowId: run.workflowId,
+      stepName,
+      ordinal: WORKFLOW_STEP_ORDINALS[stepName],
+      inputHash,
+      attempt: run.attempt,
+    });
+  }
+  const now = nowString(deps);
+  await deps.repo.startWorkflowStep({
+    workflowId: run.workflowId,
+    stepName,
+    attempt: run.attempt,
+    now,
+  });
+  const stepOutput = { finalized: true };
+  const stepOutputHash = await sha256Hex(stepOutput);
+  const applied = await deps.repo.finalizeWorkflowRunStep({
+    workflowId: run.workflowId,
+    expectedState: "RUNNING",
+    terminalState: result.status,
+    result,
+    stepOutput,
+    stepOutputHash,
+    now,
+  });
+  if (!applied) {
+    throw new Error(
+      `finalizeWorkflowRunStep did not apply for workflow ${run.workflowId} (expected RUNNING)`,
+    );
+  }
   const finalRun = await deps.repo.loadWorkflowRun(run.workflowId);
   if (!finalRun) {
     throw new Error(`Workflow run ${run.workflowId} vanished after finalize`);
@@ -521,21 +621,30 @@ async function finalizeStep(
 async function markStepTerminal(
   deps: WorkflowExecutorDeps,
   workflowId: string,
+  runAttempt: number,
   atStep: WorkflowStepName,
   state: "BLOCKED" | "FAILED",
   problem: WorkflowProblem,
   now: string,
 ): Promise<void> {
   const existing = await deps.repo.loadWorkflowStep(workflowId, atStep);
-  if (!existing) {
+  if (existing) {
+    assertOrdinalNotDrifted(workflowId, atStep, existing.ordinal);
+  } else {
     const inputHash = await sha256Hex({ workflowId, stepName: atStep });
     await deps.repo.ensureWorkflowStep({
       workflowId,
       stepName: atStep,
       ordinal: WORKFLOW_STEP_ORDINALS[atStep],
       inputHash,
+      attempt: runAttempt,
     });
-    await deps.repo.startWorkflowStep({ workflowId, stepName: atStep, now });
+    await deps.repo.startWorkflowStep({
+      workflowId,
+      stepName: atStep,
+      attempt: runAttempt,
+      now,
+    });
   }
   await deps.repo.failWorkflowStep({
     workflowId,
@@ -546,7 +655,12 @@ async function markStepTerminal(
   });
 }
 
-/** Terminal, non-retryable failure: marks `atStep` FAILED, skips whatever never ran, finalizes. */
+/**
+ * Terminal, non-retryable failure: marks `atStep` FAILED, skips whatever never ran, then still
+ * routes the result construction through a real BUILD_RESULT step (SUCCEEDED — building a FAILED
+ * ResultV1 is itself a successful build) before FINALIZE, so all ten canonical steps exist on
+ * this path exactly as they do on the success path.
+ */
 async function failRun(
   deps: WorkflowExecutorDeps,
   intent: IntentV1,
@@ -555,27 +669,46 @@ async function failRun(
   atStep: WorkflowStepName,
 ): Promise<ExecuteWorkflowResult> {
   const now = nowString(deps);
-  await markStepTerminal(deps, run.workflowId, atStep, "FAILED", problem, now);
-  await skipRemainingSteps(deps, run.workflowId, atStep);
-  const result = buildResult({
-    resultId: deps.resultIds.next(),
-    intentId: intent.intentId,
-    workflowId: run.workflowId,
-    projectId: intent.projectId,
-    intentKind: intent.kind,
-    status: "FAILED",
-    persisted: false,
-    projectRevisionBefore: null,
-    projectRevisionAfter: null,
-    forecastVersion: null,
+  await markStepTerminal(
+    deps,
+    run.workflowId,
+    run.attempt,
+    atStep,
+    "FAILED",
     problem,
-    createdAt: now,
-  });
+    now,
+  );
+  await skipRemainingSteps(deps, run.workflowId, atStep);
+  const result = await runStep(
+    deps,
+    run.workflowId,
+    run.attempt,
+    "BUILD_RESULT",
+    { status: "FAILED", problem },
+    () =>
+      buildResult({
+        resultId: deps.resultIds.next(),
+        intentId: intent.intentId,
+        workflowId: run.workflowId,
+        projectId: intent.projectId,
+        intentKind: intent.kind,
+        status: "FAILED",
+        persisted: false,
+        projectRevisionBefore: null,
+        projectRevisionAfter: null,
+        forecastVersion: null,
+        problem,
+        createdAt: now,
+      }),
+  );
   const finalRun = await finalizeStep(deps, run, result);
   return { outcome: "COMPLETED", run: finalRun, result };
 }
 
-/** Business-state block (e.g. a stale revision) — terminal, not retryable, no domain mutation. */
+/**
+ * Business-state block (e.g. a stale revision) — terminal, not retryable, no domain mutation.
+ * Routes through BUILD_RESULT the same way `failRun` does, for the same reason.
+ */
 async function blockRun(
   deps: WorkflowExecutorDeps,
   intent: IntentV1,
@@ -585,22 +718,38 @@ async function blockRun(
   projectRevision: number,
 ): Promise<ExecuteWorkflowResult> {
   const now = nowString(deps);
-  await markStepTerminal(deps, run.workflowId, atStep, "BLOCKED", problem, now);
-  await skipRemainingSteps(deps, run.workflowId, atStep);
-  const result = buildResult({
-    resultId: deps.resultIds.next(),
-    intentId: intent.intentId,
-    workflowId: run.workflowId,
-    projectId: intent.projectId,
-    intentKind: intent.kind,
-    status: "BLOCKED",
-    persisted: false,
-    projectRevisionBefore: projectRevision,
-    projectRevisionAfter: projectRevision,
-    forecastVersion: null,
+  await markStepTerminal(
+    deps,
+    run.workflowId,
+    run.attempt,
+    atStep,
+    "BLOCKED",
     problem,
-    createdAt: now,
-  });
+    now,
+  );
+  await skipRemainingSteps(deps, run.workflowId, atStep);
+  const result = await runStep(
+    deps,
+    run.workflowId,
+    run.attempt,
+    "BUILD_RESULT",
+    { status: "BLOCKED", problem },
+    () =>
+      buildResult({
+        resultId: deps.resultIds.next(),
+        intentId: intent.intentId,
+        workflowId: run.workflowId,
+        projectId: intent.projectId,
+        intentKind: intent.kind,
+        status: "BLOCKED",
+        persisted: false,
+        projectRevisionBefore: projectRevision,
+        projectRevisionAfter: projectRevision,
+        forecastVersion: null,
+        problem,
+        createdAt: now,
+      }),
+  );
   const finalRun = await finalizeStep(deps, run, result);
   return { outcome: "COMPLETED", run: finalRun, result };
 }
@@ -614,14 +763,15 @@ async function interruptRun(
   deps: WorkflowExecutorDeps,
   intent: IntentV1,
   run: WorkflowRunV1,
-  maxAttempts: number,
   atStep: WorkflowStepName,
 ): Promise<ExecuteWorkflowResult> {
-  if (run.attempt >= maxAttempts) {
+  // The exhaustion decision always uses the run's own *persisted* maxAttempts, never a
+  // caller-supplied value — that limit is fixed at claim time and is not configurable per call.
+  if (run.attempt >= run.maxAttempts) {
     const exhausted: WorkflowProblem = {
       code: "RETRY_EXHAUSTED",
       category: "TRANSIENT",
-      message: `Workflow attempts exhausted (${String(maxAttempts)}) while retrying ${atStep}`,
+      message: `Workflow attempts exhausted (${String(run.maxAttempts)}) while retrying ${atStep}`,
       retryable: false,
       details: { step: atStep, attempts: run.attempt },
     };
@@ -662,13 +812,13 @@ async function runForecastQuery(
   deps: WorkflowExecutorDeps,
   intent: IntentV1,
   run: WorkflowRunV1,
-  maxAttempts: number,
 ): Promise<ExecuteWorkflowResult> {
   let loaded: LoadedProject;
   try {
     loaded = await runStep(
       deps,
       run.workflowId,
+      run.attempt,
       "LOAD_PROJECT",
       { projectId: intent.projectId },
       async (): Promise<LoadedProject> => {
@@ -688,7 +838,7 @@ async function runForecastQuery(
     );
   } catch (error) {
     if (error instanceof ReadRetryExhaustedError) {
-      return interruptRun(deps, intent, run, maxAttempts, "LOAD_PROJECT");
+      return interruptRun(deps, intent, run, "LOAD_PROJECT");
     }
     throw error;
   }
@@ -710,6 +860,7 @@ async function runForecastQuery(
   const output = await runStep(
     deps,
     run.workflowId,
+    run.attempt,
     "EXECUTE_ENGINE",
     {
       modelRevision: model.revision,
@@ -732,6 +883,7 @@ async function runForecastQuery(
   const result = await runStep(
     deps,
     run.workflowId,
+    run.attempt,
     "BUILD_RESULT",
     { output },
     () =>
@@ -763,13 +915,13 @@ async function runForecastHealthQuery(
   deps: WorkflowExecutorDeps,
   intent: IntentV1,
   run: WorkflowRunV1,
-  maxAttempts: number,
 ): Promise<ExecuteWorkflowResult> {
   let loaded: LoadedHealthProject;
   try {
     loaded = await runStep(
       deps,
       run.workflowId,
+      run.attempt,
       "LOAD_PROJECT",
       { projectId: intent.projectId },
       async (): Promise<LoadedHealthProject> => {
@@ -785,7 +937,7 @@ async function runForecastHealthQuery(
     );
   } catch (error) {
     if (error instanceof ReadRetryExhaustedError) {
-      return interruptRun(deps, intent, run, maxAttempts, "LOAD_PROJECT");
+      return interruptRun(deps, intent, run, "LOAD_PROJECT");
     }
     throw error;
   }
@@ -809,6 +961,7 @@ async function runForecastHealthQuery(
     health = await runStep(
       deps,
       run.workflowId,
+      run.attempt,
       "EXECUTE_ENGINE",
       { revision: model.revision, latestVersion: latest?.version ?? null },
       async () => {
@@ -821,7 +974,7 @@ async function runForecastHealthQuery(
     );
   } catch (error) {
     if (error instanceof ReadRetryExhaustedError) {
-      return interruptRun(deps, intent, run, maxAttempts, "EXECUTE_ENGINE");
+      return interruptRun(deps, intent, run, "EXECUTE_ENGINE");
     }
     throw error;
   }
@@ -833,6 +986,7 @@ async function runForecastHealthQuery(
   const result = await runStep(
     deps,
     run.workflowId,
+    run.attempt,
     "BUILD_RESULT",
     { output },
     () =>
@@ -867,13 +1021,13 @@ async function runRecoveryQuery(
   deps: WorkflowExecutorDeps,
   intent: IntentV1,
   run: WorkflowRunV1,
-  maxAttempts: number,
 ): Promise<ExecuteWorkflowResult> {
   let loaded: LoadedRecoveryProject;
   try {
     loaded = await runStep(
       deps,
       run.workflowId,
+      run.attempt,
       "LOAD_PROJECT",
       { projectId: intent.projectId },
       async (): Promise<LoadedRecoveryProject> => {
@@ -899,7 +1053,7 @@ async function runRecoveryQuery(
     );
   } catch (error) {
     if (error instanceof ReadRetryExhaustedError) {
-      return interruptRun(deps, intent, run, maxAttempts, "LOAD_PROJECT");
+      return interruptRun(deps, intent, run, "LOAD_PROJECT");
     }
     throw error;
   }
@@ -930,6 +1084,7 @@ async function runRecoveryQuery(
   const output = await runStep(
     deps,
     run.workflowId,
+    run.attempt,
     "EXECUTE_ENGINE",
     {
       revision: model.revision,
@@ -971,6 +1126,7 @@ async function runRecoveryQuery(
   const result = await runStep(
     deps,
     run.workflowId,
+    run.attempt,
     "BUILD_RESULT",
     { output },
     () =>
@@ -997,7 +1153,6 @@ async function runEvidencePreview(
   deps: WorkflowExecutorDeps,
   intent: IntentV1,
   run: WorkflowRunV1,
-  maxAttempts: number,
 ): Promise<ExecuteWorkflowResult> {
   if (intent.payload.type !== "EVIDENCE") {
     throw new Error(
@@ -1011,6 +1166,7 @@ async function runEvidencePreview(
     loaded = await runStep(
       deps,
       run.workflowId,
+      run.attempt,
       "LOAD_PROJECT",
       { projectId: intent.projectId },
       async (): Promise<LoadedProject> => {
@@ -1030,7 +1186,7 @@ async function runEvidencePreview(
     );
   } catch (error) {
     if (error instanceof ReadRetryExhaustedError) {
-      return interruptRun(deps, intent, run, maxAttempts, "LOAD_PROJECT");
+      return interruptRun(deps, intent, run, "LOAD_PROJECT");
     }
     throw error;
   }
@@ -1050,6 +1206,7 @@ async function runEvidencePreview(
   const revisionCheck = await runStep(
     deps,
     run.workflowId,
+    run.attempt,
     "CHECK_REVISION",
     { expected: intent.expectedProjectRevision, current: currentRevision },
     () => ({ ok: intent.expectedProjectRevision === currentRevision }),
@@ -1072,6 +1229,7 @@ async function runEvidencePreview(
   const preparedEvent = await runStep(
     deps,
     run.workflowId,
+    run.attempt,
     "PREPARE",
     { event },
     () => event,
@@ -1083,6 +1241,7 @@ async function runEvidencePreview(
   const engineOutput = await runStep(
     deps,
     run.workflowId,
+    run.attempt,
     "EXECUTE_ENGINE",
     {
       revision: currentRevision,
@@ -1140,6 +1299,7 @@ async function runEvidencePreview(
   const result = await runStep(
     deps,
     run.workflowId,
+    run.attempt,
     "BUILD_RESULT",
     { output },
     () =>
@@ -1167,25 +1327,32 @@ async function runSteps(
   deps: WorkflowExecutorDeps,
   intent: IntentV1,
   run: WorkflowRunV1,
-  maxAttempts: number,
 ): Promise<ExecuteWorkflowResult> {
   await runStep(
     deps,
     run.workflowId,
+    run.attempt,
     "RECEIVE",
     { workflowId: run.workflowId },
     () => ({ intentId: intent.intentId, intentHash: run.intentHash }),
   );
 
-  await runStep(deps, run.workflowId, "VALIDATE", { intent }, () => {
-    const validated = validateIntent(intent);
-    if (!validated.valid) {
-      throw new Error(
-        `Intent ${intent.intentId} failed re-validation inside the executor: ${JSON.stringify(validated.problems)}`,
-      );
-    }
-    return { valid: true };
-  });
+  await runStep(
+    deps,
+    run.workflowId,
+    run.attempt,
+    "VALIDATE",
+    { intent },
+    () => {
+      const validated = validateIntent(intent);
+      if (!validated.valid) {
+        throw new Error(
+          `Intent ${intent.intentId} failed re-validation inside the executor: ${JSON.stringify(validated.problems)}`,
+        );
+      }
+      return { valid: true };
+    },
+  );
 
   const policyProblem =
     assertStagingShadowPolicy({
@@ -1198,6 +1365,7 @@ async function runSteps(
   await runStep(
     deps,
     run.workflowId,
+    run.attempt,
     "AUTHORIZE_POLICY",
     {
       mode: deps.authorization.mode,
@@ -1210,14 +1378,16 @@ async function runSteps(
 
   switch (intent.kind) {
     case "FORECAST_QUERY":
-      return runForecastQuery(deps, intent, run, maxAttempts);
+      return runForecastQuery(deps, intent, run);
     case "FORECAST_HEALTH_QUERY":
-      return runForecastHealthQuery(deps, intent, run, maxAttempts);
+      return runForecastHealthQuery(deps, intent, run);
     case "RECOVERY_QUERY":
-      return runRecoveryQuery(deps, intent, run, maxAttempts);
+      return runRecoveryQuery(deps, intent, run);
     case "EVIDENCE_PREVIEW":
-      return runEvidencePreview(deps, intent, run, maxAttempts);
+      return runEvidencePreview(deps, intent, run);
     case "EVIDENCE_APPLY_SHADOW":
+      // Defense-in-depth only: executeWorkflow rejects EVIDENCE_APPLY_SHADOW before any claim or
+      // persistence occurs, so this branch should be unreachable.
       throw new Error(
         "EVIDENCE_APPLY_SHADOW execution is Task 14 scope and is not implemented by this executor",
       );
@@ -1235,11 +1405,20 @@ const LINEAR_PATH_TO_RUNNING: Partial<Record<WorkflowState, WorkflowState>> = {
  * Advances the fixed RECEIVED -> VALIDATING -> READY -> RUNNING bookkeeping path one transition
  * at a time, incrementing `attempt` exactly on an INTERRUPTED -> RUNNING resume (a new workflow
  * attempt, design §10.3/§10.4).
+ *
+ * Task 13 supports serial re-entry only, not concurrent resume leasing (that is Task 14 scope).
+ * But two concurrent callers can still both load the same INTERRUPTED run and both attempt this
+ * same CAS transition — only one `updateWorkflowRunState` call actually applies (its guarded
+ * WHERE clause matches for exactly one caller); the loser must not silently reload and proceed as
+ * though it had won, since after the winner commits, a blind reload would show state RUNNING and
+ * be indistinguishable from having advanced it itself. Every transition attempt's own `applied`
+ * result is therefore checked; a `false` here means *this caller* lost a race and must return
+ * without ever reaching `runSteps`.
  */
 async function advanceToRunning(
   deps: WorkflowExecutorDeps,
   run: WorkflowRunV1,
-): Promise<WorkflowRunV1> {
+): Promise<{ run: WorkflowRunV1 } | { lostRace: true }> {
   let current = run;
   while (current.state !== "RUNNING") {
     const nextState = LINEAR_PATH_TO_RUNNING[current.state];
@@ -1249,7 +1428,7 @@ async function advanceToRunning(
       );
     }
     const resuming = current.state === "INTERRUPTED";
-    await deps.repo.updateWorkflowRunState({
+    const applied = await deps.repo.updateWorkflowRunState({
       workflowId: current.workflowId,
       expectedState: current.state,
       nextState,
@@ -1258,6 +1437,9 @@ async function advanceToRunning(
       resumable: false,
       incrementAttempt: resuming,
     });
+    if (!applied) {
+      return { lostRace: true };
+    }
     const reloaded = await deps.repo.loadWorkflowRun(current.workflowId);
     if (!reloaded) {
       throw new Error(
@@ -1266,25 +1448,32 @@ async function advanceToRunning(
     }
     current = reloaded;
   }
-  return current;
+  return { run: current };
 }
 
 /**
  * The sole executor entrypoint: canonical IntentV1 + injected dependencies only. Claims the
  * intent (Task 12), advances the run to RUNNING (resuming an INTERRUPTED run as a new workflow
  * attempt), then walks the canonical step order for the intent's kind. A duplicate/conflicting
- * claim and an already-terminal replay both return without re-executing anything.
+ * claim, an already-terminal replay, and a lost concurrent-resume race all return without
+ * executing (or re-executing) any workflow step.
  */
 export async function executeWorkflow(
   deps: WorkflowExecutorDeps,
   intent: IntentV1,
 ): Promise<ExecuteWorkflowResult> {
-  const maxAttempts = deps.maxAttempts ?? DEFAULT_MAX_WORKFLOW_ATTEMPTS;
+  if (!isSupportedIntentKind(intent.kind)) {
+    // Rejected before any claim/persistence — zero intents, runs, steps, or results for an
+    // unsupported kind (Task 14 scope).
+    throw new Error(
+      `EVIDENCE_APPLY_SHADOW execution is Task 14 scope and is not implemented by this executor`,
+    );
+  }
 
   const claim = await deps.repo.claimIntent({
     intent,
     workflowId: deps.workflowIds.next(),
-    maxAttempts,
+    maxAttempts: TASK13_MAX_WORKFLOW_ATTEMPTS,
     now: nowString(deps),
   });
   if (!("run" in claim)) {
@@ -1305,6 +1494,16 @@ export async function executeWorkflow(
     return { outcome: "COMPLETED", run, result };
   }
 
-  run = await advanceToRunning(deps, run);
-  return runSteps(deps, intent, run, maxAttempts);
+  const advanced = await advanceToRunning(deps, run);
+  if ("lostRace" in advanced) {
+    const current = await deps.repo.loadWorkflowRun(run.workflowId);
+    if (!current) {
+      throw new Error(
+        `Workflow run ${run.workflowId} vanished after losing a concurrent resume race`,
+      );
+    }
+    return { outcome: "CONCURRENT_RESUME_LOST", run: current };
+  }
+  run = advanced.run;
+  return runSteps(deps, intent, run);
 }

@@ -214,5 +214,24 @@ describe("EVIDENCE_PREVIEW workflow execution: masonry golden parity", () => {
 
     const after = await domainTableSnapshot(repo);
     expect(after).toEqual(before);
+
+    // All ten canonical steps still exist, including a SUCCEEDED BUILD_RESULT — a BLOCKED
+    // terminal result is still a successfully *built* result, just not a mutation.
+    const steps = await repo.loadWorkflowSteps(outcome.run.workflowId);
+    expect(steps.map((s) => s.stepName)).toEqual([...WORKFLOW_STEP_NAMES]);
+    expect(steps.map((s) => s.ordinal)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    const byName = Object.fromEntries(steps.map((s) => [s.stepName, s]));
+    // CHECK_REVISION itself succeeds at computing the (failing) check; the workflow-level block
+    // is attributed to PREPARE — the step that never got to run because of it.
+    expect(byName.CHECK_REVISION?.state).toBe("SUCCEEDED");
+    expect(byName.PREPARE?.state).toBe("BLOCKED");
+    expect(byName.EXECUTE_ENGINE?.state).toBe("SKIPPED");
+    expect(byName.COMMIT_SHADOW?.state).toBe("SKIPPED");
+    expect(byName.BUILD_RESULT?.state).toBe("SUCCEEDED");
+    expect(byName.FINALIZE?.state).toBe("SUCCEEDED");
+
+    // The result checkpoint is stable if this same terminal run were ever re-read.
+    const finalRun = await repo.loadWorkflowRun(outcome.run.workflowId);
+    expect(finalRun?.resultId).toBe(outcome.result.resultId);
   });
 });

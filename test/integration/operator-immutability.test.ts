@@ -691,6 +691,139 @@ describe("finalizeWorkflowRun: atomic, relationally consistent terminal transiti
   });
 });
 
+describe("finalizeWorkflowRunStep (Task 13): FINALIZE step completion, terminal run transition, and result insert are one atomic operation", () => {
+  it("on success, atomically commits the run transition, the result, and the FINALIZE step together", async () => {
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    const intent = await claimSampleIntent(repo);
+    await advanceToRunning(repo);
+    await repo.ensureWorkflowStep({
+      workflowId: "wf-1",
+      stepName: "FINALIZE",
+      ordinal: 9,
+      inputHash: "a".repeat(64),
+      attempt: 1,
+    });
+    await repo.startWorkflowStep({
+      workflowId: "wf-1",
+      stepName: "FINALIZE",
+      attempt: 1,
+      now: NOW,
+    });
+
+    const applied = await repo.finalizeWorkflowRunStep({
+      workflowId: "wf-1",
+      expectedState: "RUNNING",
+      terminalState: "SUCCEEDED",
+      result: sampleResult({ intentId: intent.intentId }),
+      stepOutput: { finalized: true },
+      stepOutputHash: "b".repeat(64),
+      now: NOW,
+    });
+    expect(applied).toBe(true);
+
+    const run = await repo.loadWorkflowRun("wf-1");
+    expect(run?.state).toBe("SUCCEEDED");
+    expect(run?.resultId).toBe("result-1");
+    const resultRow = await env.HOWLER_DB.prepare(
+      "SELECT COUNT(*) AS count FROM workflow_results",
+    ).first<{ count: number }>();
+    expect(resultRow?.count).toBe(1);
+    const step = await repo.loadWorkflowStep("wf-1", "FINALIZE");
+    expect(step?.state).toBe("SUCCEEDED");
+    expect(step?.outputHash).toBe("b".repeat(64));
+  });
+
+  it("if the batch fails, commits nothing: the run stays non-terminal, no result exists, and FINALIZE stays incomplete", async () => {
+    // First, a genuinely completed, unrelated workflow occupies resultId "result-1".
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    const firstIntent = await claimSampleIntent(repo);
+    await advanceToRunning(repo);
+    const firstApplied = await repo.finalizeWorkflowRun({
+      workflowId: "wf-1",
+      expectedState: "RUNNING",
+      terminalState: "SUCCEEDED",
+      result: sampleResult({ intentId: firstIntent.intentId }),
+      now: NOW,
+    });
+    expect(firstApplied).toBe(true);
+
+    // A second, independent run tries to finalize while colliding on the same resultId — the
+    // INSERT will fail on the workflow_results.result_id UNIQUE constraint, forcing the whole
+    // batch (run transition + result insert + FINALIZE step completion) to roll back together.
+    const secondClaim = await repo.claimIntent({
+      intent: validIntent({
+        intentId: "33333333-3333-4333-8333-333333333333",
+        idempotencyKey: "key-3",
+      }),
+      workflowId: "wf-2",
+      maxAttempts: 3,
+      now: NOW,
+    });
+    if (secondClaim.outcome !== "CLAIMED") {
+      throw new Error("setup: second claim did not succeed");
+    }
+    await repo.updateWorkflowRunState({
+      workflowId: "wf-2",
+      expectedState: "RECEIVED",
+      nextState: "VALIDATING",
+      now: NOW,
+    });
+    await repo.updateWorkflowRunState({
+      workflowId: "wf-2",
+      expectedState: "VALIDATING",
+      nextState: "READY",
+      now: NOW,
+    });
+    await repo.updateWorkflowRunState({
+      workflowId: "wf-2",
+      expectedState: "READY",
+      nextState: "RUNNING",
+      now: NOW,
+      markStarted: true,
+    });
+    await repo.ensureWorkflowStep({
+      workflowId: "wf-2",
+      stepName: "FINALIZE",
+      ordinal: 9,
+      inputHash: "a".repeat(64),
+      attempt: 1,
+    });
+    await repo.startWorkflowStep({
+      workflowId: "wf-2",
+      stepName: "FINALIZE",
+      attempt: 1,
+      now: NOW,
+    });
+
+    await expect(
+      repo.finalizeWorkflowRunStep({
+        workflowId: "wf-2",
+        expectedState: "RUNNING",
+        terminalState: "SUCCEEDED",
+        result: sampleResult({
+          resultId: "result-1", // colliding on purpose
+          workflowId: "wf-2",
+          intentId: "33333333-3333-4333-8333-333333333333",
+        }),
+        stepOutput: { finalized: true },
+        stepOutputHash: "c".repeat(64),
+        now: NOW,
+      }),
+    ).rejects.toThrow();
+
+    const run = await repo.loadWorkflowRun("wf-2");
+    expect(run?.state).toBe("RUNNING");
+    expect(run?.resultId).toBeUndefined();
+    const resultRow = await env.HOWLER_DB.prepare(
+      "SELECT COUNT(*) AS count FROM workflow_results",
+    ).first<{ count: number }>();
+    expect(resultRow?.count).toBe(1); // only the first (unrelated) run's result
+    const step = await repo.loadWorkflowStep("wf-2", "FINALIZE");
+    expect(step?.state).toBe("RUNNING");
+    expect(step?.outputHash).toBeUndefined();
+  });
+});
+
 describe("never persists the admin key or any authentication secret", () => {
   it("the persisted canonical request JSON contains no admin-key-shaped content", async () => {
     const repo = new D1HowlerRepository(env.HOWLER_DB);

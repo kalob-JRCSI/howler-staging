@@ -14,7 +14,10 @@ import { forecastInitial } from "../../src/engine/engine";
 import { D1HowlerRepository } from "../../src/worker/repository";
 import { validateIntent } from "../../src/operator/intent";
 import type { IntentV1 } from "../../src/operator/intent";
-import { WORKFLOW_STEP_NAMES } from "../../src/operator/workflow";
+import {
+  TransientRepositoryReadError,
+  WORKFLOW_STEP_NAMES,
+} from "../../src/operator/workflow";
 import type {
   AuthorizationAttestation,
   WorkflowExecutorDeps,
@@ -78,6 +81,28 @@ function queryIntent(): IntentV1 {
   return result.intent;
 }
 
+function healthQueryIntent(): IntentV1 {
+  const candidate = {
+    schemaVersion: "1",
+    intentId: "44444444-4444-4444-8444-444444444444",
+    idempotencyKey: "key-interruption-health-1",
+    projectId: PROJECT_ID,
+    kind: "FORECAST_HEALTH_QUERY",
+    requestedEffect: "READ_ONLY",
+    expectedProjectRevision: null,
+    submittedAt: NOW,
+    source: { channel: "API" },
+    payload: { type: "QUERY" },
+  };
+  const result = validateIntent(candidate);
+  if (!result.valid) {
+    throw new Error(
+      `test fixture is not a valid intent: ${JSON.stringify(result.problems)}`,
+    );
+  }
+  return result.intent;
+}
+
 /**
  * Wraps a real repository, delegating every method except `loadProject`, which fails with a
  * generic (transient-classified) error for the first `failuresBeforeSuccess` calls made through
@@ -94,6 +119,7 @@ function flakyRepo(
     loadWorkflowRun: repo.loadWorkflowRun.bind(repo),
     updateWorkflowRunState: repo.updateWorkflowRunState.bind(repo),
     finalizeWorkflowRun: repo.finalizeWorkflowRun.bind(repo),
+    finalizeWorkflowRunStep: repo.finalizeWorkflowRunStep.bind(repo),
     loadWorkflowResult: repo.loadWorkflowResult.bind(repo),
     loadWorkflowStep: repo.loadWorkflowStep.bind(repo),
     ensureWorkflowStep: repo.ensureWorkflowStep.bind(repo),
@@ -104,7 +130,7 @@ function flakyRepo(
     loadProject: async (projectId: string) => {
       callLog.push(callLog.length + 1);
       if (callLog.length <= failuresBeforeSuccess) {
-        throw new Error("D1 read failed (transient)");
+        throw new TransientRepositoryReadError();
       }
       return repo.loadProject(projectId);
     },
@@ -112,6 +138,24 @@ function flakyRepo(
     loadLatestPublishedForecast: repo.loadLatestPublishedForecast.bind(repo),
     loadForecastById: repo.loadForecastById.bind(repo),
     loadPredictionOutcomes: repo.loadPredictionOutcomes.bind(repo),
+  };
+}
+
+/** Like `flakyRepo`, but fails `loadPredictionOutcomes` instead — interrupts at EXECUTE_ENGINE for FORECAST_HEALTH_QUERY, not LOAD_PROJECT. */
+function flakyHealthRepo(
+  repo: D1HowlerRepository,
+  failuresBeforeSuccess: number,
+  callLog: number[],
+): WorkflowExecutorRepository {
+  return {
+    ...flakyRepo(repo, 0, []),
+    loadPredictionOutcomes: async (projectId?: string) => {
+      callLog.push(callLog.length + 1);
+      if (callLog.length <= failuresBeforeSuccess) {
+        throw new TransientRepositoryReadError();
+      }
+      return repo.loadPredictionOutcomes(projectId);
+    },
   };
 }
 
@@ -145,6 +189,138 @@ describe("transient read retry within budget", () => {
     expect(outcome.run.attempt).toBe(1);
     // Exactly 3 loadProject calls: 2 failures + 1 success, all within the same attempt/step.
     expect(callLog.length).toBe(3);
+  });
+
+  it("explicit TransientRepositoryReadError retries up to exactly three calls before exhaustion interrupts the run", async () => {
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    await seedProject(repo);
+    const callLog: number[] = [];
+
+    const outcome = await executeWorkflow(
+      buildDeps(flakyRepo(repo, Infinity, callLog)),
+      queryIntent(),
+    );
+
+    expect(outcome.outcome).toBe("INTERRUPTED");
+    expect(callLog.length).toBe(3);
+  });
+});
+
+describe("retry classification is explicit, not permissive", () => {
+  /** Wraps a real repository, but `loadProject` always throws a plain, untagged Error. */
+  function genericErrorRepo(
+    repo: D1HowlerRepository,
+    callLog: number[],
+  ): WorkflowExecutorRepository {
+    return {
+      ...flakyRepo(repo, 0, []),
+      loadProject: (projectId: string) => {
+        callLog.push(callLog.length + 1);
+        void projectId;
+        return Promise.reject(new Error("a generic, unclassified failure"));
+      },
+    };
+  }
+
+  it("a generic (untagged) Error is never retried: exactly one repository call, and it propagates immediately", async () => {
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    await seedProject(repo);
+    const callLog: number[] = [];
+
+    await expect(
+      executeWorkflow(
+        buildDeps(genericErrorRepo(repo, callLog)),
+        queryIntent(),
+      ),
+    ).rejects.toThrow("a generic, unclassified failure");
+
+    expect(callLog.length).toBe(1);
+    // No interruption, no completion, no result — the call rejected outright.
+    const runCount = await env.HOWLER_DB.prepare(
+      "SELECT COUNT(*) AS count FROM workflow_runs WHERE state != 'RUNNING'",
+    ).first<{ count: number }>();
+    // The run is left exactly where the uncaught throw found it (RUNNING, mid-LOAD_PROJECT).
+    expect(runCount?.count).toBe(0);
+  });
+});
+
+describe("concurrent resume ownership: only the CAS winner executes workflow steps", () => {
+  it("two simultaneous resumptions of the same interrupted run: exactly one wins and executes to completion; the loser executes no workflow step", async () => {
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    await seedProject(repo);
+    const intent = queryIntent();
+
+    const interrupted = await executeWorkflow(
+      buildDeps(flakyRepo(repo, Infinity, [])),
+      intent,
+    );
+    expect(interrupted.outcome).toBe("INTERRUPTED");
+
+    const callLogA: number[] = [];
+    const callLogB: number[] = [];
+    const [a, b] = await Promise.all([
+      executeWorkflow(buildDeps(flakyRepo(repo, 0, callLogA)), intent),
+      executeWorkflow(buildDeps(flakyRepo(repo, 0, callLogB)), intent),
+    ]);
+
+    expect([a.outcome, b.outcome].sort()).toEqual([
+      "COMPLETED",
+      "CONCURRENT_RESUME_LOST",
+    ]);
+
+    const winner = a.outcome === "COMPLETED" ? a : b;
+    const loserCallLog = a.outcome === "COMPLETED" ? callLogB : callLogA;
+    expect(winner.outcome).toBe("COMPLETED");
+    if (winner.outcome !== "COMPLETED") return;
+
+    // Exactly one engine execution: the winner's own LOAD_PROJECT read happened, the loser's
+    // never did — it never reached `runSteps` at all.
+    expect(loserCallLog.length).toBe(0);
+    expect(winner.result.status).toBe("SUCCEEDED");
+    // Exactly one attempt increment consumed the resume, not two.
+    expect(winner.run.attempt).toBe(2);
+
+    // Exactly one terminal immutable result exists for the whole run.
+    const resultCount = await env.HOWLER_DB.prepare(
+      "SELECT COUNT(*) AS count FROM workflow_results",
+    ).first<{ count: number }>();
+    expect(resultCount?.count).toBe(1);
+  });
+});
+
+describe("maxAttempts is an immutable Task 13 invariant (exactly 3)", () => {
+  it("a newly claimed run always persists maxAttempts=3, regardless of anything a caller could configure", async () => {
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    await seedProject(repo);
+    const outcome = await executeWorkflow(
+      buildDeps(flakyRepo(repo, 0, [])),
+      queryIntent(),
+    );
+    expect(outcome.outcome).toBe("COMPLETED");
+    if (outcome.outcome !== "COMPLETED") return;
+    expect(outcome.run.maxAttempts).toBe(3);
+  });
+
+  it("replay/resume never alters the persisted attempt limit", async () => {
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    await seedProject(repo);
+    const intent = queryIntent();
+
+    const interrupted = await executeWorkflow(
+      buildDeps(flakyRepo(repo, Infinity, [])),
+      intent,
+    );
+    expect(interrupted.outcome).toBe("INTERRUPTED");
+    if (interrupted.outcome !== "INTERRUPTED") return;
+    expect(interrupted.run.maxAttempts).toBe(3);
+
+    const resumed = await executeWorkflow(
+      buildDeps(flakyRepo(repo, 0, [])),
+      intent,
+    );
+    expect(resumed.outcome).toBe("COMPLETED");
+    if (resumed.outcome !== "COMPLETED") return;
+    expect(resumed.run.maxAttempts).toBe(3);
   });
 });
 
@@ -273,5 +449,201 @@ describe("one exhausted workflow attempt interrupts, and serial re-entry resumes
       "SELECT COUNT(*) AS count FROM workflow_results",
     ).first<{ count: number }>();
     expect(resultCount?.count).toBe(1);
+  });
+});
+
+describe("persisted step definitions cannot silently drift", () => {
+  it("a corrupted ordinal on an already-SUCCEEDED step causes resume to fail before any further execution", async () => {
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    await seedProject(repo);
+    const intent = queryIntent();
+
+    const interrupted = await executeWorkflow(
+      buildDeps(flakyRepo(repo, Infinity, [])),
+      intent,
+    );
+    expect(interrupted.outcome).toBe("INTERRUPTED");
+    if (interrupted.outcome !== "INTERRUPTED") return;
+
+    // RECEIVE already completed SUCCEEDED before LOAD_PROJECT interrupted. Corrupt its ordinal.
+    await env.HOWLER_DB.prepare(
+      "UPDATE workflow_steps SET ordinal = 99 WHERE workflow_id = ? AND step_name = 'RECEIVE'",
+    )
+      .bind(interrupted.run.workflowId)
+      .run();
+
+    const callLog: number[] = [];
+    await expect(
+      executeWorkflow(buildDeps(flakyRepo(repo, 0, callLog)), intent),
+    ).rejects.toThrow(/ordinal drifted/);
+    // The corruption is caught before LOAD_PROJECT's own read is ever attempted again.
+    expect(callLog.length).toBe(0);
+  });
+
+  it("a corrupted input hash on an already-SKIPPED step causes resume to fail before any further execution", async () => {
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    await seedProject(repo);
+    const intent = healthQueryIntent();
+
+    // Interrupt at EXECUTE_ENGINE so CHECK_REVISION/PREPARE are already persisted SKIPPED.
+    const interrupted = await executeWorkflow(
+      buildDeps(flakyHealthRepo(repo, Infinity, [])),
+      intent,
+    );
+    expect(interrupted.outcome).toBe("INTERRUPTED");
+    if (interrupted.outcome !== "INTERRUPTED") return;
+
+    const beforeCorruption = await repo.loadWorkflowStep(
+      interrupted.run.workflowId,
+      "CHECK_REVISION",
+    );
+    expect(beforeCorruption?.state).toBe("SKIPPED");
+
+    await env.HOWLER_DB.prepare(
+      "UPDATE workflow_steps SET input_hash = ? WHERE workflow_id = ? AND step_name = 'CHECK_REVISION'",
+    )
+      .bind("f".repeat(64), interrupted.run.workflowId)
+      .run();
+
+    const callLog: number[] = [];
+    await expect(
+      executeWorkflow(buildDeps(flakyHealthRepo(repo, 0, callLog)), intent),
+    ).rejects.toThrow(/input hash changed/);
+    // The corruption is caught before EXECUTE_ENGINE's own read is ever attempted again.
+    expect(callLog.length).toBe(0);
+  });
+});
+
+describe("step attempt metadata accurately records which workflow attempt (re)executed a step", () => {
+  it("previously completed steps retain their original attempt; a resumed incomplete step records the new attempt", async () => {
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    await seedProject(repo);
+    const intent = queryIntent();
+
+    const interrupted = await executeWorkflow(
+      buildDeps(flakyRepo(repo, Infinity, [])),
+      intent,
+    );
+    expect(interrupted.outcome).toBe("INTERRUPTED");
+    if (interrupted.outcome !== "INTERRUPTED") return;
+
+    const stepsAfterInterrupt = await repo.loadWorkflowSteps(
+      interrupted.run.workflowId,
+    );
+    const byNameBefore = Object.fromEntries(
+      stepsAfterInterrupt.map((s) => [s.stepName, s]),
+    );
+    expect(byNameBefore.RECEIVE?.attempt).toBe(1);
+    expect(byNameBefore.VALIDATE?.attempt).toBe(1);
+    expect(byNameBefore.AUTHORIZE_POLICY?.attempt).toBe(1);
+    expect(byNameBefore.LOAD_PROJECT?.attempt).toBe(1);
+
+    const resumed = await executeWorkflow(
+      buildDeps(flakyRepo(repo, 0, [])),
+      intent,
+    );
+    expect(resumed.outcome).toBe("COMPLETED");
+    if (resumed.outcome !== "COMPLETED") return;
+    expect(resumed.run.attempt).toBe(2);
+
+    const stepsAfterResume = await repo.loadWorkflowSteps(
+      interrupted.run.workflowId,
+    );
+    const byNameAfter = Object.fromEntries(
+      stepsAfterResume.map((s) => [s.stepName, s]),
+    );
+    // Already-completed steps retain their original attempt.
+    expect(byNameAfter.RECEIVE?.attempt).toBe(1);
+    expect(byNameAfter.VALIDATE?.attempt).toBe(1);
+    expect(byNameAfter.AUTHORIZE_POLICY?.attempt).toBe(1);
+    // The step that was incomplete and got retried now records the attempt it succeeded under.
+    expect(byNameAfter.LOAD_PROJECT?.attempt).toBe(2);
+  });
+});
+
+describe("EVIDENCE_APPLY_SHADOW is rejected before any claim or persistence", () => {
+  it("creates zero intents, runs, steps, and results", async () => {
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    await seedProject(repo);
+    const candidate = {
+      schemaVersion: "1",
+      intentId: "55555555-5555-4555-8555-555555555555",
+      idempotencyKey: "key-apply-shadow-1",
+      projectId: PROJECT_ID,
+      kind: "EVIDENCE_APPLY_SHADOW",
+      requestedEffect: "APPLY_SHADOW",
+      expectedProjectRevision: 1,
+      submittedAt: NOW,
+      source: { channel: "API" },
+      payload: {
+        type: "EVIDENCE",
+        event: {
+          id: "evt-1",
+          baseRevision: 1,
+          projectId: PROJECT_ID,
+          type: "FIELD_UPDATE",
+          occurredAt: NOW,
+          receivedAt: NOW,
+          sourceIds: ["src-1"],
+          verification: "PM_CONFIRMED",
+          impactSeedActivityIds: ["masonry"],
+          mutations: [],
+          payload: {},
+        },
+      },
+    };
+    const validated = validateIntent(candidate);
+    if (!validated.valid) {
+      throw new Error(
+        `test fixture is not a valid intent: ${JSON.stringify(validated.problems)}`,
+      );
+    }
+
+    await expect(
+      executeWorkflow(buildDeps(flakyRepo(repo, 0, [])), validated.intent),
+    ).rejects.toThrow(/Task 14/);
+
+    const intentCount = await env.HOWLER_DB.prepare(
+      "SELECT COUNT(*) AS count FROM operator_intents",
+    ).first<{ count: number }>();
+    expect(intentCount?.count).toBe(0);
+    const runCount = await env.HOWLER_DB.prepare(
+      "SELECT COUNT(*) AS count FROM workflow_runs",
+    ).first<{ count: number }>();
+    expect(runCount?.count).toBe(0);
+    const stepCount = await env.HOWLER_DB.prepare(
+      "SELECT COUNT(*) AS count FROM workflow_steps",
+    ).first<{ count: number }>();
+    expect(stepCount?.count).toBe(0);
+    const resultCount2 = await env.HOWLER_DB.prepare(
+      "SELECT COUNT(*) AS count FROM workflow_results",
+    ).first<{ count: number }>();
+    expect(resultCount2?.count).toBe(0);
+  });
+});
+
+describe("BUILD_RESULT executes on terminal non-success paths too", () => {
+  it("stale-revision BLOCKED and RETRY_EXHAUSTED FAILED both persist all ten canonical steps including a SUCCEEDED BUILD_RESULT", async () => {
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    await seedProject(repo);
+    const intent = queryIntent();
+
+    // Drive to terminal FAILED via three exhausted attempts (reuses the RETRY_EXHAUSTED path).
+    await executeWorkflow(buildDeps(flakyRepo(repo, Infinity, [])), intent);
+    await executeWorkflow(buildDeps(flakyRepo(repo, Infinity, [])), intent);
+    const attempt3b = await executeWorkflow(
+      buildDeps(flakyRepo(repo, Infinity, [])),
+      intent,
+    );
+    expect(attempt3b.outcome).toBe("COMPLETED");
+    if (attempt3b.outcome !== "COMPLETED") return;
+    expect(attempt3b.result.status).toBe("FAILED");
+
+    const steps = await repo.loadWorkflowSteps(attempt3b.run.workflowId);
+    expect(steps.map((s) => s.stepName)).toEqual([...WORKFLOW_STEP_NAMES]);
+    expect(steps.map((s) => s.ordinal)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    const byName = Object.fromEntries(steps.map((s) => [s.stepName, s]));
+    expect(byName.BUILD_RESULT?.state).toBe("SUCCEEDED");
+    expect(byName.FINALIZE?.state).toBe("SUCCEEDED");
   });
 });
