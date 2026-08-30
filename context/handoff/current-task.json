@@ -1,17 +1,19 @@
 {
   "schemaVersion": "1",
   "kind": "handoffRecord",
-  "taskId": "task-14",
-  "title": "Task 14: Implement revision-safe shadow mutation and resumability",
+  "taskId": "task-15",
+  "title": "Task 15: Expose additive operator HTTP contracts",
   "status": "IN_PROGRESS",
-  "baseSha": "6df623cd1e2ff0f0d4c2e877b36dc9380f3033fa",
-  "blocks": ["task-15"],
-  "summary": "Task 14 (EVIDENCE_APPLY_SHADOW execution, revision-safe shadow-commit persistence, commit-time revision-race and ambiguous-commit-evidence handling, concurrent resume ownership) is implemented and verified on branch codex/v095-task14-context-activation: full repository test suite, context-pack tests, typecheck, lint, format, and build:dry all pass. Not yet merged, not yet accepted history, and not yet deployed. Task 15 (additive operator HTTP contracts, including the resume route) remains blocked until this is reviewed and merged.",
+  "baseSha": "c484a1ccf4f7d7c5c23482180f89ff2278d98ec0",
+  "blocks": ["task-16"],
+  "summary": "Task 14 is accepted (see context/receipts/accepted/through-task-014.json). Task 15 is implemented and verified on branch codex/v095-task15-operator-routes: POST /v1/intents, GET /v1/workflows/:workflowId, GET /v1/results/:resultId, and POST /v1/workflows/:workflowId/resume are thin authenticated adapters over the existing operator intent/workflow/result system (no workflow/domain logic duplicated in the HTTP layer). Full repository test suite, context-pack tests, typecheck, lint, format, and build:dry all pass. Not yet merged, not yet accepted history, and not yet deployed. Task 16 (dashboard/admin UI) remains blocked until this is reviewed and merged.",
   "relevantPaths": [
+    "src/worker/index.ts",
+    "src/worker/http.ts",
     "src/operator/workflow.ts",
-    "src/operator/policy.ts",
-    "src/worker/repository.ts",
-    "context/receipts/accepted/through-phase0-2.json",
-    "context/receipts/accepted/through-task-013.json"
+    "src/operator/intent.ts",
+    "src/operator/result.ts",
+    "test/contract/operator-routes.test.ts",
+    "test/contract/v094-routes.test.ts"
   ]
 }

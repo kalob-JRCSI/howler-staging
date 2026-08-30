@@ -77,6 +77,15 @@
       "summary": "Compact receipt: Context + Skill Fabric Phase 0-2 accepted through 6df623c, layered on through-task-013."
     },
     {
+      "id": "receipt-through-task-014",
+      "kind": "receipt",
+      "path": "context/receipts/accepted/through-task-014.json",
+      "authority": "ACCEPTED_RECEIPT",
+      "tags": ["accepted-history"],
+      "taskTypes": ["accepted-history-lookup", "implementation-handoff"],
+      "summary": "Compact receipt: Task 14 (shadow mutation/resumability) accepted through c484a1c, layered on through-phase0-2."
+    },
+    {
       "id": "spec-foundation-design",
       "kind": "spec",
       "path": "docs/superpowers/specs/2026-08-27-howler-v095-foundation-design.md",

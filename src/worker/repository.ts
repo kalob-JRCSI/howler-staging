@@ -979,6 +979,29 @@ export class D1HowlerRepository {
   }
 
   /**
+   * Task 15: reloads the original canonical intent for a workflow, so the resume HTTP route can
+   * resubmit the *identical* intent into `executeWorkflow` (design §7.3: "resume only an eligible
+   * interrupted run; it does not override business blocks or revisions") without the caller having
+   * to resend the original request body. `request_json` is the same canonical record `claimIntent`
+   * persisted, so it round-trips to a valid `IntentV1` unchanged.
+   */
+  async loadIntentByWorkflowId(
+    workflowId: string,
+  ): Promise<IntentV1 | undefined> {
+    const row = await this.db
+      .prepare(
+        `SELECT oi.request_json AS json FROM operator_intents oi
+        JOIN workflow_runs wr ON wr.intent_id = oi.intent_id
+        WHERE wr.workflow_id = ? LIMIT 1`,
+      )
+      .bind(workflowId)
+      .first<{ json: string }>();
+    return row
+      ? (parseJson(row.json, `intent for workflow ${workflowId}`) as IntentV1)
+      : undefined;
+  }
+
+  /**
    * Guarded (optimistic) run-state update for *non-terminal* transitions only (RECEIVED ->
    * VALIDATING -> READY -> RUNNING, RUNNING -> INTERRUPTED, INTERRUPTED -> RUNNING). Rejects any
    * transition outside Task 11's canonical state matrix (`isValidTransition`) and any resulting

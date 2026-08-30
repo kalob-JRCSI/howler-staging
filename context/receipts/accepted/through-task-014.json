@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "1",
+  "id": "through-task-014",
+  "kind": "acceptedReceipt",
+  "throughTask": 14,
+  "baseSha": "c484a1ccf4f7d7c5c23482180f89ff2278d98ec0",
+  "acceptedAt": "2026-08-30T00:00:00.000Z",
+  "summary": "Layered on top of through-phase0-2 (Tasks 1-13 plus the Context + Skill Fabric, unchanged): Task 14 is now accepted history. EVIDENCE_APPLY_SHADOW is a fully supported operator intent kind: COMMIT_SHADOW is the only operator domain mutation, gated by an oversight BLOCK check, a commit-time revision race normalized to BLOCKED/REVISION_CONFLICT, ambiguous commit evidence treated as terminal non-resumable FAILED/COMMIT_STATE_AMBIGUOUS, and concurrent resume ownership reusing Task 13's CAS guard unchanged. No HTTP route exposes it yet (Task 15).",
+  "evidence": [
+    {
+      "authority": "ACCEPTED_RECEIPT",
+      "path": "context/receipts/accepted/through-phase0-2.json",
+      "note": "Prior accepted layer: Tasks 1-13 and the Context + Skill Fabric, unchanged."
+    },
+    {
+      "authority": "GIT_CANONICAL",
+      "path": "src/operator/workflow.ts",
+      "note": "Task 14 executor: runEvidenceApplyShadow, runCommitShadowStep reconciliation, CommitStateAmbiguousError."
+    },
+    {
+      "authority": "GIT_CANONICAL",
+      "path": "src/operator/policy.ts",
+      "note": "Task 14: assertShadowCommitPermitted defense-in-depth guard."
+    },
+    {
+      "authority": "GIT_CANONICAL",
+      "path": "src/worker/repository.ts",
+      "note": "Task 14: loadEventById/loadOversightReviewById reconciliation reads; commitShadowTransition unchanged from the v0.9.4 recovery."
+    },
+    {
+      "authority": "GIT_CANONICAL",
+      "path": "test/integration/workflow-apply-shadow.test.ts",
+      "note": "Successful commit, oversight BLOCK, duplicate delivery."
+    },
+    {
+      "authority": "GIT_CANONICAL",
+      "path": "test/integration/workflow-revision-conflict.test.ts",
+      "note": "Stale-revision and commit-time revision-race BLOCKED paths."
+    },
+    {
+      "authority": "GIT_CANONICAL",
+      "path": "test/integration/workflow-resume.test.ts",
+      "note": "Transient-interruption resume, duplicate-after-crash reconciliation, concurrent resume ownership."
+    },
+    {
+      "authority": "GIT_CANONICAL",
+      "path": "test/integration/workflow-ambiguous-commit.test.ts",
+      "note": "Ambiguous commit evidence: terminal, non-resumable FAILED/COMMIT_STATE_AMBIGUOUS."
+    },
+    {
+      "authority": "RUNTIME_TRUTH",
+      "path": "wrangler.jsonc",
+      "note": "Staging-only, HOWLER_MODE=shadow, canonical deploy config, unchanged."
+    },
+    {
+      "authority": "GIT_CANONICAL",
+      "path": "sha:c484a1ccf4f7d7c5c23482180f89ff2278d98ec0",
+      "note": "Merge commit for PR #7 (Task 14), the accepted baseline tip this receipt describes."
+    }
+  ],
+  "notAccepted": [
+    "Task 15 (additive operator HTTP contracts: POST /v1/intents, GET /v1/workflows/:workflowId, GET /v1/results/:resultId, POST /v1/workflows/:workflowId/resume) is not represented by this receipt and is not accepted history."
+  ]
+}
