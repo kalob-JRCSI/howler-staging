@@ -2,14 +2,14 @@
   "note": "Phase 0-2 measured baseline-vs-routed comparison for the real catalog. Forward-only; no historical figure implied.",
   "taskType": "implementation-handoff",
   "baseline": {
-    "fileCount": 12,
-    "chars": 99069,
-    "approxTokens": 24768
+    "fileCount": 13,
+    "chars": 101403,
+    "approxTokens": 25351
   },
   "routed": {
-    "fileCount": 10,
-    "chars": 95579,
-    "approxTokens": 23895
+    "fileCount": 11,
+    "chars": 97913,
+    "approxTokens": 24479
   },
-  "measuredReductionPercent": 3.5
+  "measuredReductionPercent": 3.4
 }

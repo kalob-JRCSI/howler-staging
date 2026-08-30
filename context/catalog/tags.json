@@ -10,7 +10,8 @@
       "skill-accepted-history",
       "receipt-through-task-013",
       "receipt-through-phase0-2",
-      "receipt-through-task-014"
+      "receipt-through-task-014",
+      "receipt-through-task-015"
     ],
     "parity": ["skill-parity-review", "test-dir-parity"],
     "fixtures": ["test-dir-parity"],
