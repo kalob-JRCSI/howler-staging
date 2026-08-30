@@ -17,11 +17,25 @@ import { D1HowlerRepository } from "./repository";
 import { validateUnderstandingProposal } from "./understanding";
 import type { UnderstandingProposalInputV094 } from "./understanding";
 import type { ProjectEventV094, ProjectModelV094 } from "../domain/types";
+import { validateIntent } from "../operator/intent";
+import { executeWorkflow, isTerminalWorkflowState } from "../operator/workflow";
+import type {
+  AuthorizationAttestation,
+  ExecuteWorkflowResult,
+  WorkflowExecutorDeps,
+} from "../operator/workflow";
+import { buildIntentSubmissionResponse } from "../operator/result";
 
 // Engine/admin-page compatibility version. Distinct from GET /health's own `version` field, which
 // buildHealthReport (src/worker/health.ts) now owns and reports as "0.9.5" with an additive
 // engineCompatibilityVersion of "0.9.4" — see design doc §4.3.
 const SERVICE_VERSION = "0.9.4";
+
+// Task 15: the operator executor judges this against `assertStagingShadowPolicy`
+// (src/operator/policy.ts) exactly as policy.ts's own STAGING_WORKER_NAME constant does. Not read
+// from an env binding — wrangler.jsonc's own committed worker name has no runtime env
+// counterpart, so this mirrors SERVICE_VERSION's existing hardcoded-constant pattern above.
+const OPERATOR_WORKER_NAME = "jarvis-voice-staging";
 
 const SCHEMA_TABLES = [
   "projects",
@@ -304,6 +318,86 @@ async function reviewedRun(
   return { model, baseline, latest, comparisonBaseline, run, reviewToken };
 }
 
+/**
+ * Task 15: the one place a repository + runtime mode become the injected dependencies
+ * `executeWorkflow` (src/operator/workflow.ts) needs. Builds no domain/workflow behavior of its
+ * own — purely transport-side wiring so the HTTP layer never duplicates operator logic.
+ */
+function buildWorkflowExecutorDeps(
+  repo: D1HowlerRepository,
+  mode: string,
+): WorkflowExecutorDeps {
+  const authorization: AuthorizationAttestation = {
+    authenticated: true,
+    mode,
+    workerName: OPERATOR_WORKER_NAME,
+  };
+  return {
+    repo,
+    clock: { now: () => new Date() },
+    workflowIds: { next: () => crypto.randomUUID() },
+    resultIds: { next: () => crypto.randomUUID() },
+    authorization,
+  };
+}
+
+/**
+ * The one place an `ExecuteWorkflowResult` becomes an HTTP response (design §7.3) — shared by
+ * `POST /v1/intents` and the resume route, so the outcome-to-status mapping and the "was this a
+ * replay" determination exist in exactly one place, not duplicated per route.
+ *
+ * `SUCCEEDED` -> 200 (replay) or 201 (fresh). `BLOCKED` -> 409: a business/revision/oversight
+ * prerequisite conflicts with the current request (design §10.2 explicitly normalizes a
+ * commit-time revision race to this same status). `FAILED` -> 500: a non-retryable
+ * internal/technical failure, not a client-format problem — still returned as a structured
+ * `WorkflowProblem`, never a stack trace.
+ */
+function respondToWorkflowOutcome(
+  outcome: ExecuteWorkflowResult,
+  alreadyTerminalBefore: boolean,
+): Response {
+  switch (outcome.outcome) {
+    case "IDEMPOTENCY_KEY_REUSE":
+      throw new HttpError(
+        409,
+        "Idempotency key reused with a different request",
+        { code: "IDEMPOTENCY_KEY_REUSE" },
+      );
+    case "INTENT_ID_REUSE":
+      throw new HttpError(409, "Intent ID reused with a different request", {
+        code: "INTENT_ID_REUSE",
+      });
+    case "CONCURRENT_RESUME_LOST":
+      throw new HttpError(
+        409,
+        "This workflow is concurrently being advanced by another request",
+        {
+          code: "CONCURRENT_RESUME_LOST",
+          workflowId: outcome.run.workflowId,
+        },
+      );
+    case "INTERRUPTED":
+      return json(
+        buildIntentSubmissionResponse(false, outcome.run, undefined),
+        202,
+      );
+    case "COMPLETED": {
+      const response = buildIntentSubmissionResponse(
+        alreadyTerminalBefore,
+        outcome.run,
+        outcome.result,
+      );
+      if (outcome.result.status === "SUCCEEDED") {
+        return json(response, alreadyTerminalBefore ? 200 : 201);
+      }
+      if (outcome.result.status === "BLOCKED") {
+        return json(response, 409);
+      }
+      return json(response, 500);
+    }
+  }
+}
+
 async function handle(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   const parts = route(url.pathname);
@@ -359,6 +453,77 @@ async function handle(request: Request, env: Env): Promise<Response> {
       },
       201,
     );
+  }
+
+  // Task 15: additive operator HTTP contracts (design §7.3). Thin adapters only — all four
+  // routes call straight into `executeWorkflow`/the repository; no workflow/domain logic is
+  // reimplemented here.
+  if (request.method === "POST" && parts.join("/") === "v1/intents") {
+    const body = await readJson(request);
+    const validated = validateIntent(body);
+    if (!validated.valid) {
+      throw new HttpError(400, "Invalid intent", {
+        problems: validated.problems,
+      });
+    }
+    const intent = validated.intent;
+    const before = await repo.loadWorkflowRunByIntentId(intent.intentId);
+    const alreadyTerminal =
+      before !== undefined && isTerminalWorkflowState(before.state);
+    const outcome = await executeWorkflow(
+      buildWorkflowExecutorDeps(repo, mode),
+      intent,
+    );
+    return respondToWorkflowOutcome(outcome, alreadyTerminal);
+  }
+
+  if (
+    request.method === "GET" &&
+    parts.length === 3 &&
+    parts[1] === "workflows" &&
+    parts[2]
+  ) {
+    const workflowId = parts[2];
+    const run = await repo.loadWorkflowRun(workflowId);
+    if (!run) throw new HttpError(404, `Workflow ${workflowId} not found`);
+    return json(run);
+  }
+
+  if (
+    request.method === "GET" &&
+    parts.length === 3 &&
+    parts[1] === "results" &&
+    parts[2]
+  ) {
+    const resultId = parts[2];
+    const result = await repo.loadWorkflowResult(resultId);
+    if (!result) throw new HttpError(404, `Result ${resultId} not found`);
+    return json(result);
+  }
+
+  if (
+    request.method === "POST" &&
+    parts.length === 4 &&
+    parts[1] === "workflows" &&
+    parts[2] &&
+    parts[3] === "resume"
+  ) {
+    const workflowId = parts[2];
+    const run = await repo.loadWorkflowRun(workflowId);
+    if (!run) throw new HttpError(404, `Workflow ${workflowId} not found`);
+    const intent = await repo.loadIntentByWorkflowId(workflowId);
+    if (!intent) {
+      throw new HttpError(
+        500,
+        `Workflow ${workflowId} has no matching intent record`,
+      );
+    }
+    const alreadyTerminal = isTerminalWorkflowState(run.state);
+    const outcome = await executeWorkflow(
+      buildWorkflowExecutorDeps(repo, mode),
+      intent,
+    );
+    return respondToWorkflowOutcome(outcome, alreadyTerminal);
   }
 
   if (parts[1] !== "projects" || !parts[2])

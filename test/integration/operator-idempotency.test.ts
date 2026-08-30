@@ -512,3 +512,26 @@ describe("claimIntent: concurrent claims — the loser loads the winning run rat
     expect(await runCount()).toBe(1);
   });
 });
+
+describe("loadIntentByWorkflowId: Task 15 resume-route lookup", () => {
+  it("reloads the exact original intent by workflowId, round-tripping every field", async () => {
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    const intent = validIntent();
+    const claimed = await repo.claimIntent({
+      intent,
+      workflowId: "wf-lookup-1",
+      maxAttempts: 3,
+      now: NOW,
+    });
+    expect(claimed.outcome).toBe("CLAIMED");
+    if (claimed.outcome !== "CLAIMED") return;
+
+    const reloaded = await repo.loadIntentByWorkflowId(claimed.run.workflowId);
+    expect(reloaded).toEqual(intent);
+  });
+
+  it("returns undefined for an unknown workflowId", async () => {
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    expect(await repo.loadIntentByWorkflowId("does-not-exist")).toBeUndefined();
+  });
+});
