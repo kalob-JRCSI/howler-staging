@@ -138,6 +138,9 @@ function flakyRepo(
     loadLatestPublishedForecast: repo.loadLatestPublishedForecast.bind(repo),
     loadForecastById: repo.loadForecastById.bind(repo),
     loadPredictionOutcomes: repo.loadPredictionOutcomes.bind(repo),
+    commitShadowTransition: repo.commitShadowTransition.bind(repo),
+    loadEventById: repo.loadEventById.bind(repo),
+    loadOversightReviewById: repo.loadOversightReviewById.bind(repo),
   };
 }
 
@@ -558,67 +561,6 @@ describe("step attempt metadata accurately records which workflow attempt (re)ex
     expect(byNameAfter.AUTHORIZE_POLICY?.attempt).toBe(1);
     // The step that was incomplete and got retried now records the attempt it succeeded under.
     expect(byNameAfter.LOAD_PROJECT?.attempt).toBe(2);
-  });
-});
-
-describe("EVIDENCE_APPLY_SHADOW is rejected before any claim or persistence", () => {
-  it("creates zero intents, runs, steps, and results", async () => {
-    const repo = new D1HowlerRepository(env.HOWLER_DB);
-    await seedProject(repo);
-    const candidate = {
-      schemaVersion: "1",
-      intentId: "55555555-5555-4555-8555-555555555555",
-      idempotencyKey: "key-apply-shadow-1",
-      projectId: PROJECT_ID,
-      kind: "EVIDENCE_APPLY_SHADOW",
-      requestedEffect: "APPLY_SHADOW",
-      expectedProjectRevision: 1,
-      submittedAt: NOW,
-      source: { channel: "API" },
-      payload: {
-        type: "EVIDENCE",
-        event: {
-          id: "evt-1",
-          baseRevision: 1,
-          projectId: PROJECT_ID,
-          type: "FIELD_UPDATE",
-          occurredAt: NOW,
-          receivedAt: NOW,
-          sourceIds: ["src-1"],
-          verification: "PM_CONFIRMED",
-          impactSeedActivityIds: ["masonry"],
-          mutations: [],
-          payload: {},
-        },
-      },
-    };
-    const validated = validateIntent(candidate);
-    if (!validated.valid) {
-      throw new Error(
-        `test fixture is not a valid intent: ${JSON.stringify(validated.problems)}`,
-      );
-    }
-
-    await expect(
-      executeWorkflow(buildDeps(flakyRepo(repo, 0, [])), validated.intent),
-    ).rejects.toThrow(/Task 14/);
-
-    const intentCount = await env.HOWLER_DB.prepare(
-      "SELECT COUNT(*) AS count FROM operator_intents",
-    ).first<{ count: number }>();
-    expect(intentCount?.count).toBe(0);
-    const runCount = await env.HOWLER_DB.prepare(
-      "SELECT COUNT(*) AS count FROM workflow_runs",
-    ).first<{ count: number }>();
-    expect(runCount?.count).toBe(0);
-    const stepCount = await env.HOWLER_DB.prepare(
-      "SELECT COUNT(*) AS count FROM workflow_steps",
-    ).first<{ count: number }>();
-    expect(stepCount?.count).toBe(0);
-    const resultCount2 = await env.HOWLER_DB.prepare(
-      "SELECT COUNT(*) AS count FROM workflow_results",
-    ).first<{ count: number }>();
-    expect(resultCount2?.count).toBe(0);
   });
 });
 

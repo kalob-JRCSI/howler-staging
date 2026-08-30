@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   assertPermittedEffect,
+  assertShadowCommitPermitted,
   assertStagingShadowPolicy,
   isSafetyCompliant,
   OPERATOR_SAFETY,
@@ -145,5 +146,27 @@ describe("assertPermittedEffect: defense-in-depth against publication/external e
       const problem = assertPermittedEffect(kind, "EXTERNAL_SYNC" as never);
       expect(problem, kind).toMatchObject({ category: "POLICY" });
     }
+  });
+});
+
+describe("assertShadowCommitPermitted: only EVIDENCE_APPLY_SHADOW may invoke a shadow commit", () => {
+  it("permits EVIDENCE_APPLY_SHADOW", () => {
+    expect(
+      assertShadowCommitPermitted("EVIDENCE_APPLY_SHADOW"),
+    ).toBeUndefined();
+  });
+
+  it.each([
+    "FORECAST_QUERY",
+    "FORECAST_HEALTH_QUERY",
+    "RECOVERY_QUERY",
+    "EVIDENCE_PREVIEW",
+  ] as const)("rejects %s", (kind) => {
+    const problem = assertShadowCommitPermitted(kind);
+    expect(problem).toMatchObject({
+      code: "POLICY_SHADOW_COMMIT_NOT_PERMITTED",
+      category: "POLICY",
+      retryable: false,
+    });
   });
 });

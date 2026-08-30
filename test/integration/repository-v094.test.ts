@@ -233,6 +233,66 @@ describe("D1HowlerRepository: events", () => {
     await expect(repo.loadEvents("p1", 0)).resolves.toEqual([]);
     await expect(repo.loadEvents("p1", -5)).resolves.toEqual([]);
   });
+
+  it("loadEventById finds a committed event by its exact (project, event) key", async () => {
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    const model = seedModel();
+    const run = forecastInitial(model, GENERATED_AT, 1);
+    await repo.createProject(model, run.candidate, run.oversight);
+    const event = {
+      id: "e0",
+      baseRevision: 0,
+      projectId: "p1",
+      type: "FIELD_UPDATE",
+      occurredAt: GENERATED_AT,
+      receivedAt: GENERATED_AT,
+      sourceIds: [],
+      verification: "PM_CONFIRMED" as const,
+      impactSeedActivityIds: [],
+      mutations: [],
+      payload: {},
+    };
+    const modelAfterEvent: ProjectModelV094 = {
+      ...model,
+      revision: 1,
+      eventLedger: [event],
+    };
+    const candidate = {
+      ...run.candidate,
+      id: "snap-0",
+      version: 2,
+      modelRevision: 1,
+      status: "WORKING" as const,
+    };
+    const oversight = {
+      ...run.oversight,
+      id: "oversight-0",
+      candidateSnapshotId: candidate.id,
+    };
+    await repo.commitShadowTransition({
+      expectedRevision: 0,
+      modelAfterEvent,
+      event,
+      candidate,
+      oversight,
+    });
+    expect(await repo.loadEventById("p1", "e0")).toEqual(event);
+    expect(await repo.loadEventById("p1", "missing-event")).toBeUndefined();
+    expect(await repo.loadEventById("other-project", "e0")).toBeUndefined();
+  });
+
+  it("loadOversightReviewById finds a committed oversight review by its exact ID", async () => {
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    const model = seedModel();
+    const run = forecastInitial(model, GENERATED_AT, 1);
+    await repo.createProject(model, run.candidate, run.oversight);
+    expect(await repo.loadOversightReviewById(run.oversight.id)).toEqual(
+      run.oversight,
+    );
+    expect(
+      await repo.loadOversightReviewById("missing-review"),
+    ).toBeUndefined();
+  });
 });
 
 describe("D1HowlerRepository: learning records", () => {

@@ -469,6 +469,27 @@ export class D1HowlerRepository {
       : undefined;
   }
 
+  /**
+   * Targeted lookup by the domain's own stable primary key `(project_id, event_id)` — used by
+   * Task 14's COMMIT_SHADOW reconciliation to detect whether a prior attempt's atomic domain
+   * commit already landed before this attempt tries to (re-)commit (design §10.3/§10.4).
+   */
+  async loadEventById(
+    projectId: string,
+    eventId: string,
+  ): Promise<ProjectEventV094 | undefined> {
+    const row = await this.db
+      .prepare(
+        `SELECT event_json AS json FROM project_events
+      WHERE project_id = ? AND event_id = ? LIMIT 1`,
+      )
+      .bind(projectId, eventId)
+      .first<{ json: string }>();
+    return row
+      ? (parseJson(row.json, `event ${eventId}`) as ProjectEventV094)
+      : undefined;
+  }
+
   async loadEvents(
     projectId: string,
     limit = 100,
@@ -684,6 +705,30 @@ export class D1HowlerRepository {
       }
       throw error;
     }
+  }
+
+  /**
+   * Targeted lookup by the domain's own primary key `review_id` — the other half of Task 14's
+   * COMMIT_SHADOW reconciliation evidence check (paired with `loadEventById`): an event that
+   * exists without its matching oversight review (or vice versa) is exactly the ambiguous-commit
+   * evidence design §10.4 requires treating as terminal `COMMIT_STATE_AMBIGUOUS`, never as a
+   * silent retry.
+   */
+  async loadOversightReviewById(
+    reviewId: string,
+  ): Promise<OversightReviewV094 | undefined> {
+    const row = await this.db
+      .prepare(
+        `SELECT review_json AS json FROM oversight_reviews WHERE review_id = ? LIMIT 1`,
+      )
+      .bind(reviewId)
+      .first<{ json: string }>();
+    return row
+      ? (parseJson(
+          row.json,
+          `oversight review ${reviewId}`,
+        ) as OversightReviewV094)
+      : undefined;
   }
 
   async saveLearningRecord(record: LearningRecordV094): Promise<void> {

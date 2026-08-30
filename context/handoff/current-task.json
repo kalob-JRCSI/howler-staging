@@ -1,17 +1,17 @@
 {
   "schemaVersion": "1",
   "kind": "handoffRecord",
-  "taskId": "howler-context-skill-fabric-phase0-2",
-  "title": "Howler Context + Skill Fabric, Phase 0-2",
+  "taskId": "task-14",
+  "title": "Task 14: Implement revision-safe shadow mutation and resumability",
   "status": "IN_PROGRESS",
-  "baseSha": "2ffc939a94d97d7f19b6f9f5885d1f407df9eb1e",
-  "blocks": ["task-14"],
-  "summary": "Development-infrastructure-only work: a lean AGENTS.md router, a compact accepted-history receipt through Task 13, a routable context catalog, four canonical repo-local development skills under .agents/skills/, and a deterministic context packer (tools/context-pack/) with no embeddings/vector search. Does not modify Howler runtime behavior and does not start Task 14.",
+  "baseSha": "6df623cd1e2ff0f0d4c2e877b36dc9380f3033fa",
+  "blocks": ["task-15"],
+  "summary": "Task 14 (EVIDENCE_APPLY_SHADOW execution, revision-safe shadow-commit persistence, commit-time revision-race and ambiguous-commit-evidence handling, concurrent resume ownership) is implemented and verified on branch codex/v095-task14-context-activation: full repository test suite, context-pack tests, typecheck, lint, format, and build:dry all pass. Not yet merged, not yet accepted history, and not yet deployed. Task 15 (additive operator HTTP contracts, including the resume route) remains blocked until this is reviewed and merged.",
   "relevantPaths": [
-    "AGENTS.md",
-    "context/",
-    ".agents/skills/",
-    "tools/context-pack/",
-    "docs/superpowers/plans/2026-08-30-howler-context-skill-fabric-phase0-2.md"
+    "src/operator/workflow.ts",
+    "src/operator/policy.ts",
+    "src/worker/repository.ts",
+    "context/receipts/accepted/through-phase0-2.json",
+    "context/receipts/accepted/through-task-013.json"
   ]
 }
