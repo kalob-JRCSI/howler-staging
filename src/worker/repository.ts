@@ -976,10 +976,13 @@ export class D1HowlerRepository {
       await this.db.batch(statements);
     } catch (error) {
       // The guard's own WHERE clause not matching (a concurrent finalize already ran) surfaces as
-      // a workflow_results FK/identity failure once the UPDATE silently affects zero rows and the
-      // run is left in its prior (non-terminal) state — re-check rather than guess from the text.
+      // a workflow_results UNIQUE/identity failure once the UPDATE silently affects zero rows and
+      // a competing finalize has already moved the run to a terminal state — re-check the run's
+      // actual state rather than guess from the error text. A state that has moved away from
+      // expectedState means someone else won the race; a state that is still expectedState means
+      // this failure is unexplained by a race and must not be swallowed.
       const stillCurrent = await this.loadWorkflowRun(input.workflowId);
-      if (stillCurrent && stillCurrent.state === input.expectedState) {
+      if (stillCurrent && stillCurrent.state !== input.expectedState) {
         return false;
       }
       throw error;

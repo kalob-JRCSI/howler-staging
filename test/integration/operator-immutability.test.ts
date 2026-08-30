@@ -600,6 +600,48 @@ describe("finalizeWorkflowRun: atomic, relationally consistent terminal transiti
     const run = await repo.loadWorkflowRun("wf-1");
     expect(run?.state).toBe("FAILED");
   });
+
+  it("a genuine concurrent double-finalize race: the loser returns false rather than rejecting", async () => {
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    const intent = await claimSampleIntent(repo);
+    await advanceToRunning(repo);
+
+    // Both calls read/act on the same expectedState ("RUNNING") and race to finalize the same
+    // workflowId concurrently — this exercises the actual catch-path race classification, not the
+    // pre-check (which only catches a *stale* expectedState read before either call starts).
+    const [a, b] = await Promise.all([
+      repo.finalizeWorkflowRun({
+        workflowId: "wf-1",
+        expectedState: "RUNNING",
+        terminalState: "SUCCEEDED",
+        result: sampleResult({
+          intentId: intent.intentId,
+          resultId: "result-A",
+        }),
+        now: NOW,
+      }),
+      repo.finalizeWorkflowRun({
+        workflowId: "wf-1",
+        expectedState: "RUNNING",
+        terminalState: "SUCCEEDED",
+        result: sampleResult({
+          intentId: intent.intentId,
+          resultId: "result-B",
+        }),
+        now: NOW,
+      }),
+    ]);
+
+    expect([a, b].sort()).toEqual([false, true]);
+
+    const resultRow = await env.HOWLER_DB.prepare(
+      "SELECT COUNT(*) AS count FROM workflow_results",
+    ).first<{ count: number }>();
+    expect(resultRow?.count).toBe(1);
+
+    const run = await repo.loadWorkflowRun("wf-1");
+    expect(run?.state).toBe("SUCCEEDED");
+  });
 });
 
 describe("never persists the admin key or any authentication secret", () => {
