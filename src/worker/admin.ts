@@ -273,6 +273,7 @@ export interface OperatorPanelTestHooks {
     makeId: () => string,
   ) => SubmissionIdentity;
   markSubmissionResolved?: (storage: OperatorPanelStorage) => void;
+  isDefinitiveOutcome?: (result: { status: number; body: unknown }) => boolean;
   buildIntentPayload?: (
     fields: FormFields,
     identity: SubmissionIdentity,
@@ -284,6 +285,12 @@ const PENDING_KEY = "howler_operator_pending_submission";
 const ADMIN_KEY_STORAGE_KEY = "howler_admin_key";
 const EM_DASH = String.fromCharCode(8212);
 const EVIDENCE_KINDS = new Set(["EVIDENCE_PREVIEW", "EVIDENCE_APPLY_SHADOW"]);
+/** The Task 15 structured 409 outcomes that carry no `run` object of their own. */
+const REUSE_OR_CONFLICT_CODES = new Set([
+  "IDEMPOTENCY_KEY_REUSE",
+  "INTENT_ID_REUSE",
+  "CONCURRENT_RESUME_LOST",
+]);
 const REQUIRED_EFFECT_BY_KIND: Record<string, string> = {
   FORECAST_QUERY: "READ_ONLY",
   FORECAST_HEALTH_QUERY: "READ_ONLY",
@@ -366,13 +373,73 @@ export function operatorPanelClientScript(
   }
 
   /**
-   * Marks whatever identity is currently pending as RESOLVED: called the moment a submission
-   * receives ANY definitive server response (the fetch settled -- regardless of HTTP status or
-   * whether the body was a recognized run/result shape). A 202 INTERRUPTED response counts as
-   * definitive too: it is known server acceptance of the intent/workflow, and the correct way to
-   * continue it is the explicit Resume workflow action, not a coincidental identity match on a
-   * later Run click. A network exception never reaches this function, so a lost/ambiguous
-   * response leaves the identity PENDING and still retryable. A no-op if nothing is pending.
+   * A fetch settling (as opposed to rejecting) is not by itself proof of the logical intent's
+   * server-side fate -- an arbitrary 5xx can happen after the server already did real work, and a
+   * malformed/unparseable body proves nothing either way. Only a response shape the Task 15
+   * contract actually documents counts as DEFINITIVE:
+   *
+   *  - a recognized `run` object (workflowId + state) -- present on 200/201 (SUCCEEDED),
+   *    202 (INTERRUPTED), 409 (BLOCKED), and 500 (FAILED) alike, since all of them carry the
+   *    authoritative run/result Task 15 already persisted;
+   *  - 401/403 -- Task 15 authenticates before parsing or persisting anything, so rejection here
+   *    proves no workflow was ever created;
+   *  - a structured 409 reuse/conflict outcome (IDEMPOTENCY_KEY_REUSE, INTENT_ID_REUSE,
+   *    CONCURRENT_RESUME_LOST) -- these have no `run` object of their own, but are still a
+   *    recognized, documented Task 15 shape;
+   *  - a structured 400 validation rejection (a `details.problems` array) -- proven
+   *    pre-`claimIntent`, so no workflow was created.
+   *
+   * Anything else -- an unrecognized 5xx, an unparseable body, a response with none of the above
+   * shapes -- is UNCERTAIN: the identity must stay PENDING so the next retry reuses it rather than
+   * risking a second logical intent for work whose fate is not actually known.
+   */
+  function isDefinitiveOutcome(result: {
+    status: number;
+    body: unknown;
+  }): boolean {
+    const body = result.body as
+      | {
+          run?: { workflowId?: unknown; state?: unknown };
+          details?: { code?: unknown; problems?: unknown };
+        }
+      | undefined;
+    if (!body) return false;
+
+    const run = body.run;
+    if (
+      run &&
+      typeof run.workflowId === "string" &&
+      typeof run.state === "string"
+    ) {
+      return true;
+    }
+
+    if (result.status === 401 || result.status === 403) return true;
+
+    const code = body.details?.code;
+    if (
+      result.status === 409 &&
+      typeof code === "string" &&
+      REUSE_OR_CONFLICT_CODES.has(code)
+    ) {
+      return true;
+    }
+
+    if (result.status === 400 && Array.isArray(body.details?.problems)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Marks whatever identity is currently pending as RESOLVED: called only when
+   * `isDefinitiveOutcome` proves the submission's fate is actually known. A 202 INTERRUPTED
+   * response counts as definitive: it is known server acceptance of the intent/workflow, and the
+   * correct way to continue it is the explicit Resume workflow action, not a coincidental identity
+   * match on a later Run click. A network exception never reaches this function at all, and an
+   * uncertain (not-definitive) response deliberately does not call it either, so both leave the
+   * identity PENDING and still retryable. A no-op if nothing is pending.
    */
   function markSubmissionResolved(storage: OperatorPanelStorage): void {
     const stored = readStoredSubmission(storage);
@@ -446,6 +513,7 @@ export function operatorPanelClientScript(
     testHooks.computeFormSignature = computeFormSignature;
     testHooks.resolveSubmissionIdentity = resolveSubmissionIdentity;
     testHooks.markSubmissionResolved = markSubmissionResolved;
+    testHooks.isDefinitiveOutcome = isDefinitiveOutcome;
     testHooks.buildIntentPayload = buildIntentPayload;
     testHooks.mapOutcomeToDisplay = mapOutcomeToDisplay;
   }
@@ -565,11 +633,13 @@ export function operatorPanelClientScript(
   ): Promise<void> {
     return promise
       .then((result) => {
-        // The fetch settled with a definitive server response (any HTTP status, any body shape)
-        // -- this identity is resolved regardless of whether the response was one we can render.
-        // A network exception never reaches this branch, so a lost/ambiguous response (the
-        // `.catch` below) leaves the identity PENDING and still safely retryable.
-        markSubmissionResolved(sessionStorage);
+        // The fetch settled (as opposed to rejecting), but that alone does not prove the logical
+        // intent's fate is known -- an arbitrary 5xx or an unparseable body must leave the
+        // identity PENDING (see isDefinitiveOutcome). A network exception never reaches this
+        // branch either way (the `.catch` below).
+        if (isDefinitiveOutcome(result)) {
+          markSubmissionResolved(sessionStorage);
+        }
         const body = result.body as
           { run?: unknown; result?: unknown; error?: string } | undefined;
         if (body && (body.run ?? body.result)) {

@@ -355,6 +355,130 @@ describe("pending/resolved submission identity lifecycle", () => {
   });
 });
 
+describe("pure logic: isDefinitiveOutcome (Task 15 response classification)", () => {
+  it("a recognized 201 fresh success is definitive", () => {
+    const { testHooks } = mount(() => jsonResponse(202, {}));
+    expect(
+      testHooks.isDefinitiveOutcome({
+        status: 201,
+        body: {
+          run: { workflowId: "w1", state: "SUCCEEDED" },
+          result: { resultId: "r1", status: "SUCCEEDED" },
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it("a recognized 200 deterministic replay is definitive", () => {
+    const { testHooks } = mount(() => jsonResponse(202, {}));
+    expect(
+      testHooks.isDefinitiveOutcome({
+        status: 200,
+        body: {
+          replayed: true,
+          run: { workflowId: "w1", state: "SUCCEEDED" },
+          result: { resultId: "r1", status: "SUCCEEDED" },
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it("a recognized 202 INTERRUPTED (workflow identity known) is definitive", () => {
+    const { testHooks } = mount(() => jsonResponse(202, {}));
+    expect(
+      testHooks.isDefinitiveOutcome({
+        status: 202,
+        body: { run: { workflowId: "w1", state: "INTERRUPTED" } },
+      }),
+    ).toBe(true);
+  });
+
+  it("a recognized structured 409 BLOCKED result is definitive", () => {
+    const { testHooks } = mount(() => jsonResponse(202, {}));
+    expect(
+      testHooks.isDefinitiveOutcome({
+        status: 409,
+        body: {
+          run: { workflowId: "w1", state: "BLOCKED" },
+          result: {
+            resultId: "r1",
+            status: "BLOCKED",
+            problem: { code: "REVISION_CONFLICT" },
+          },
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it("a recognized structured 409 reuse/conflict outcome (no run object) is definitive", () => {
+    const { testHooks } = mount(() => jsonResponse(202, {}));
+    for (const code of [
+      "IDEMPOTENCY_KEY_REUSE",
+      "INTENT_ID_REUSE",
+      "CONCURRENT_RESUME_LOST",
+    ]) {
+      expect(
+        testHooks.isDefinitiveOutcome({
+          status: 409,
+          body: { error: "conflict", details: { code } },
+        }),
+      ).toBe(true);
+    }
+  });
+
+  it("401/403 is definitive -- Task 15 authenticates before parsing/persistence", () => {
+    const { testHooks } = mount(() => jsonResponse(202, {}));
+    expect(
+      testHooks.isDefinitiveOutcome({
+        status: 401,
+        body: { error: "Unauthorized" },
+      }),
+    ).toBe(true);
+    expect(
+      testHooks.isDefinitiveOutcome({
+        status: 403,
+        body: { error: "Forbidden" },
+      }),
+    ).toBe(true);
+  });
+
+  it("a deterministic 400 pre-acceptance validation rejection is definitive", () => {
+    const { testHooks } = mount(() => jsonResponse(202, {}));
+    expect(
+      testHooks.isDefinitiveOutcome({
+        status: 400,
+        body: {
+          error: "Invalid intent",
+          details: { problems: [{ code: "X" }] },
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it("an arbitrary 500 with no recognized run/result is UNCERTAIN, not definitive", () => {
+    const { testHooks } = mount(() => jsonResponse(202, {}));
+    expect(
+      testHooks.isDefinitiveOutcome({
+        status: 500,
+        body: { error: "Internal server error", requestId: "req-1" },
+      }),
+    ).toBe(false);
+  });
+
+  it("a malformed/unrecognized response body is UNCERTAIN, not definitive", () => {
+    const { testHooks } = mount(() => jsonResponse(202, {}));
+    expect(
+      testHooks.isDefinitiveOutcome({
+        status: 502,
+        body: { error: "<html>Bad Gateway</html>" },
+      }),
+    ).toBe(false);
+    expect(
+      testHooks.isDefinitiveOutcome({ status: 500, body: undefined }),
+    ).toBe(false);
+  });
+});
+
 describe("pure logic: buildIntentPayload", () => {
   it("builds a QUERY payload with expectedProjectRevision null for a read-only kind", () => {
     const { testHooks } = mount(() => jsonResponse(202, {}));
@@ -585,6 +709,59 @@ describe("DOM wiring: submit", () => {
           problem: { code: "REVISION_CONFLICT" },
         },
       }),
+    );
+    els.form.trigger("submit", { preventDefault: () => undefined });
+    await flushMicrotasks();
+    els.form.trigger("submit", { preventDefault: () => undefined });
+    await flushMicrotasks();
+
+    const bodies = fetchCalls.map(
+      (c) => JSON.parse(c.body ?? "{}") as Record<string, unknown>,
+    );
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]?.intentId).not.toBe(bodies[0]?.intentId);
+  });
+
+  it("an arbitrary 500 with no recognized run/result leaves the identity PENDING; the next retry reuses it", async () => {
+    const { els, fetchCalls } = mount(() =>
+      jsonResponse(500, { error: "Internal server error", requestId: "req-1" }),
+    );
+    els.form.trigger("submit", { preventDefault: () => undefined });
+    await flushMicrotasks();
+    els.form.trigger("submit", { preventDefault: () => undefined });
+    await flushMicrotasks();
+
+    const bodies = fetchCalls.map(
+      (c) => JSON.parse(c.body ?? "{}") as Record<string, unknown>,
+    );
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]?.intentId).toBe(bodies[0]?.intentId);
+    expect(bodies[1]?.idempotencyKey).toBe(bodies[0]?.idempotencyKey);
+    expect(bodies[1]?.submittedAt).toBe(bodies[0]?.submittedAt);
+  });
+
+  it("a malformed (non-JSON) response body leaves the identity PENDING; the next retry reuses it", async () => {
+    const { els, fetchCalls } = mount(() => ({
+      ok: false,
+      status: 502,
+      bodyText: "<html>Bad Gateway</html>",
+    }));
+    els.form.trigger("submit", { preventDefault: () => undefined });
+    await flushMicrotasks();
+    els.form.trigger("submit", { preventDefault: () => undefined });
+    await flushMicrotasks();
+
+    const bodies = fetchCalls.map(
+      (c) => JSON.parse(c.body ?? "{}") as Record<string, unknown>,
+    );
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]?.intentId).toBe(bodies[0]?.intentId);
+    expect(bodies[1]?.idempotencyKey).toBe(bodies[0]?.idempotencyKey);
+  });
+
+  it("401 Unauthorized is a definitive pre-persistence rejection: a deliberate retry after it mints a new identity", async () => {
+    const { els, fetchCalls } = mount(() =>
+      jsonResponse(401, { error: "Unauthorized" }),
     );
     els.form.trigger("submit", { preventDefault: () => undefined });
     await flushMicrotasks();
