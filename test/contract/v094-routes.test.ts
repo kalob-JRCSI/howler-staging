@@ -25,6 +25,21 @@ function fixture(fileName: string): unknown {
   return JSON.parse(entry[1]);
 }
 
+// Task 12: local loader for the operator migration file, mirroring test/helpers/d1.ts's own
+// baselineMigrationSql() pattern without adding a new export there (out of Task 12's file list).
+const operatorMigrationSources = import.meta.glob<string>(
+  "../../migrations/*.sql",
+  { eager: true, import: "default", query: "?raw" },
+);
+
+function operatorMigrationSql(): string {
+  const entry = Object.entries(operatorMigrationSources).find(([modulePath]) =>
+    modulePath.endsWith("/0002_operator_runs.sql"),
+  );
+  if (!entry) throw new Error("missing migration 0002_operator_runs.sql");
+  return entry[1];
+}
+
 interface RouteContract {
   method: string;
   pathPattern: string;
@@ -221,10 +236,59 @@ describe("POST /v1/admin/init-db", () => {
     expect(response.status).toBe(200);
     const live = await introspectSchemaObjects(env.HOWLER_DB);
     const expectedStatements = parseFixtureStatements(baselineMigrationSql());
-    expect(live).toHaveLength(expectedStatements.length);
+    // init-db now also applies the additive operator schema (Task 12), so `live` legitimately
+    // contains more than just the 19 v0.9.4 objects — assert every v0.9.4 object is still present
+    // (drift-free) rather than asserting the *total* count equals only the v0.9.4 count.
     for (const expectedSql of expectedStatements) {
       expect(live.map((object) => object.sql)).toContain(expectedSql);
     }
+  });
+
+  it("produces an operator schema semantically identical to migrations/0002_operator_runs.sql (no drift between the router's inline statements and the migration file)", async () => {
+    const response = await worker.fetch(
+      jsonRequest("POST", "/v1/admin/init-db"),
+      adminEnv(),
+    );
+    expect(response.status).toBe(200);
+    const live = await introspectSchemaObjects(env.HOWLER_DB);
+    const expectedStatements = parseFixtureStatements(operatorMigrationSql());
+    for (const expectedSql of expectedStatements) {
+      expect(live.map((object) => object.sql)).toContain(expectedSql);
+    }
+  });
+
+  it("reports additive operatorSchema readiness without altering any existing v0.9.4 field", async () => {
+    const response = await worker.fetch(
+      jsonRequest("POST", "/v1/admin/init-db"),
+      adminEnv(),
+    );
+    expect(response.status).toBe(200);
+    const body = (await jsonBody(response)) as {
+      ok: boolean;
+      expected: string[];
+      found: string[];
+      statementsApplied: number;
+      operatorSchema: { ok: boolean; expected: string[]; found: string[] };
+      stagingOnly: boolean;
+    };
+    // Existing v0.9.4 fields are byte-for-byte unchanged from Task 9.
+    expect(body.ok).toBe(true);
+    expect(body.found.slice().sort()).toEqual(body.expected.slice().sort());
+    expect(body.statementsApplied).toBe(19);
+    expect(body.stagingOnly).toBe(true);
+    // New, purely additive field.
+    expect(body.operatorSchema.ok).toBe(true);
+    expect(body.operatorSchema.found.slice().sort()).toEqual(
+      body.operatorSchema.expected.slice().sort(),
+    );
+    expect(body.operatorSchema.expected.slice().sort()).toEqual(
+      [
+        "operator_intents",
+        "workflow_runs",
+        "workflow_steps",
+        "workflow_results",
+      ].sort(),
+    );
   });
 
   it("is idempotent: reapplying does not delete or duplicate existing data", async () => {

@@ -54,46 +54,160 @@ const SCHEMA_STATEMENTS = [
   "CREATE TRIGGER IF NOT EXISTS prediction_outcomes_no_delete BEFORE DELETE ON prediction_outcomes BEGIN SELECT RAISE(ABORT, 'prediction_outcomes is append-only'); END",
 ] as const;
 
+// Task 12 (migrations/0002_operator_runs.sql): additive operator persistence tables. Kept as its
+// own constant array, exactly mirroring SCHEMA_STATEMENTS' pattern, so init-db's v0.9.4 readiness
+// fields/values are completely unaffected — operator-table readiness is reported as a new,
+// additive field. test/contract/v094-routes.test.ts proves this array stays byte-for-semantic
+// identical to the committed migration file, so the route cannot drift from migration source.
+const OPERATOR_SCHEMA_TABLES = [
+  "operator_intents",
+  "workflow_runs",
+  "workflow_steps",
+  "workflow_results",
+] as const;
+
+const OPERATOR_SCHEMA_STATEMENTS = [
+  "CREATE TABLE IF NOT EXISTS operator_intents (intent_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('FORECAST_QUERY','FORECAST_HEALTH_QUERY','RECOVERY_QUERY','EVIDENCE_PREVIEW','EVIDENCE_APPLY_SHADOW')), request_json TEXT NOT NULL, request_hash TEXT NOT NULL CHECK (length(request_hash) = 64 AND request_hash NOT GLOB '*[^0-9a-f]*'), created_at TEXT NOT NULL, UNIQUE (project_id, idempotency_key))",
+  "CREATE TRIGGER IF NOT EXISTS operator_intents_no_update BEFORE UPDATE ON operator_intents BEGIN SELECT RAISE(ABORT, 'operator_intents is immutable'); END",
+  "CREATE TRIGGER IF NOT EXISTS operator_intents_no_delete BEFORE DELETE ON operator_intents BEGIN SELECT RAISE(ABORT, 'operator_intents is immutable'); END",
+  "CREATE TABLE IF NOT EXISTS workflow_runs (workflow_id TEXT PRIMARY KEY, intent_id TEXT NOT NULL UNIQUE, intent_hash TEXT NOT NULL CHECK (length(intent_hash) = 64 AND intent_hash NOT GLOB '*[^0-9a-f]*'), project_id TEXT NOT NULL, workflow_type TEXT NOT NULL CHECK (workflow_type = 'OPERATOR_INTENT_V1'), workflow_version INTEGER NOT NULL CHECK (workflow_version = 1), state TEXT NOT NULL CHECK (state IN ('RECEIVED','VALIDATING','READY','RUNNING','INTERRUPTED','BLOCKED','FAILED','SUCCEEDED')), current_step TEXT, attempt INTEGER NOT NULL CHECK (attempt >= 1), max_attempts INTEGER NOT NULL CHECK (max_attempts >= 1), resumable INTEGER NOT NULL CHECK (resumable IN (0,1)), interruption_json TEXT, blocked_reason_json TEXT, failure_json TEXT, result_id TEXT, created_at TEXT NOT NULL, started_at TEXT, updated_at TEXT NOT NULL, completed_at TEXT, FOREIGN KEY (intent_id) REFERENCES operator_intents(intent_id), CHECK (attempt <= max_attempts), CHECK ((state IN ('SUCCEEDED','BLOCKED','FAILED') AND result_id IS NOT NULL) OR (state NOT IN ('SUCCEEDED','BLOCKED','FAILED') AND result_id IS NULL)))",
+  "CREATE INDEX IF NOT EXISTS idx_workflow_runs_project_state ON workflow_runs(project_id, state)",
+  "CREATE TABLE IF NOT EXISTS workflow_steps (workflow_id TEXT NOT NULL, step_name TEXT NOT NULL, ordinal INTEGER NOT NULL CHECK (ordinal >= 0), state TEXT NOT NULL CHECK (state IN ('PENDING','RUNNING','SUCCEEDED','BLOCKED','FAILED','SKIPPED')), attempt INTEGER NOT NULL CHECK (attempt >= 1), input_hash TEXT NOT NULL CHECK (length(input_hash) = 64 AND input_hash NOT GLOB '*[^0-9a-f]*'), output_json TEXT, output_hash TEXT, problem_json TEXT, started_at TEXT, completed_at TEXT, PRIMARY KEY (workflow_id, step_name), FOREIGN KEY (workflow_id) REFERENCES workflow_runs(workflow_id))",
+  "CREATE TABLE IF NOT EXISTS workflow_results (result_id TEXT PRIMARY KEY, workflow_id TEXT NOT NULL UNIQUE, intent_id TEXT NOT NULL UNIQUE, project_id TEXT NOT NULL, status TEXT NOT NULL CHECK (status IN ('SUCCEEDED','BLOCKED','FAILED')), result_json TEXT NOT NULL, created_at TEXT NOT NULL, FOREIGN KEY (workflow_id) REFERENCES workflow_runs(workflow_id), FOREIGN KEY (intent_id) REFERENCES operator_intents(intent_id))",
+  "CREATE TRIGGER IF NOT EXISTS workflow_results_no_update BEFORE UPDATE ON workflow_results BEGIN SELECT RAISE(ABORT, 'workflow_results is immutable'); END",
+  "CREATE TRIGGER IF NOT EXISTS workflow_results_no_delete BEFORE DELETE ON workflow_results BEGIN SELECT RAISE(ABORT, 'workflow_results is immutable'); END",
+  "CREATE TRIGGER IF NOT EXISTS workflow_results_identity_guard BEFORE INSERT ON workflow_results BEGIN SELECT CASE WHEN (SELECT intent_id FROM workflow_runs WHERE workflow_id = NEW.workflow_id) <> NEW.intent_id THEN RAISE(ABORT, 'HOWLER_RESULT_INTENT_MISMATCH') WHEN (SELECT project_id FROM workflow_runs WHERE workflow_id = NEW.workflow_id) <> NEW.project_id THEN RAISE(ABORT, 'HOWLER_RESULT_PROJECT_MISMATCH') WHEN (SELECT state FROM workflow_runs WHERE workflow_id = NEW.workflow_id) <> NEW.status THEN RAISE(ABORT, 'HOWLER_RESULT_STATUS_MISMATCH') END; END",
+] as const;
+
+// Every object name the operator schema actually creates (tables + trigger + index), used to
+// prove exact bidirectional parity against the migration file — not just "these table names
+// exist" (which a malformed/partial same-named object would also satisfy).
+const OPERATOR_SCHEMA_OBJECT_NAMES = [
+  "operator_intents",
+  "operator_intents_no_update",
+  "operator_intents_no_delete",
+  "workflow_runs",
+  "idx_workflow_runs_project_state",
+  "workflow_steps",
+  "workflow_results",
+  "workflow_results_no_update",
+  "workflow_results_no_delete",
+  "workflow_results_identity_guard",
+] as const;
+
+/** D1/SQLite drops the (semantically inert) `IF NOT EXISTS` clause from the stored DDL text. */
+function normalizeSchemaStatement(sql: string): string {
+  return sql
+    .replace(
+      /^(CREATE (?:TABLE|INDEX|UNIQUE INDEX|TRIGGER))\s+IF NOT EXISTS\s+/i,
+      "$1 ",
+    )
+    .trim();
+}
+
+interface OperatorSchemaInitResult {
+  ok: boolean;
+  expected: readonly string[];
+  found: string[];
+}
+
 interface SchemaInitResult {
   ok: boolean;
   expected: readonly string[];
   found: string[];
   statementsApplied: number;
+  operatorSchema: OperatorSchemaInitResult;
+}
+
+async function applyStatements(
+  db: D1Database,
+  statements: readonly string[],
+  label: string,
+): Promise<number> {
+  let applied = 0;
+  // Iterated via `.entries()` rather than a classic indexed for-loop: with
+  // `noUncheckedIndexedAccess`, indexed access types as `string | undefined`, but `.entries()`
+  // yields the element type directly since it always produces exactly `length` pairs.
+  for (const [index, statement] of statements.entries()) {
+    try {
+      await db.prepare(statement).run();
+      applied += 1;
+    } catch (error) {
+      throw new HttpError(
+        500,
+        `${label} initialization failed at statement ${String(index + 1)}`,
+        { cause: error instanceof Error ? error.message : String(error) },
+      );
+    }
+  }
+  return applied;
+}
+
+async function findExistingTables(
+  db: D1Database,
+  tables: readonly string[],
+): Promise<string[]> {
+  const placeholders = tables.map(() => "?").join(",");
+  const found = await db
+    .prepare(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name IN (${placeholders}) ORDER BY name`,
+    )
+    .bind(...tables)
+    .all<{ name: string }>();
+  return found.results.map((row) => row.name);
+}
+
+/**
+ * Verifies the *full* operator schema is present with byte-for-semantic-identical DDL — every
+ * table, trigger, and index the migration creates, not just "a table with this name exists".
+ * A malformed or partial same-named object (wrong columns, missing constraint, etc.) has
+ * different normalized SQL text and so is correctly reported as not ready.
+ */
+async function verifyOperatorSchemaReadiness(
+  db: D1Database,
+): Promise<OperatorSchemaInitResult> {
+  const placeholders = OPERATOR_SCHEMA_OBJECT_NAMES.map(() => "?").join(",");
+  const found = await db
+    .prepare(
+      `SELECT type, name, sql FROM sqlite_master WHERE name IN (${placeholders})`,
+    )
+    .bind(...OPERATOR_SCHEMA_OBJECT_NAMES)
+    .all<{ type: string; name: string; sql: string | null }>();
+  const foundStatements = new Set(
+    found.results.map((row) =>
+      row.sql ? normalizeSchemaStatement(row.sql) : "",
+    ),
+  );
+  const expectedStatements = OPERATOR_SCHEMA_STATEMENTS.map(
+    normalizeSchemaStatement,
+  );
+  const ok =
+    found.results.length === OPERATOR_SCHEMA_OBJECT_NAMES.length &&
+    expectedStatements.every((expected) => foundStatements.has(expected));
+  const tableNames = found.results
+    .filter((row) => row.type === "table")
+    .map((row) => row.name);
+  return { ok, expected: OPERATOR_SCHEMA_TABLES, found: tableNames };
 }
 
 async function initializeSchema(
   db: D1Database | undefined,
 ): Promise<SchemaInitResult> {
   if (!db) throw new HttpError(500, "HOWLER_DB is not bound");
-  const results: { statement: number; ok: boolean }[] = [];
-  // Iterated via `.entries()` rather than a classic indexed for-loop: with
-  // `noUncheckedIndexedAccess`, `SCHEMA_STATEMENTS[i]` types as `string | undefined`, but
-  // `.entries()` yields the element type directly since it always produces exactly `length` pairs.
-  for (const [index, statement] of SCHEMA_STATEMENTS.entries()) {
-    try {
-      const result = await db.prepare(statement).run();
-      results.push({ statement: index + 1, ok: result.success });
-    } catch (error) {
-      throw new HttpError(
-        500,
-        `Schema initialization failed at statement ${String(index + 1)}`,
-        { cause: error instanceof Error ? error.message : String(error) },
-      );
-    }
-  }
-  const placeholders = SCHEMA_TABLES.map(() => "?").join(",");
-  const found = await db
-    .prepare(
-      `SELECT name FROM sqlite_master WHERE type='table' AND name IN (${placeholders}) ORDER BY name`,
-    )
-    .bind(...SCHEMA_TABLES)
-    .all<{ name: string }>();
-  const tableNames = found.results.map((row) => row.name);
+  const statementsApplied = await applyStatements(
+    db,
+    SCHEMA_STATEMENTS,
+    "Schema",
+  );
+  const tableNames = await findExistingTables(db, SCHEMA_TABLES);
+  await applyStatements(db, OPERATOR_SCHEMA_STATEMENTS, "Operator schema");
+  const operatorSchema = await verifyOperatorSchemaReadiness(db);
   return {
     ok: tableNames.length === SCHEMA_TABLES.length,
     expected: SCHEMA_TABLES,
     found: tableNames,
-    statementsApplied: results.length,
+    statementsApplied,
+    operatorSchema,
   };
 }
 
