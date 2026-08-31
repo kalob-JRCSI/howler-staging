@@ -1240,11 +1240,15 @@ export function fieldDashboardClientScript(
     return QUERY_KINDS.some((kind) => inFlight.has(`${projectId}:${kind}`));
   }
 
-  function isProjectEvidenceBusy(projectId: string): boolean {
-    return (
-      inFlight.has(`${projectId}:EVIDENCE_PREVIEW`) ||
-      inFlight.has(`${projectId}:EVIDENCE_APPLY_SHADOW`)
-    );
+  /**
+   * EVIDENCE_PREVIEW and EVIDENCE_APPLY_SHADOW are separate logical action slots (own
+   * `${projectId}:${kind}` ownership), so one being busy must not disable the other. The single
+   * evidence-run control is shared between them, so its busy state reflects only whichever kind
+   * is *currently selected* in the dropdown -- not "either evidence kind".
+   */
+  function isProjectEvidenceBusy(projectId: string, index: number): boolean {
+    const kindEl = document.getElementById(`fp-${String(index)}-evidence-kind`);
+    return inFlight.has(`${projectId}:${kindEl.value}`);
   }
 
   function isActionPending(storageKey: string): boolean {
@@ -1278,6 +1282,26 @@ export function fieldDashboardClientScript(
     return true;
   }
 
+  /**
+   * The single place that actually forgets a project's state, used by every caller that might
+   * newly make a project purge-safe: `removeProject` itself (the project might already have no
+   * active work), and every action/Resume's own settlement (an action that was the *last* reason
+   * an already-untracked project was being preserved just resolved). A no-op if the project is
+   * still tracked (removal is the only thing that starts this lifecycle) or still unsafe to
+   * purge. Centralizing this avoids re-implementing the same purge rules at each of those call
+   * sites.
+   */
+  function maybePurgeUntrackedProject(projectId: string): void {
+    if (indexOfProject(projectId) !== -1) return;
+    if (!isProjectSafeToPurge(projectId)) return;
+    healthByProject.delete(projectId);
+    recoveryByProject.delete(projectId);
+    for (const kind of ACTION_KINDS) {
+      actionStateByKey.delete(`${projectId}:${kind}`);
+      sessionStorage.removeItem?.(`howler_field_pending_${projectId}_${kind}`);
+    }
+  }
+
   function setCardStatus(projectId: string, text: string): void {
     const index = indexOfProject(projectId);
     if (index === -1) return;
@@ -1292,7 +1316,7 @@ export function fieldDashboardClientScript(
     const index = indexOfProject(projectId);
     if (index === -1) return;
     const queryBusy = isProjectQueryBusy(projectId);
-    const evidenceBusy = isProjectEvidenceBusy(projectId);
+    const evidenceBusy = isProjectEvidenceBusy(projectId, index);
     document.getElementById(`fp-${String(index)}-refresh`).disabled = queryBusy;
     document.getElementById(`fp-${String(index)}-evidence-run`).disabled =
       evidenceBusy;
@@ -1510,6 +1534,7 @@ export function fieldDashboardClientScript(
       .then(() => {
         inFlight.delete(key);
         refreshBusyIndicators(projectId);
+        maybePurgeUntrackedProject(projectId);
       });
   }
 
@@ -1562,6 +1587,7 @@ export function fieldDashboardClientScript(
       .then(() => {
         inFlight.delete(key);
         refreshBusyIndicators(projectId);
+        maybePurgeUntrackedProject(projectId);
       });
   }
 
@@ -1598,6 +1624,7 @@ export function fieldDashboardClientScript(
       .then(() => {
         inFlight.delete(actionKey);
         refreshBusyIndicators(projectId);
+        maybePurgeUntrackedProject(projectId);
       });
   }
 
@@ -1615,16 +1642,7 @@ export function fieldDashboardClientScript(
     if (index === -1) return;
     trackedProjects.splice(index, 1);
     saveTrackedProjects(sessionStorage, trackedProjects);
-    if (isProjectSafeToPurge(projectId)) {
-      healthByProject.delete(projectId);
-      recoveryByProject.delete(projectId);
-      for (const kind of ACTION_KINDS) {
-        actionStateByKey.delete(`${projectId}:${kind}`);
-        sessionStorage.removeItem?.(
-          `howler_field_pending_${projectId}_${kind}`,
-        );
-      }
-    }
+    maybePurgeUntrackedProject(projectId);
     renderProjects();
   }
 
@@ -1643,6 +1661,11 @@ export function fieldDashboardClientScript(
       .getElementById(`fp-${String(index)}-evidence-run`)
       .addEventListener("click", () => {
         runEvidenceAction(projectId, index);
+      });
+    document
+      .getElementById(`fp-${String(index)}-evidence-kind`)
+      .addEventListener("change", () => {
+        refreshBusyIndicators(projectId);
       });
   }
 
