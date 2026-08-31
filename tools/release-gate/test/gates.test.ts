@@ -5,6 +5,7 @@ import {
   checkLiveSystemActivation,
   checkNoBrowserBusinessLogic,
   checkNoLegacyMutationRoute,
+  checkNoLiveConnectorReferences,
   checkProductionConfig,
   checkStagingShadowCompliance,
 } from "../src/gates";
@@ -129,17 +130,68 @@ describe("checkNoLegacyMutationRoute", () => {
 });
 
 describe("checkEvidenceApplyShadowExplicit (unsafe implicit apply)", () => {
-  it("PASS: EVIDENCE_APPLY_SHADOW is never default-selected", () => {
+  const NO_SCRIPT = "";
+
+  it("PASS: current explicit-only behavior (double-quoted HTML, no JS shortcuts)", () => {
     const html = `<select id="intent-kind"><option value="FORECAST_QUERY" selected>Forecast</option><option value="EVIDENCE_APPLY_SHADOW">Apply</option></select>`;
-    const result = checkEvidenceApplyShadowExplicit(html);
+    const result = checkEvidenceApplyShadowExplicit(html, NO_SCRIPT);
     expect(result.pass).toBe(true);
   });
 
-  it("FAIL: EVIDENCE_APPLY_SHADOW marked selected", () => {
+  it("FAIL: EVIDENCE_APPLY_SHADOW marked selected (double-quoted)", () => {
     const html = `<select id="intent-kind"><option value="EVIDENCE_APPLY_SHADOW" selected>Apply</option></select>`;
-    const result = checkEvidenceApplyShadowExplicit(html);
+    const result = checkEvidenceApplyShadowExplicit(html, NO_SCRIPT);
     expect(result.pass).toBe(false);
     expect(result.reason).toMatch(/default-selected/);
+  });
+
+  it("FAIL: EVIDENCE_APPLY_SHADOW marked selected (single-quoted -- a real HTML string variant the old regex missed)", () => {
+    const html = `<select id='intent-kind'><option value='EVIDENCE_APPLY_SHADOW' selected>Apply</option></select>`;
+    const result = checkEvidenceApplyShadowExplicit(html, NO_SCRIPT);
+    expect(result.pass).toBe(false);
+  });
+
+  it("FAIL: JS forces a control's value to EVIDENCE_APPLY_SHADOW as an initialization/default", () => {
+    const html = `<select id="intent-kind"><option value="EVIDENCE_APPLY_SHADOW">Apply</option></select>`;
+    const script = `els.intentKind.value = "EVIDENCE_APPLY_SHADOW";`;
+    const result = checkEvidenceApplyShadowExplicit(html, script);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/value/i);
+  });
+
+  it("FAIL: a default/initial constant is declared as EVIDENCE_APPLY_SHADOW", () => {
+    const html = `<select id="intent-kind"></select>`;
+    const script = `const DEFAULT_INTENT_KIND = "EVIDENCE_APPLY_SHADOW";`;
+    const result = checkEvidenceApplyShadowExplicit(html, script);
+    expect(result.pass).toBe(false);
+  });
+
+  it("FAIL: a preview handler automatically invokes an apply action", () => {
+    const html = `<select id="intent-kind"></select>`;
+    const script = `
+      function runPreviewAction(projectId) {
+        submitPreview(projectId);
+        runApplyAction(projectId);
+      }
+    `;
+    const result = checkEvidenceApplyShadowExplicit(html, script);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/preview/i);
+  });
+
+  it("does not false-fail a user explicitly choosing Apply at runtime (reading .value, not assigning it)", () => {
+    const html = `<select id="intent-kind"><option value="EVIDENCE_APPLY_SHADOW">Apply</option></select>`;
+    const script = `
+      function currentFields() {
+        return { kind: els.intentKind.value, projectId: els.projectId.value };
+      }
+      function runEvidenceAction(projectId, index) {
+        const kind = kindEl.value;
+        if (kind === "EVIDENCE_APPLY_SHADOW") { /* user chose it */ }
+      }
+    `;
+    const result = checkEvidenceApplyShadowExplicit(html, script);
+    expect(result.pass).toBe(true);
   });
 });
 
@@ -173,13 +225,22 @@ describe("checkCanonicalResumeOwnership (canonical Resume violation)", () => {
 });
 
 describe("checkNoBrowserBusinessLogic", () => {
+  // A stronger, mechanically-derived denylist is exercised in
+  // tools/release-gate/test/forbidden-symbols.test.ts; these keep the basic PASS/FAIL contract
+  // covered here alongside the gate's other unit tests.
+  const FORBIDDEN = [
+    "analyzeRecovery",
+    "forecastAfterEvent",
+    "commitShadowTransition",
+  ];
+
   it("PASS: client source contains no canonical server-only function call", () => {
     const source = `
       function runQuery(projectId, kind) {
         void callApi(fetch, sessionStorage, adminKeyValue(), "/v1/intents", { method: "POST" });
       }
     `;
-    const result = checkNoBrowserBusinessLogic(source);
+    const result = checkNoBrowserBusinessLogic(source, FORBIDDEN);
     expect(result.pass).toBe(true);
   });
 
@@ -189,15 +250,55 @@ describe("checkNoBrowserBusinessLogic", () => {
         return forecastAfterEvent(model, event);
       }
     `;
-    const result = checkNoBrowserBusinessLogic(source);
+    const result = checkNoBrowserBusinessLogic(source, FORBIDDEN);
     expect(result.pass).toBe(false);
-    expect(result.reason).toContain("forecastAfterEvent(");
+    expect(result.reason).toContain("forecastAfterEvent");
   });
 
   it("FAIL: client source calls the canonical shadow-commit mutation directly", () => {
     const source = `function applyLocally() { return commitShadowTransition(transition); }`;
-    const result = checkNoBrowserBusinessLogic(source);
+    const result = checkNoBrowserBusinessLogic(source, FORBIDDEN);
     expect(result.pass).toBe(false);
-    expect(result.reason).toContain("commitShadowTransition(");
+    expect(result.reason).toContain("commitShadowTransition");
+  });
+});
+
+describe("checkNoLiveConnectorReferences", () => {
+  it("PASS: normal same-origin fetches to Howler's own API never trigger a violation", () => {
+    const source = `
+      function runQuery() {
+        return fetch("/v1/intents", { method: "POST" });
+      }
+      function resume(id) {
+        return fetch(\`/v1/workflows/\${id}/resume\`, { method: "POST" });
+      }
+    `;
+    expect(checkNoLiveConnectorReferences(source).pass).toBe(true);
+  });
+
+  it("FAIL: a Google Calendar host reference", () => {
+    const source = `fetch("https://www.googleapis.com/calendar/v3/events");`;
+    const result = checkNoLiveConnectorReferences(source);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/calendar/i);
+  });
+
+  it("FAIL: a Google Drive host reference", () => {
+    const source = `fetch("https://www.googleapis.com/drive/v3/files");`;
+    const result = checkNoLiveConnectorReferences(source);
+    expect(result.pass).toBe(false);
+    expect(result.reason).toMatch(/drive/i);
+  });
+
+  it("FAIL: a live connector client class name reference even without a URL", () => {
+    const source = `const client = new GoogleCalendarClient(credentials);`;
+    const result = checkNoLiveConnectorReferences(source);
+    expect(result.pass).toBe(false);
+  });
+
+  it("FAIL: an OAuth account host reference", () => {
+    const source = `window.location = "https://accounts.google.com/o/oauth2/auth";`;
+    const result = checkNoLiveConnectorReferences(source);
+    expect(result.pass).toBe(false);
   });
 });

@@ -72,7 +72,7 @@ const problemFixture: WorkflowProblem = {
 describe("correlation identity", () => {
   it("surfaces intentId/workflowId/resultId directly from the run/result", () => {
     const trace = buildExecutionTrace(
-      makeRun({ resultId: "result-1" }),
+      makeRun({ state: "SUCCEEDED", resultId: "result-1" }),
       [],
       makeResult(),
     );
@@ -83,7 +83,7 @@ describe("correlation identity", () => {
 
   it("intentKind falls back to the result's intentKind when not explicitly supplied", () => {
     const trace = buildExecutionTrace(
-      makeRun(),
+      makeRun({ state: "SUCCEEDED", resultId: "result-1" }),
       [],
       makeResult({ intentKind: "RECOVERY_QUERY" }),
     );
@@ -92,7 +92,7 @@ describe("correlation identity", () => {
 
   it("intentKind is explicitly supplied when no result exists yet (e.g. still RUNNING)", () => {
     const trace = buildExecutionTrace(
-      makeRun(),
+      makeRun({ state: "RUNNING" }),
       [],
       undefined,
       "EVIDENCE_APPLY_SHADOW",
@@ -108,7 +108,7 @@ describe("correlation identity", () => {
   it("throws when a supplied result's workflowId does not correlate to the run", () => {
     expect(() =>
       buildExecutionTrace(
-        makeRun(),
+        makeRun({ state: "SUCCEEDED", resultId: "result-1" }),
         [],
         makeResult({ workflowId: "wf-OTHER" }),
       ),
@@ -118,7 +118,7 @@ describe("correlation identity", () => {
   it("throws when a supplied result's intentId does not correlate to the run", () => {
     expect(() =>
       buildExecutionTrace(
-        makeRun(),
+        makeRun({ state: "SUCCEEDED", resultId: "result-1" }),
         [],
         makeResult({ intentId: "intent-OTHER" }),
       ),
@@ -144,7 +144,6 @@ describe("per-outcome shape", () => {
     expect(trace.problem).toEqual({
       code: "REVISION_CONFLICT",
       category: "REVISION",
-      message: "Expected revision 3, got 4",
       retryable: false,
     });
     expect(trace.resultId).toBeNull();
@@ -226,7 +225,6 @@ describe("step ledger", () => {
     expect(trace.steps[0]?.problem).toEqual({
       code: "REVISION_CONFLICT",
       category: "REVISION",
-      message: "Expected revision 3, got 4",
       retryable: false,
     });
   });
@@ -250,7 +248,7 @@ describe("step ledger", () => {
 describe("verification (oversight)", () => {
   it("surfaces only decision + a findings count, never raw findings", () => {
     const trace = buildExecutionTrace(
-      makeRun(),
+      makeRun({ state: "SUCCEEDED", resultId: "result-1" }),
       [],
       makeResult({
         oversight: {
@@ -275,13 +273,17 @@ describe("verification (oversight)", () => {
   });
 
   it("is null when the result has no oversight", () => {
-    const trace = buildExecutionTrace(makeRun(), [], makeResult());
+    const trace = buildExecutionTrace(
+      makeRun({ state: "SUCCEEDED", resultId: "result-1" }),
+      [],
+      makeResult(),
+    );
     expect(trace.verification).toBeNull();
   });
 
   it("is null when oversight is present but not a recognizable review shape", () => {
     const trace = buildExecutionTrace(
-      makeRun(),
+      makeRun({ state: "SUCCEEDED", resultId: "result-1" }),
       [],
       makeResult({ oversight: { unexpected: true } }),
     );
@@ -363,6 +365,269 @@ describe("duration", () => {
 
   it("is null when the run has not completed", () => {
     const trace = buildExecutionTrace(makeRun({ state: "RUNNING" }), []);
+    expect(trace.durationMs).toBeNull();
+  });
+});
+
+// -----------------------------------------------------------------------------------------------
+// TASK 17 CORRECTION
+// -----------------------------------------------------------------------------------------------
+
+describe("HIGH 4: WorkflowProblem.message is never exposed verbatim", () => {
+  const messageWithSecretLooking: WorkflowProblem = {
+    code: "REVISION_CONFLICT",
+    category: "REVISION",
+    message: "Authorization: Bearer sk-fake-admin-key-should-never-appear",
+    retryable: false,
+  };
+
+  it("a Bearer token embedded in a problem message never appears in the trace", () => {
+    const trace = buildExecutionTrace(
+      makeRun({
+        state: "BLOCKED",
+        blockedReason: messageWithSecretLooking,
+        resultId: "result-1",
+      }),
+      [],
+      makeResult({ status: "BLOCKED" }),
+    );
+    const json = JSON.stringify(trace);
+    expect(json).not.toContain("sk-fake-admin-key-should-never-appear");
+    expect(json.toLowerCase()).not.toContain("bearer");
+  });
+
+  it("a HOWLER_ADMIN_KEY-like value embedded in a message never appears", () => {
+    const trace = buildExecutionTrace(
+      makeRun({
+        state: "FAILED",
+        failure: {
+          code: "INTERNAL_ERROR",
+          category: "INTERNAL",
+          message: "HOWLER_ADMIN_KEY=abc123 leaked into an exception string",
+          retryable: false,
+        },
+        resultId: "result-1",
+      }),
+      [],
+      makeResult({ status: "FAILED" }),
+    );
+    expect(JSON.stringify(trace).toLowerCase()).not.toContain(
+      "howler_admin_key",
+    );
+  });
+
+  it("internal exception text embedded in a message never appears verbatim", () => {
+    const trace = buildExecutionTrace(
+      makeRun({
+        state: "FAILED",
+        failure: {
+          code: "INTERNAL_ERROR",
+          category: "INTERNAL",
+          message:
+            "TypeError: Cannot read properties of undefined (reading 'foo') at D1HowlerRepository.commitShadowTransition",
+          retryable: false,
+        },
+        resultId: "result-1",
+      }),
+      [],
+      makeResult({ status: "FAILED" }),
+    );
+    const json = JSON.stringify(trace);
+    expect(json).not.toContain("Cannot read properties of undefined");
+    expect(json).not.toContain("D1HowlerRepository");
+  });
+
+  it("the message field itself is never present on the redacted problem", () => {
+    const trace = buildExecutionTrace(
+      makeRun({
+        state: "BLOCKED",
+        blockedReason: messageWithSecretLooking,
+        resultId: "result-1",
+      }),
+      [],
+      makeResult({ status: "BLOCKED" }),
+    );
+    expect(trace.problem).not.toHaveProperty("message");
+  });
+
+  it("known problem code still observable, and classification remains useful", () => {
+    const trace = buildExecutionTrace(
+      makeRun({
+        state: "BLOCKED",
+        blockedReason: messageWithSecretLooking,
+        resultId: "result-1",
+      }),
+      [],
+      makeResult({ status: "BLOCKED" }),
+    );
+    expect(trace.problem).toEqual({
+      code: "REVISION_CONFLICT",
+      category: "REVISION",
+      retryable: false,
+    });
+  });
+});
+
+describe("HIGH 5: execution trace correlation is fully validated, not partially assumed", () => {
+  it("throws when a step's workflowId does not belong to this run", () => {
+    expect(() =>
+      buildExecutionTrace(makeRun(), [
+        makeStep({ stepName: "RECEIVE", workflowId: "wf-FOREIGN" }),
+      ]),
+    ).toThrow(/workflowId/);
+  });
+
+  it("throws when result.projectId does not correlate to run.projectId", () => {
+    expect(() =>
+      buildExecutionTrace(
+        makeRun({ state: "SUCCEEDED", resultId: "result-1" }),
+        [],
+        makeResult({ projectId: "proj-OTHER" }),
+      ),
+    ).toThrow(/projectId/);
+  });
+
+  it("throws when result.resultId does not match run.resultId, when the run already points to a result", () => {
+    expect(() =>
+      buildExecutionTrace(
+        makeRun({ state: "SUCCEEDED", resultId: "result-1" }),
+        [],
+        makeResult({ resultId: "result-DIFFERENT" }),
+      ),
+    ).toThrow(/resultId/);
+  });
+
+  it("throws when result.status is inconsistent with a terminal run.state", () => {
+    expect(() =>
+      buildExecutionTrace(
+        makeRun({ state: "SUCCEEDED", resultId: "result-1" }),
+        [],
+        makeResult({ status: "FAILED" }),
+      ),
+    ).toThrow(/status/);
+  });
+
+  it("throws when a result is supplied for a non-terminal run state", () => {
+    expect(() =>
+      buildExecutionTrace(
+        makeRun({ state: "RUNNING" }),
+        [],
+        makeResult({ status: "SUCCEEDED" }),
+      ),
+    ).toThrow(/non-terminal/);
+  });
+
+  it("throws when the caller-supplied intentKind contradicts the result's own intentKind", () => {
+    expect(() =>
+      buildExecutionTrace(
+        makeRun({ state: "SUCCEEDED", resultId: "result-1" }),
+        [],
+        makeResult({ intentKind: "RECOVERY_QUERY" }),
+        "EVIDENCE_APPLY_SHADOW",
+      ),
+    ).toThrow(/intentKind/);
+  });
+
+  it("does not throw when the caller-supplied intentKind agrees with the result's intentKind", () => {
+    expect(() =>
+      buildExecutionTrace(
+        makeRun({ state: "SUCCEEDED", resultId: "result-1" }),
+        [],
+        makeResult({ intentKind: "RECOVERY_QUERY" }),
+        "RECOVERY_QUERY",
+      ),
+    ).not.toThrow();
+  });
+
+  it("a valid INTERRUPTED/no-result trace still works (no result to correlate)", () => {
+    expect(() =>
+      buildExecutionTrace(
+        makeRun({ state: "INTERRUPTED", interruption: problemFixture }),
+        [makeStep({ stepName: "RECEIVE" })],
+      ),
+    ).not.toThrow();
+  });
+
+  it("a valid terminal trace with fully-correlated steps and result still works", () => {
+    expect(() =>
+      buildExecutionTrace(
+        makeRun({ state: "SUCCEEDED", resultId: "result-1" }),
+        [makeStep({ stepName: "RECEIVE" }), makeStep({ stepName: "FINALIZE" })],
+        makeResult({ status: "SUCCEEDED" }),
+      ),
+    ).not.toThrow();
+  });
+});
+
+describe("MEDIUM 1: duration is always finite, nonnegative, and deterministic", () => {
+  it("a normal forward duration", () => {
+    const trace = buildExecutionTrace(
+      makeRun({
+        state: "SUCCEEDED",
+        resultId: "result-1",
+        createdAt: "2026-08-31T10:00:00.000Z",
+        completedAt: "2026-08-31T10:00:05.000Z",
+      }),
+      [],
+      makeResult({ status: "SUCCEEDED" }),
+    );
+    expect(trace.durationMs).toBe(5000);
+  });
+
+  it("equal timestamps produce 0, not null", () => {
+    const trace = buildExecutionTrace(
+      makeRun({
+        state: "SUCCEEDED",
+        resultId: "result-1",
+        createdAt: "2026-08-31T10:00:00.000Z",
+        completedAt: "2026-08-31T10:00:00.000Z",
+      }),
+      [],
+      makeResult({ status: "SUCCEEDED" }),
+    );
+    expect(trace.durationMs).toBe(0);
+  });
+
+  it("reversed timestamps (completedAt before createdAt) produce null, never a negative number", () => {
+    const trace = buildExecutionTrace(
+      makeRun({
+        state: "SUCCEEDED",
+        resultId: "result-1",
+        createdAt: "2026-08-31T10:00:05.000Z",
+        completedAt: "2026-08-31T10:00:00.000Z",
+      }),
+      [],
+      makeResult({ status: "SUCCEEDED" }),
+    );
+    expect(trace.durationMs).toBeNull();
+  });
+
+  it("an invalid completedAt timestamp produces null, never NaN", () => {
+    const trace = buildExecutionTrace(
+      makeRun({
+        state: "SUCCEEDED",
+        resultId: "result-1",
+        createdAt: "2026-08-31T10:00:00.000Z",
+        completedAt: "not-a-real-timestamp",
+      }),
+      [],
+      makeResult({ status: "SUCCEEDED" }),
+    );
+    expect(trace.durationMs).toBeNull();
+    expect(Number.isNaN(trace.durationMs)).toBe(false);
+  });
+
+  it("an invalid createdAt timestamp produces null, never NaN", () => {
+    const trace = buildExecutionTrace(
+      makeRun({
+        state: "SUCCEEDED",
+        resultId: "result-1",
+        createdAt: "not-a-real-timestamp",
+        completedAt: "2026-08-31T10:00:05.000Z",
+      }),
+      [],
+      makeResult({ status: "SUCCEEDED" }),
+    );
     expect(trace.durationMs).toBeNull();
   });
 });

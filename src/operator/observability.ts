@@ -14,16 +14,20 @@ import type {
   WorkflowStepName,
   WorkflowStepV1,
 } from "./workflow";
-import { WORKFLOW_STEP_NAMES } from "./workflow";
+import { WORKFLOW_STEP_NAMES, isTerminalWorkflowState } from "./workflow";
 import type { ResultStatus, ResultV1 } from "./result";
 
-/** `WorkflowProblem` with `details` deliberately omitted -- `details` can carry raw
- * revision/diff-shaped data the pipeline does not currently classify as safe-to-expose, so the
- * conservative default is to omit it entirely rather than selectively allowlist fields. */
+/** `WorkflowProblem` with `details` AND `message` deliberately omitted. `details` can carry raw
+ * revision/diff-shaped data the pipeline does not currently classify as safe-to-expose. `message`
+ * is free-form prose -- every current call site happens to build it from a fixed, non-sensitive
+ * template, but nothing in the type system guarantees that stays true, and observability is meant
+ * to be safe to emit without re-auditing every future WorkflowProblem construction site. `code` +
+ * `category` + `retryable` alone is still a useful, structured classification (see
+ * REQUIRED_EFFECT_BY_KIND-style closed enums for `code`/`category`); omission is preferred here
+ * over attempting to regex-scrub arbitrary prose, which cannot be proven complete. */
 export interface RedactedProblem {
   code: string;
   category: WorkflowProblem["category"];
-  message: string;
   retryable: boolean;
 }
 
@@ -72,7 +76,6 @@ function redact(problem: WorkflowProblem | undefined): RedactedProblem | null {
   return {
     code: problem.code,
     category: problem.category,
-    message: problem.message,
     retryable: problem.retryable,
   };
 }
@@ -148,10 +151,102 @@ function buildSteps(steps: WorkflowStepV1[]): ExecutionTraceStep[] {
   return ordered;
 }
 
+const TERMINAL_RESULT_STATUS_BY_STATE: Partial<
+  Record<WorkflowState, ResultStatus>
+> = {
+  SUCCEEDED: "SUCCEEDED",
+  BLOCKED: "BLOCKED",
+  FAILED: "FAILED",
+};
+
 /**
- * Builds one structured, secret-free execution record from already-loaded canonical rows. Throws
- * (an existing-invariant violation, never a normal outcome) if a supplied `result` does not
- * actually correlate to `run` -- correlation is verified, not merely asserted by construction.
+ * Validates that every supplied row actually belongs to the same canonical execution -- never
+ * invents or assumes a relationship the persisted contracts don't establish. Throws (an
+ * existing-invariant violation, never a normal outcome) on the first mismatch found:
+ *
+ *  - every step's workflowId must belong to this run
+ *  - a supplied result's workflowId/intentId/projectId must match the run
+ *  - if the run already points to a resultId, a supplied result's resultId must match it
+ *  - a result is only ever valid for a terminal run.state (SUCCEEDED/BLOCKED/FAILED) -- design
+ *    §8.2: "result?: ResultV1 // absent only while run.state is INTERRUPTED" generalizes to every
+ *    non-terminal state
+ *  - a supplied result's status must match the one status the terminal run.state permits
+ *  - a caller-supplied intentKind must agree with the result's own intentKind when both exist --
+ *    contradictory metadata is never silently combined
+ */
+function assertCorrelated(
+  run: WorkflowRunV1,
+  steps: WorkflowStepV1[],
+  result: ResultV1 | undefined,
+  intentKind: IntentKind | undefined,
+): void {
+  for (const step of steps) {
+    if (step.workflowId !== run.workflowId) {
+      throw new Error(
+        `buildExecutionTrace: step ${step.stepName}'s workflowId (${step.workflowId}) does not correlate to run.workflowId (${run.workflowId})`,
+      );
+    }
+  }
+
+  if (!result) return;
+
+  if (result.workflowId !== run.workflowId) {
+    throw new Error(
+      `buildExecutionTrace: result.workflowId (${result.workflowId}) does not correlate to run.workflowId (${run.workflowId})`,
+    );
+  }
+  if (result.intentId !== run.intentId) {
+    throw new Error(
+      `buildExecutionTrace: result.intentId (${result.intentId}) does not correlate to run.intentId (${run.intentId})`,
+    );
+  }
+  if (result.projectId !== run.projectId) {
+    throw new Error(
+      `buildExecutionTrace: result.projectId (${result.projectId}) does not correlate to run.projectId (${run.projectId})`,
+    );
+  }
+  if (run.resultId !== undefined && result.resultId !== run.resultId) {
+    throw new Error(
+      `buildExecutionTrace: result.resultId (${result.resultId}) does not match run.resultId (${run.resultId})`,
+    );
+  }
+  if (!isTerminalWorkflowState(run.state)) {
+    throw new Error(
+      `buildExecutionTrace: a result was supplied for a non-terminal run.state (${run.state}); only SUCCEEDED/BLOCKED/FAILED runs have a result`,
+    );
+  }
+  const expectedStatus = TERMINAL_RESULT_STATUS_BY_STATE[run.state];
+  if (expectedStatus !== undefined && result.status !== expectedStatus) {
+    throw new Error(
+      `buildExecutionTrace: result.status (${result.status}) is inconsistent with terminal run.state (${run.state})`,
+    );
+  }
+  if (intentKind !== undefined && intentKind !== result.intentKind) {
+    throw new Error(
+      `buildExecutionTrace: supplied intentKind (${intentKind}) contradicts result.intentKind (${result.intentKind})`,
+    );
+  }
+}
+
+/** Finite, nonnegative, deterministic, or null -- never NaN, never negative. Malformed
+ * timestamps and a completedAt that precedes createdAt (both genuine data anomalies, not normal
+ * outcomes) are represented the same way as "not yet completed": no duration to report. */
+function computeDurationMs(
+  createdAt: string,
+  completedAt: string | undefined,
+): number | null {
+  if (completedAt === undefined) return null;
+  const created = Date.parse(createdAt);
+  const completed = Date.parse(completedAt);
+  if (!Number.isFinite(created) || !Number.isFinite(completed)) return null;
+  const durationMs = completed - created;
+  return durationMs >= 0 ? durationMs : null;
+}
+
+/**
+ * Builds one structured, secret-free execution record from already-loaded canonical rows. See
+ * `assertCorrelated` for the full set of cross-row invariants this verifies before building
+ * anything.
  *
  * `intentKind` is optional because a workflow with no result yet (RUNNING/INTERRUPTED) carries no
  * `ResultV1.intentKind` to fall back on; a caller that already has the original claimed intent can
@@ -163,16 +258,7 @@ export function buildExecutionTrace(
   result?: ResultV1,
   intentKind?: IntentKind,
 ): ExecutionTraceV1 {
-  if (result && result.workflowId !== run.workflowId) {
-    throw new Error(
-      `buildExecutionTrace: result.workflowId (${result.workflowId}) does not correlate to run.workflowId (${run.workflowId})`,
-    );
-  }
-  if (result && result.intentId !== run.intentId) {
-    throw new Error(
-      `buildExecutionTrace: result.intentId (${result.intentId}) does not correlate to run.intentId (${run.intentId})`,
-    );
-  }
+  assertCorrelated(run, steps, result, intentKind);
 
   return {
     schemaVersion: "1",
@@ -193,9 +279,6 @@ export function buildExecutionTrace(
     ...(run.startedAt !== undefined ? { startedAt: run.startedAt } : {}),
     updatedAt: run.updatedAt,
     ...(run.completedAt !== undefined ? { completedAt: run.completedAt } : {}),
-    durationMs:
-      run.completedAt !== undefined
-        ? Date.parse(run.completedAt) - Date.parse(run.createdAt)
-        : null,
+    durationMs: computeDurationMs(run.createdAt, run.completedAt),
   };
 }

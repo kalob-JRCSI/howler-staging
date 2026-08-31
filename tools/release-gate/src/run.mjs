@@ -14,17 +14,55 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { classifyVitestRun } from "./classify.mjs";
+import { computeChangedFiles } from "./changed-files.mjs";
 
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 
+/**
+ * The comparison base for dynamic changed-file discovery -- overridable per invocation
+ * (`RELEASE_GATE_BASE_SHA=<sha> npm run gate:release`) so a future candidate can supply its own
+ * accepted base rather than this file staying hardcoded to one task's base forever. Defaults to
+ * the currently accepted base this correction was written against.
+ */
+const BASE_SHA =
+  process.env.RELEASE_GATE_BASE_SHA ??
+  "1a9f03e03ee0f476febc9740311283162f6882d1";
+
+/** Extensions Prettier reliably formats in this repo -- filters the dynamic changed-file list so
+ * an unrelated binary/unsupported file never produces gate noise. Still fully dynamic: this is a
+ * type filter, not a filename allowlist. */
+const FORMATTABLE_EXTENSIONS = new Set([
+  ".ts",
+  ".tsx",
+  ".js",
+  ".mjs",
+  ".cjs",
+  ".json",
+  ".jsonc",
+  ".md",
+  ".yml",
+  ".yaml",
+  ".css",
+  ".html",
+]);
+
+// Each signature has three independent parts -- exact source file, exact full test name (describe
+// path + title), and a stable fingerprint (the first line of the assertion's failure message,
+// before its stack trace, so no absolute path or line number is part of the signature). All three
+// must match; a failure with the same file+name but a different message is a different failure
+// and fails closed. See tools/release-gate/test/classify.test.ts for the exhaustive matching
+// behavior this feeds.
 const KNOWN_BASELINE_DEFECTS = [
   {
     id: "repository-policy-crlf-regex",
     fileSuffix: "test/safety/repository-policy.test.ts",
     fullName:
       "repository policy: CI never receives Cloudflare credentials ci.yml's pull_request trigger has no branch restriction",
+    fingerprint:
+      "AssertionError: pull_request trigger must be present: expected null not to be null // Object.is equality",
     note: "CRLF-sensitive regex assumes LF line endings; the committed content is compliant, only this worktree's checkout line endings trip the check.",
   },
   {
@@ -32,29 +70,10 @@ const KNOWN_BASELINE_DEFECTS = [
     fileSuffix: "tools/context-pack/test/select.test.ts",
     fullName:
       "context-budget pruning prunes lower-priority-tier entries first, and mandatory material survives budget pressure",
+    fingerprint:
+      "AssertionError: expected false to be true // Object.is equality",
     note: "CRLF-checked-out fixture shifts a hardcoded byte-count budget threshold across a pass/fail boundary.",
   },
-];
-
-/** Files Task 17 itself touches -- format:check runs against exactly this list, never the whole
- * repo, per the locked decision that repo-wide CRLF noise on untouched files is reported
- * separately and never blocks this gate. */
-const TASK_17_TOUCHED_FILES = [
-  "src/operator/observability.ts",
-  "test/unit/operator-observability.test.ts",
-  "test/safety/release-gate.test.ts",
-  "tools/release-gate/src/schemas.ts",
-  "tools/release-gate/src/gates.ts",
-  "tools/release-gate/src/run.mjs",
-  "tools/release-gate/tsconfig.json",
-  "tools/release-gate/vitest.config.ts",
-  "tools/release-gate/test/gates.test.ts",
-  "package.json",
-  "context/receipts/accepted/through-task-016b.json",
-  "context/catalog/index.json",
-  "context/catalog/tags.json",
-  "context/handoff/current-task.json",
-  "docs/superpowers/plans/2026-08-31-howler-v095-task17-observability-safety-gates-plan.md",
 ];
 
 /** @typedef {{ id: string; pass: boolean; reason: string; location?: string }} StepResult */
@@ -102,37 +121,23 @@ function runVitestJson(id, args) {
       "--reporter=json",
       `--outputFile=${outputFile}`,
     ]);
-    if (!existsSync(outputFile)) {
-      steps.push({
-        id,
-        pass: false,
-        reason: `${id}: vitest produced no JSON report (exit ${String(result.status)})\n${(result.stderr ?? "").split("\n").slice(-15).join("\n")}`,
-      });
-      return;
-    }
-    /** @type {{ testResults: { name: string; assertionResults: { title: string; fullName: string; status: string }[] }[] }} */
-    const report = JSON.parse(readFileSync(outputFile, "utf8"));
-    const failures = [];
-    for (const fileResult of report.testResults) {
-      for (const assertion of fileResult.assertionResults) {
-        if (assertion.status !== "failed") continue;
-        failures.push({ file: fileResult.name, fullName: assertion.fullName });
+
+    let report = null;
+    if (existsSync(outputFile)) {
+      try {
+        report = JSON.parse(readFileSync(outputFile, "utf8"));
+      } catch {
+        report = null; // malformed JSON -- classifyVitestRun treats this the same as no report
       }
     }
 
-    const known = [];
-    const unknown = [];
-    for (const failure of failures) {
-      const match = KNOWN_BASELINE_DEFECTS.find(
-        (defect) =>
-          failure.file.replaceAll("\\", "/").endsWith(defect.fileSuffix) &&
-          failure.fullName === defect.fullName,
-      );
-      if (match) known.push({ failure, defect: match });
-      else unknown.push(failure);
-    }
+    const classification = classifyVitestRun({
+      exitCode: result.status,
+      report,
+      knownDefects: KNOWN_BASELINE_DEFECTS,
+    });
 
-    for (const { defect } of known) {
+    for (const defect of classification.knownDefectsMatched) {
       steps.push({
         id: `KNOWN BASELINE DEFECT: ${defect.id}`,
         pass: true,
@@ -140,19 +145,21 @@ function runVitestJson(id, args) {
       });
     }
 
-    if (unknown.length > 0) {
+    if (classification.pass) {
       steps.push({
         id,
-        pass: false,
-        reason:
-          `${String(unknown.length)} unrecognized failure(s):\n` +
-          unknown.map((f) => `  - ${f.file} :: ${f.fullName}`).join("\n"),
+        pass: true,
+        reason: `${id} succeeded (${String(classification.knownDefectsMatched.length)} known baseline defect(s) excluded from blocking)`,
       });
     } else {
       steps.push({
         id,
-        pass: true,
-        reason: `${id} succeeded (${String(known.length)} known baseline defect(s) excluded from blocking)`,
+        pass: false,
+        reason:
+          `${String(classification.unknownFailures.length)} unrecognized failure(s) (process exit ${String(result.status)}${result.signal ? `, signal ${result.signal}` : ""}):\n` +
+          classification.unknownFailures
+            .map((f) => `  - ${f.file} :: ${f.description}`)
+            .join("\n"),
       });
     }
   } finally {
@@ -160,12 +167,43 @@ function runVitestJson(id, args) {
   }
 }
 
-function runFormatCheckOnTouchedFiles() {
-  const existing = TASK_17_TOUCHED_FILES.filter((f) =>
-    existsSync(join(repoRoot, f)),
+/**
+ * Discovers the candidate's actually-changed files dynamically -- against BASE_SHA (tracked
+ * changes, staged or not) plus any new untracked file -- rather than a hardcoded list frozen to
+ * one task's file set. A future candidate with a different diff is checked correctly without
+ * this script needing to be edited first.
+ */
+function getChangedFiles() {
+  const diffResult = runCommand("git", ["diff", "--name-only", BASE_SHA]);
+  const untrackedResult = runCommand("git", [
+    "ls-files",
+    "--others",
+    "--exclude-standard",
+  ]);
+  return computeChangedFiles({
+    diffOutput: diffResult.status === 0 ? (diffResult.stdout ?? "") : "",
+    untrackedOutput:
+      untrackedResult.status === 0 ? (untrackedResult.stdout ?? "") : "",
+  });
+}
+
+function runFormatCheckOnChangedFiles() {
+  const changed = getChangedFiles();
+  const formattable = changed.filter(
+    (f) =>
+      FORMATTABLE_EXTENSIONS.has(extname(f)) && existsSync(join(repoRoot, f)),
   );
-  const result = runCommand("npx", ["prettier", "--check", ...existing]);
-  recordSimpleGate("format:check (Task 17-touched files only)", result);
+  const gateId = `format:check (changed files vs ${BASE_SHA.slice(0, 12)})`;
+  if (formattable.length === 0) {
+    steps.push({
+      id: gateId,
+      pass: true,
+      reason: "No formattable changed files found against the base",
+    });
+    return;
+  }
+  const result = runCommand("npx", ["prettier", "--check", ...formattable]);
+  recordSimpleGate(gateId, result);
 }
 
 function reportRepoWideFormatNoiseInformationally() {
@@ -182,7 +220,7 @@ function reportRepoWideFormatNoiseInformationally() {
 
 recordSimpleGate("lint", npmRun("lint"));
 recordSimpleGate("typecheck", npmRun("typecheck"));
-runFormatCheckOnTouchedFiles();
+runFormatCheckOnChangedFiles();
 runVitestJson("test (unit/integration/contract/parity/safety)", [
   "--passWithNoTests",
   "test/unit",

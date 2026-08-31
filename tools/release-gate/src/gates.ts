@@ -121,22 +121,83 @@ export function checkNoLegacyMutationRoute(
   };
 }
 
-export function checkEvidenceApplyShadowExplicit(html: string): GateResult {
-  const impliedSelected =
-    /value="EVIDENCE_APPLY_SHADOW"[^>]*selected/.test(html) ||
-    /selected[^>]*value="EVIDENCE_APPLY_SHADOW"/.test(html);
-  if (impliedSelected) {
+const PREVIEW_FUNCTION_PATTERN = /function\s+\w*[Pp]review\w*\s*\(/;
+
+/**
+ * Checks both the rendered HTML *and* the client script source for every concrete
+ * implicit-default/escalation mechanism this codebase's pattern could use, not only one
+ * double-quoted HTML regex:
+ *
+ *  1. an `<option>` marked `selected` for EVIDENCE_APPLY_SHADOW, either quote style
+ *  2. a control's `.value` forced to the literal string in script (an assignment, not a read --
+ *     `kindEl.value` being *read* to build a request from the user's own selection is fine;
+ *     `kindEl.value = "EVIDENCE_APPLY_SHADOW"` forcing it is not)
+ *  3. a `DEFAULT`/`INITIAL`-named constant declared as the literal string
+ *  4. a preview-named function that automatically calls an apply-named function
+ *
+ * A user explicitly choosing Apply at runtime (reading `.value`, comparing it, submitting it)
+ * never matches any of these -- only an unconditional assignment/declaration/auto-invocation does.
+ */
+export function checkEvidenceApplyShadowExplicit(
+  html: string,
+  clientScriptSource: string,
+): GateResult {
+  const impliedSelectedInHtml =
+    /value=["']EVIDENCE_APPLY_SHADOW["'][^>]*selected/.test(html) ||
+    /selected[^>]*value=["']EVIDENCE_APPLY_SHADOW["']/.test(html);
+  if (impliedSelectedInHtml) {
     return {
       id: "evidence-apply-shadow-explicit",
       pass: false,
-      reason: "EVIDENCE_APPLY_SHADOW is marked as the default-selected option",
-      location: "intent-kind select",
+      reason:
+        "EVIDENCE_APPLY_SHADOW is marked as the default-selected HTML option",
+      location: "intent-kind select (HTML)",
     };
   }
+
+  if (/\.value\s*=\s*["']EVIDENCE_APPLY_SHADOW["']/.test(clientScriptSource)) {
+    return {
+      id: "evidence-apply-shadow-explicit",
+      pass: false,
+      reason:
+        "Client script assigns a control's value to EVIDENCE_APPLY_SHADOW directly (implicit default/escalation)",
+      location: "client script .value assignment",
+    };
+  }
+
+  if (
+    /(?:const|let|var)\s+\w*(?:DEFAULT|INITIAL)\w*\s*=\s*["']EVIDENCE_APPLY_SHADOW["']/i.test(
+      clientScriptSource,
+    )
+  ) {
+    return {
+      id: "evidence-apply-shadow-explicit",
+      pass: false,
+      reason:
+        "Client script declares a default/initial constant set to EVIDENCE_APPLY_SHADOW",
+      location: "client script default constant",
+    };
+  }
+
+  const previewBody = extractFunctionBody(
+    clientScriptSource,
+    PREVIEW_FUNCTION_PATTERN,
+  );
+  if (previewBody && /\b\w*[Aa]pply\w*\s*\(/.test(previewBody)) {
+    return {
+      id: "evidence-apply-shadow-explicit",
+      pass: false,
+      reason:
+        "A preview-related function automatically invokes an apply-related function",
+      location: "preview function body",
+    };
+  }
+
   return {
     id: "evidence-apply-shadow-explicit",
     pass: true,
-    reason: "EVIDENCE_APPLY_SHADOW is never default-selected",
+    reason:
+      "EVIDENCE_APPLY_SHADOW is never default-selected, forced, or auto-invoked from preview",
   };
 }
 
@@ -202,28 +263,33 @@ export function checkCanonicalResumeOwnership(source: string): GateResult {
   };
 }
 
-/** Canonical engine/operator function names that must only ever run server-side. Their name
- * appearing inside client-embedded source is a structural proof of leaked business logic --
- * these functions are never importable in a browser context, so the only way the literal call
- * text appears there is a duplicated implementation. */
-const FORBIDDEN_SERVER_ONLY_CALLS = [
-  "analyzeRecovery(",
-  "forecastAfterEvent(",
-  "forecastInitial(",
-  "publishForecast(",
-  "commitShadowTransition(",
-  "validateProjectModel(",
-];
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
 
-export function checkNoBrowserBusinessLogic(source: string): GateResult {
-  const found = FORBIDDEN_SERVER_ONLY_CALLS.find((name) =>
-    source.includes(name),
+/**
+ * `forbiddenSymbols` is the caller-supplied denylist of exported value names (function/const/
+ * class) from the engine/domain/operator layer -- built mechanically by
+ * `extractExportedValueNames` over the real source files, not a small hand-picked sample this
+ * function owns itself (a hardcoded 6-name list here would only catch those exact 6 names; a
+ * mechanically-derived list is exhaustive relative to what those modules currently export).
+ * Matches on a whole-identifier boundary, so it catches both a call (`analyzeRecovery(...)`) and
+ * a bare reference (an alias, a re-export) alike -- either is a structural proof of leakage --
+ * without false-positiving on an unrelated identifier that merely contains the name as a
+ * substring (e.g. `analyzeRecoveryReportUiLabel`).
+ */
+export function checkNoBrowserBusinessLogic(
+  source: string,
+  forbiddenSymbols: readonly string[],
+): GateResult {
+  const found = forbiddenSymbols.find((name) =>
+    new RegExp(`\\b${escapeRegExp(name)}\\b`).test(source),
   );
   if (found) {
     return {
       id: "no-browser-business-logic",
       pass: false,
-      reason: `Client-embedded source calls a server-only canonical function: ${found}`,
+      reason: `Client-embedded source references a server-only canonical symbol: ${found}`,
       location: found,
     };
   }
@@ -231,6 +297,39 @@ export function checkNoBrowserBusinessLogic(source: string): GateResult {
     id: "no-browser-business-logic",
     pass: true,
     reason:
-      "No canonical server-only function call found in client-embedded source",
+      "No canonical engine/domain/operator symbol found in client-embedded source",
+  };
+}
+
+/** Explicit tokens for the live integrations Task 17 forbids -- Google Calendar/Drive hosts and
+ * client class names, plus the shared Google OAuth host any such integration would need. A plain
+ * relative-path fetch to Howler's own API (e.g. `fetch("/v1/intents", ...)`) never matches any of
+ * these, so normal same-origin calls are never flagged. */
+const FORBIDDEN_LIVE_CONNECTOR_TOKENS = [
+  "calendar.google.com",
+  "googleapis.com/calendar",
+  "drive.google.com",
+  "googleapis.com/drive",
+  "accounts.google.com",
+  "GoogleCalendar",
+  "GoogleDrive",
+];
+
+export function checkNoLiveConnectorReferences(source: string): GateResult {
+  const found = FORBIDDEN_LIVE_CONNECTOR_TOKENS.find((token) =>
+    source.includes(token),
+  );
+  if (found) {
+    return {
+      id: "no-live-connector-references",
+      pass: false,
+      reason: `Source references a forbidden live connector integration point: ${found}`,
+      location: found,
+    };
+  }
+  return {
+    id: "no-live-connector-references",
+    pass: true,
+    reason: "No forbidden live connector reference found",
   };
 }

@@ -12,6 +12,7 @@ import {
   createSubmissionKernel,
   fieldDashboardClientScript,
   fieldDashboardHtml,
+  operatorPanelClientScript,
   operatorPanelHtml,
 } from "../../src/worker/admin";
 import {
@@ -20,9 +21,15 @@ import {
   checkLiveSystemActivation,
   checkNoBrowserBusinessLogic,
   checkNoLegacyMutationRoute,
+  checkNoLiveConnectorReferences,
   checkProductionConfig,
   checkStagingShadowCompliance,
 } from "../../tools/release-gate/src/gates";
+import { extractMutationRoutes } from "../../tools/release-gate/src/extract-routes";
+import {
+  extractExportedValueNames,
+  KNOWN_HARMLESS_NAME_COLLISIONS,
+} from "../../tools/release-gate/src/forbidden-symbols";
 
 function readSource(sources: Record<string, string>, suffix: string): string {
   const entry = Object.entries(sources).find(([modulePath]) =>
@@ -38,6 +45,15 @@ const wranglerSources = import.meta.glob<string>("../../wrangler.jsonc", {
   query: "?raw",
 });
 const wrangler = readSource(wranglerSources, "wrangler.jsonc");
+
+// The sandboxed Workers test runtime has no Node `fs` (nodejs_compat is deliberately not
+// enabled), so real source text is read the same way repository-policy.test.ts reads ci.yml --
+// via Vite's `?raw` glob import at build time, not readFileSync.
+const workerIndexSources = import.meta.glob<string>(
+  "../../src/worker/index.ts",
+  { eager: true, import: "default", query: "?raw" },
+);
+const workerIndexSource = readSource(workerIndexSources, "src/worker/index.ts");
 
 describe("release gate: staging/shadow safety (real repo)", () => {
   it("OPERATOR_SAFETY passes checkStagingShadowCompliance", () => {
@@ -61,42 +77,60 @@ describe("release gate: staging/shadow safety (real repo)", () => {
 });
 
 describe("release gate: no legacy mutation route (real repo)", () => {
-  // Task 15's canonical operator entry points, plus the pre-existing v0.9.4 compatibility
-  // mutation routes accepted history already covers. Not auto-extracted from src/worker/index.ts
-  // (its route matching mixes exact-path and segment-count styles that a regex would only
-  // approximate) -- update this list deliberately whenever a route is added, same as
-  // repository-policy.test.ts's own hand-maintained checks.
+  // Task 15's three literal canonical entry points, plus the five segment-index-guarded v0.9.4
+  // compatibility mutation routes accepted history already covers (resume, understanding/preview,
+  // events/preview, events/apply-shadow, events/publish) -- rendered the same way
+  // extractMutationRoutes canonicalizes a segment-index guard. This list is still hand-maintained
+  // (update it deliberately when a route is added), but unlike before, what it's compared AGAINST
+  // is now the actual route guards extracted from src/worker/index.ts's own source, not a second
+  // copy of this same list standing in for "reality".
   const ACCEPTED_MUTATION_ROUTES = [
     "/v1/admin/init-db",
     "/v1/projects/deboard-v091/seed",
     "/v1/intents",
-    "/v1/workflows/:workflowId/resume",
-    "/v1/projects/:projectId/events/preview",
-    "/v1/projects/:projectId/events/apply-shadow",
-    "/v1/projects/:projectId/events/publish",
+    "SEGMENTS(len=4){1=workflows,3=resume}",
+    "SEGMENTS(len=5){3=understanding,4=preview}",
+    "SEGMENTS(len=5){3=events,4=preview}",
+    "SEGMENTS(len=5){3=events,4=apply-shadow}",
+    "SEGMENTS(len=5){3=events,4=publish}",
   ];
 
-  it("the accepted mutation route set passes checkNoLegacyMutationRoute", () => {
-    const routes = ACCEPTED_MUTATION_ROUTES.map((path) => ({
-      method: "POST",
-      path,
-    }));
-    const result = checkNoLegacyMutationRoute(routes, ACCEPTED_MUTATION_ROUTES);
+  it("extracts exactly the accepted mutation route set from the real source, nothing more, nothing less", () => {
+    const observed = extractMutationRoutes(workerIndexSource);
+    const observedPaths = observed.map((r) => `${r.method} ${r.path}`).sort();
+    const acceptedPaths = ACCEPTED_MUTATION_ROUTES.map(
+      (p) => `POST ${p}`,
+    ).sort();
+    expect(observedPaths).toEqual(acceptedPaths);
+  });
+
+  it("the real repo's actual mutation routes pass checkNoLegacyMutationRoute", () => {
+    const observed = extractMutationRoutes(workerIndexSource);
+    const result = checkNoLegacyMutationRoute(
+      observed,
+      ACCEPTED_MUTATION_ROUTES,
+    );
     expect(result.pass).toBe(true);
   });
 });
 
 describe("release gate: EVIDENCE_APPLY_SHADOW is never implicitly selected (real repo)", () => {
-  it("the real /admin/operator page passes checkEvidenceApplyShadowExplicit", () => {
-    expect(checkEvidenceApplyShadowExplicit(operatorPanelHtml()).pass).toBe(
-      true,
-    );
+  const operatorScript =
+    createSubmissionKernel.toString() + operatorPanelClientScript.toString();
+  const fieldScript =
+    createSubmissionKernel.toString() + fieldDashboardClientScript.toString();
+
+  it("the real /admin/operator page + client script passes checkEvidenceApplyShadowExplicit", () => {
+    expect(
+      checkEvidenceApplyShadowExplicit(operatorPanelHtml(), operatorScript)
+        .pass,
+    ).toBe(true);
   });
 
-  it("the real /admin/field page passes checkEvidenceApplyShadowExplicit", () => {
-    expect(checkEvidenceApplyShadowExplicit(fieldDashboardHtml()).pass).toBe(
-      true,
-    );
+  it("the real /admin/field page + client script passes checkEvidenceApplyShadowExplicit", () => {
+    expect(
+      checkEvidenceApplyShadowExplicit(fieldDashboardHtml(), fieldScript).pass,
+    ).toBe(true);
   });
 
   it("the actually-served GET /admin/operator response passes too", async () => {
@@ -104,9 +138,10 @@ describe("release gate: EVIDENCE_APPLY_SHADOW is never implicitly selected (real
       new Request("https://example.test/admin/operator"),
       env,
     );
-    expect(checkEvidenceApplyShadowExplicit(await response.text()).pass).toBe(
-      true,
-    );
+    expect(
+      checkEvidenceApplyShadowExplicit(await response.text(), operatorScript)
+        .pass,
+    ).toBe(true);
   });
 });
 
@@ -119,9 +154,56 @@ describe("release gate: canonical Resume ownership (real repo)", () => {
 });
 
 describe("release gate: no browser-side business logic (real repo)", () => {
-  it("the field dashboard's embedded script never calls a canonical server-only function", () => {
-    const source =
+  // Mechanically derived from the real engine/domain/operator exports -- see
+  // tools/release-gate/test/forbidden-symbols.test.ts for the fixture-level proof this catches a
+  // renamed/inline copy, not just a call to one of a small hand-picked sample of names.
+  const engineDomainOperatorSources = import.meta.glob<string>(
+    [
+      "../../src/engine/*.ts",
+      "../../src/domain/validation.ts",
+      "../../src/operator/intent.ts",
+      "../../src/operator/workflow.ts",
+      "../../src/operator/result.ts",
+      "../../src/operator/policy.ts",
+      "../../src/operator/observability.ts",
+    ],
+    { eager: true, import: "default", query: "?raw" },
+  );
+
+  function forbiddenSymbols(): string[] {
+    const names = new Set<string>();
+    for (const source of Object.values(engineDomainOperatorSources)) {
+      for (const name of extractExportedValueNames(source)) names.add(name);
+    }
+    for (const known of KNOWN_HARMLESS_NAME_COLLISIONS) names.delete(known);
+    return [...names];
+  }
+
+  it("neither Task 16A's nor Task 16B's embedded client script references a canonical engine/domain/operator symbol", () => {
+    const forbidden = forbiddenSymbols();
+    expect(forbidden.length).toBeGreaterThan(20);
+    const operatorSource =
+      createSubmissionKernel.toString() + operatorPanelClientScript.toString();
+    const fieldSource =
       createSubmissionKernel.toString() + fieldDashboardClientScript.toString();
-    expect(checkNoBrowserBusinessLogic(source).pass).toBe(true);
+    expect(checkNoBrowserBusinessLogic(operatorSource, forbidden).pass).toBe(
+      true,
+    );
+    expect(checkNoBrowserBusinessLogic(fieldSource, forbidden).pass).toBe(true);
+  });
+});
+
+describe("release gate: no source-level live connector references (real repo)", () => {
+  it("neither client-embedded script references a live connector integration point", () => {
+    const operatorSource =
+      createSubmissionKernel.toString() + operatorPanelClientScript.toString();
+    const fieldSource =
+      createSubmissionKernel.toString() + fieldDashboardClientScript.toString();
+    expect(checkNoLiveConnectorReferences(operatorSource).pass).toBe(true);
+    expect(checkNoLiveConnectorReferences(fieldSource).pass).toBe(true);
+  });
+
+  it("the real src/worker/index.ts route table has no live connector reference", () => {
+    expect(checkNoLiveConnectorReferences(workerIndexSource).pass).toBe(true);
   });
 });
