@@ -1148,9 +1148,10 @@ export function fieldDashboardClientScript(
         <div><h3>Upcoming forecast</h3><p id="fp-${String(index)}-forecast">${EM_DASH}</p></div>
       </div>
       <p><strong>Recommended next move:</strong> <span id="fp-${String(index)}-recommendation">Run Refresh to load project intelligence.</span></p>
-      <p>Workflow: <span id="fp-${String(index)}-workflow-state">${EM_DASH}</span>
-        <button type="button" id="fp-${String(index)}-resume" hidden>Resume workflow</button></p>
-      <p id="fp-${String(index)}-problem"></p>
+      <section class="active-workflows">
+        <h3>Active workflows / Needs attention</h3>
+        <div id="fp-${String(index)}-active-workflows"><p class="none">No active or blocked workflows.</p></div>
+      </section>
       <button type="button" id="fp-${String(index)}-refresh">Refresh</button>
       <section class="evidence-block">
         <label for="fp-${String(index)}-evidence-kind">Evidence action</label>
@@ -1194,33 +1195,84 @@ export function fieldDashboardClientScript(
   }
 
   let trackedProjects = loadTrackedProjects(sessionStorage);
-  const healthByIndex = new Map<number, Record<string, unknown> | null>();
-  const recoveryByIndex = new Map<number, Record<string, unknown> | null>();
-  const lastActionByIndex = new Map<
-    number,
-    { kind: string; storageKey: string; workflowId: string | null }
-  >();
+
+  // All state below is keyed by *stable* identity -- a projectId, or `${projectId}:${kind}` for
+  // per-action state -- never by render index. A project's index shifts the moment an earlier
+  // project is removed, so an index-keyed slot would let a response meant for one project's
+  // request land in whatever project now occupies its old position. DOM element ids (`fp-N-*`)
+  // remain index-based purely for addressing the current render; they never carry logical
+  // ownership of state.
+  const ACTION_KINDS = [
+    "FORECAST_QUERY",
+    "FORECAST_HEALTH_QUERY",
+    "RECOVERY_QUERY",
+    "EVIDENCE_PREVIEW",
+    "EVIDENCE_APPLY_SHADOW",
+  ];
+  const ACTION_LABELS: Record<string, string> = {
+    FORECAST_QUERY: "Forecast",
+    FORECAST_HEALTH_QUERY: "Forecast health",
+    RECOVERY_QUERY: "Recovery",
+    EVIDENCE_PREVIEW: "Evidence preview",
+    EVIDENCE_APPLY_SHADOW: "Apply shadow evidence",
+  };
+  interface ActionState {
+    workflowId: string | null;
+    workflowState: string;
+    problemText: string;
+    storageKey: string;
+  }
+  const healthByProject = new Map<string, Record<string, unknown> | null>();
+  const recoveryByProject = new Map<string, Record<string, unknown> | null>();
+  const actionStateByKey = new Map<string, ActionState>();
   const inFlight = new Set<string>();
 
-  function setCardStatus(index: number, text: string): void {
+  function indexOfProject(projectId: string): number {
+    return trackedProjects.indexOf(projectId);
+  }
+
+  function isProjectQueryBusy(projectId: string): boolean {
+    return QUERY_KINDS.some((kind) => inFlight.has(`${projectId}:${kind}`));
+  }
+
+  function isProjectEvidenceBusy(projectId: string): boolean {
+    return (
+      inFlight.has(`${projectId}:EVIDENCE_PREVIEW`) ||
+      inFlight.has(`${projectId}:EVIDENCE_APPLY_SHADOW`)
+    );
+  }
+
+  function setCardStatus(projectId: string, text: string): void {
+    const index = indexOfProject(projectId);
+    if (index === -1) return;
     document.getElementById(`fp-${String(index)}-card-status`).textContent =
       text;
   }
 
-  function setCardBusy(index: number, busy: boolean): void {
-    document.getElementById(`fp-${String(index)}-refresh`).disabled = busy;
-    document.getElementById(`fp-${String(index)}-evidence-run`).disabled = busy;
-    const resumeBtn = document.getElementById(`fp-${String(index)}-resume`);
-    resumeBtn.disabled = busy || resumeBtn.hidden;
+  /** Recomputes a project's busy indicators from the current `inFlight` set -- never a single
+   * boolean captured at one action's start, since several independent actions can be in flight
+   * for the same project at once. A no-op if the project is no longer tracked. */
+  function refreshBusyIndicators(projectId: string): void {
+    const index = indexOfProject(projectId);
+    if (index === -1) return;
+    const queryBusy = isProjectQueryBusy(projectId);
+    const evidenceBusy = isProjectEvidenceBusy(projectId);
+    document.getElementById(`fp-${String(index)}-refresh`).disabled = queryBusy;
+    document.getElementById(`fp-${String(index)}-evidence-run`).disabled =
+      evidenceBusy;
     setCardStatus(
-      index,
-      busy ? `Working${String.fromCharCode(8230)}` : "Ready.",
+      projectId,
+      queryBusy || evidenceBusy
+        ? `Working${String.fromCharCode(8230)}`
+        : "Ready.",
     );
   }
 
-  function updateProjectSummary(index: number): void {
-    const health = healthByIndex.get(index) ?? null;
-    const recovery = recoveryByIndex.get(index) ?? null;
+  function updateProjectSummary(projectId: string): void {
+    const index = indexOfProject(projectId);
+    if (index === -1) return;
+    const health = healthByProject.get(projectId) ?? null;
+    const recovery = recoveryByProject.get(projectId) ?? null;
     const healthAvailable = health ? health.available === true : false;
     const recoveryAvailable = recovery ? recovery.available === true : false;
 
@@ -1264,8 +1316,70 @@ export function fieldDashboardClientScript(
       );
   }
 
+  function isNoteworthy(state: ActionState | undefined): boolean {
+    if (!state) return false;
+    return (
+      state.workflowState === "INTERRUPTED" ||
+      state.workflowState === "BLOCKED" ||
+      state.workflowState === "FAILED" ||
+      state.problemText !== ""
+    );
+  }
+
+  /** Renders the compact "Active workflows / Needs attention" list for one project -- one row
+   * per action kind that is currently INTERRUPTED/BLOCKED/FAILED/has a problem, each with its own
+   * Resume where applicable. A successful background read never removes another action kind's
+   * row: each kind owns its own slot in `actionStateByKey`, so one kind's SUCCEEDED response
+   * cannot overwrite another kind's still-unresolved INTERRUPTED workflow. */
+  function renderActiveWorkflows(projectId: string): void {
+    const index = indexOfProject(projectId);
+    if (index === -1) return;
+    const rows = ACTION_KINDS.map((kind) => ({
+      kind,
+      state: actionStateByKey.get(`${projectId}:${kind}`),
+    })).filter((entry) => isNoteworthy(entry.state));
+
+    const container = document.getElementById(
+      `fp-${String(index)}-active-workflows`,
+    );
+    if (rows.length === 0) {
+      container.innerHTML = `<p class="none">No active or blocked workflows.</p>`;
+      return;
+    }
+    container.innerHTML = rows
+      .map(({ kind, state }) => {
+        const label = ACTION_LABELS[kind] ?? kind;
+        const showResume = state?.workflowState === "INTERRUPTED";
+        const problemSuffix = state?.problemText
+          ? ` ${EM_DASH} ${escapeHtml(state.problemText)}`
+          : "";
+        return `<div class="workflow-row">
+          <span>${escapeHtml(label)}: ${escapeHtml(state?.workflowState ?? EM_DASH)}${problemSuffix}</span>
+          ${showResume ? `<button type="button" id="fp-${String(index)}-resume-${kind}">Resume</button>` : ""}
+        </div>`;
+      })
+      .join("");
+    for (const { kind, state } of rows) {
+      if (state?.workflowState === "INTERRUPTED") {
+        document
+          .getElementById(`fp-${String(index)}-resume-${kind}`)
+          .addEventListener("click", () => {
+            resumeAction(projectId, kind);
+          });
+      }
+    }
+  }
+
+  /**
+   * Applies one action kind's response for one project. Always keyed by the stable `projectId` +
+   * `kind` that *initiated* the request, never by the render index the project happened to be at
+   * when the request started -- a response only ever mutates the state slot it logically owns.
+   * If the project is no longer tracked (removed while this request was in flight), the identity
+   * lifecycle and in-memory intelligence maps are still updated (so a later re-add can pick up
+   * where an unresolved action left off), but no DOM is touched.
+   */
   function handleActionResult(
-    index: number,
+    projectId: string,
     kind: string,
     storageKey: string,
     result: { ok: boolean; status: number; body: unknown },
@@ -1274,55 +1388,54 @@ export function fieldDashboardClientScript(
       markSubmissionResolved(sessionStorage, storageKey);
     }
     const display = mapOutcomeToDisplay(result.body);
-
-    document.getElementById(`fp-${String(index)}-workflow-state`).textContent =
-      String(display.workflowState);
+    const actionKey = `${projectId}:${kind}`;
+    const previous = actionStateByKey.get(actionKey);
+    const workflowId =
+      typeof display.workflowId === "string" && display.workflowId !== EM_DASH
+        ? display.workflowId
+        : (previous?.workflowId ?? null);
     const problemText =
       display.problem !== EM_DASH
         ? String(display.problem)
         : display.revisionConflict !== EM_DASH
           ? String(display.revisionConflict)
           : "";
-    document.getElementById(`fp-${String(index)}-problem`).textContent =
-      problemText;
-    const resumeBtn = document.getElementById(`fp-${String(index)}-resume`);
-    resumeBtn.hidden = !display.showResume;
-
-    const workflowId = display.workflowId;
-    lastActionByIndex.set(index, {
-      kind,
+    actionStateByKey.set(actionKey, {
+      workflowId,
+      workflowState: String(display.workflowState),
+      problemText,
       storageKey,
-      workflowId:
-        typeof workflowId === "string" && workflowId !== EM_DASH
-          ? workflowId
-          : (lastActionByIndex.get(index)?.workflowId ?? null),
     });
 
     if (kind === "FORECAST_HEALTH_QUERY") {
-      healthByIndex.set(index, mapHealthToDisplay(result.body));
+      healthByProject.set(projectId, mapHealthToDisplay(result.body));
     }
     if (kind === "RECOVERY_QUERY") {
-      recoveryByIndex.set(index, mapRecoveryToDisplay(result.body));
+      recoveryByProject.set(projectId, mapRecoveryToDisplay(result.body));
     }
+
+    const index = indexOfProject(projectId);
+    if (index === -1) return;
+
     document.getElementById(`fp-${String(index)}-raw`).textContent =
       JSON.stringify(result.body, null, 2);
-
-    updateProjectSummary(index);
+    updateProjectSummary(projectId);
+    renderActiveWorkflows(projectId);
 
     const body = result.body as
       { run?: unknown; result?: unknown; error?: string } | undefined;
     if (body && (body.run ?? body.result)) {
-      setCardStatus(index, "Ready.");
+      setCardStatus(projectId, "Ready.");
     } else {
       setCardStatus(
-        index,
+        projectId,
         `Error: ${body?.error ?? `HTTP ${String(result.status)}`}`,
       );
     }
   }
 
-  function runQuery(projectId: string, index: number, kind: string): void {
-    const key = `${String(index)}:${kind}`;
+  function runQuery(projectId: string, kind: string): void {
+    const key = `${projectId}:${kind}`;
     if (inFlight.has(key)) return;
     const fields: FormFields = {
       kind,
@@ -1330,7 +1443,7 @@ export function fieldDashboardClientScript(
       expectedRevision: null,
       evidenceEvent: null,
     };
-    const storageKey = `howler_field_pending_${String(index)}_${kind}`;
+    const storageKey = `howler_field_pending_${projectId}_${kind}`;
     const identity = resolveSubmissionIdentity(
       computeFormSignature(fields),
       sessionStorage,
@@ -1340,35 +1453,36 @@ export function fieldDashboardClientScript(
     );
     const intent = buildIntentPayload(fields, identity);
     inFlight.add(key);
-    setCardBusy(index, true);
+    refreshBusyIndicators(projectId);
     void callApi(fetch, sessionStorage, adminKeyValue(), "/v1/intents", {
       method: "POST",
       body: JSON.stringify(intent),
     })
       .then((result) => {
-        handleActionResult(index, kind, storageKey, result);
+        handleActionResult(projectId, kind, storageKey, result);
       })
       .catch((error: unknown) => {
-        setCardStatus(index, `Error: ${describeError(error)}`);
+        setCardStatus(projectId, `Error: ${describeError(error)}`);
       })
       .then(() => {
         inFlight.delete(key);
-        setCardBusy(index, false);
+        refreshBusyIndicators(projectId);
       });
   }
 
-  function runProjectQueries(projectId: string, index: number): void {
-    for (const kind of QUERY_KINDS) runQuery(projectId, index, kind);
+  function runProjectQueries(projectId: string): void {
+    for (const kind of QUERY_KINDS) runQuery(projectId, kind);
   }
 
   function runEvidenceAction(projectId: string, index: number): void {
-    const key = `${String(index)}:EVIDENCE`;
-    if (inFlight.has(key)) return;
     const kindEl = document.getElementById(`fp-${String(index)}-evidence-kind`);
     const revisionEl = document.getElementById(
       `fp-${String(index)}-evidence-revision`,
     );
     const jsonEl = document.getElementById(`fp-${String(index)}-evidence-json`);
+    const kind = kindEl.value;
+    const key = `${projectId}:${kind}`;
+    if (inFlight.has(key)) return;
     let evidenceEvent: unknown = null;
     try {
       evidenceEvent = JSON.parse(jsonEl.value || "null");
@@ -1376,12 +1490,12 @@ export function fieldDashboardClientScript(
       evidenceEvent = null;
     }
     const fields: FormFields = {
-      kind: kindEl.value,
+      kind,
       projectId,
       expectedRevision: Number(revisionEl.value),
       evidenceEvent,
     };
-    const storageKey = `howler_field_pending_${String(index)}_EVIDENCE`;
+    const storageKey = `howler_field_pending_${projectId}_${kind}`;
     const identity = resolveSubmissionIdentity(
       computeFormSignature(fields),
       sessionStorage,
@@ -1391,54 +1505,60 @@ export function fieldDashboardClientScript(
     );
     const intent = buildIntentPayload(fields, identity);
     inFlight.add(key);
-    setCardBusy(index, true);
+    refreshBusyIndicators(projectId);
     void callApi(fetch, sessionStorage, adminKeyValue(), "/v1/intents", {
       method: "POST",
       body: JSON.stringify(intent),
     })
       .then((result) => {
-        handleActionResult(index, fields.kind, storageKey, result);
+        handleActionResult(projectId, kind, storageKey, result);
       })
       .catch((error: unknown) => {
-        setCardStatus(index, `Error: ${describeError(error)}`);
+        setCardStatus(projectId, `Error: ${describeError(error)}`);
       })
       .then(() => {
         inFlight.delete(key);
-        setCardBusy(index, false);
+        refreshBusyIndicators(projectId);
       });
   }
 
-  function resumeAction(index: number): void {
-    const key = `${String(index)}:RESUME`;
-    const last = lastActionByIndex.get(index);
-    if (!last?.workflowId || inFlight.has(key)) return;
-    inFlight.add(key);
-    setCardBusy(index, true);
+  function resumeAction(projectId: string, kind: string): void {
+    const actionKey = `${projectId}:${kind}`;
+    const resumeKey = `${actionKey}:RESUME`;
+    const state = actionStateByKey.get(actionKey);
+    if (!state?.workflowId || inFlight.has(resumeKey)) return;
+    inFlight.add(resumeKey);
+    refreshBusyIndicators(projectId);
     void callApi(
       fetch,
       sessionStorage,
       adminKeyValue(),
-      `/v1/workflows/${encodeURIComponent(last.workflowId)}/resume`,
+      `/v1/workflows/${encodeURIComponent(state.workflowId)}/resume`,
       { method: "POST" },
     )
       .then((result) => {
-        handleActionResult(index, last.kind, last.storageKey, result);
+        handleActionResult(projectId, kind, state.storageKey, result);
       })
       .catch((error: unknown) => {
-        setCardStatus(index, `Error: ${describeError(error)}`);
+        setCardStatus(projectId, `Error: ${describeError(error)}`);
       })
       .then(() => {
-        inFlight.delete(key);
-        setCardBusy(index, false);
+        inFlight.delete(resumeKey);
+        refreshBusyIndicators(projectId);
       });
   }
 
-  function removeProject(index: number): void {
+  function removeProject(projectId: string): void {
+    const index = indexOfProject(projectId);
+    if (index === -1) return;
     trackedProjects.splice(index, 1);
     saveTrackedProjects(sessionStorage, trackedProjects);
-    healthByIndex.delete(index);
-    recoveryByIndex.delete(index);
-    lastActionByIndex.delete(index);
+    // Deliberately not clearing healthByProject/recoveryByProject/actionStateByKey/sessionStorage
+    // pending identities for this projectId here: a still-in-flight request for it must still be
+    // able to resolve (or stay correctly PENDING) so a later re-add under the same projectId picks
+    // up exactly where an unresolved action left off. handleActionResult already skips all DOM
+    // writes once a project is no longer tracked, and a different, newly-added projectId can never
+    // read another projectId's map entries, so nothing here leaks into an unrelated project.
     renderProjects();
   }
 
@@ -1446,17 +1566,12 @@ export function fieldDashboardClientScript(
     document
       .getElementById(`fp-${String(index)}-refresh`)
       .addEventListener("click", () => {
-        runProjectQueries(projectId, index);
-      });
-    document
-      .getElementById(`fp-${String(index)}-resume`)
-      .addEventListener("click", () => {
-        resumeAction(index);
+        runProjectQueries(projectId);
       });
     document
       .getElementById(`fp-${String(index)}-remove`)
       .addEventListener("click", () => {
-        removeProject(index);
+        removeProject(projectId);
       });
     document
       .getElementById(`fp-${String(index)}-evidence-run`)
@@ -1469,9 +1584,11 @@ export function fieldDashboardClientScript(
     els.projectsContainer.innerHTML = trackedProjects
       .map((id, i) => projectCardHtml(id, i))
       .join("");
-    trackedProjects.forEach((id, i) => {
-      wireProjectCard(id, i);
-      updateProjectSummary(i);
+    trackedProjects.forEach((id) => {
+      const index = indexOfProject(id);
+      wireProjectCard(id, index);
+      updateProjectSummary(id);
+      renderActiveWorkflows(id);
     });
   }
 
@@ -1485,8 +1602,8 @@ export function fieldDashboardClientScript(
   });
 
   els.refreshAllButton.addEventListener("click", () => {
-    trackedProjects.forEach((id, i) => {
-      runProjectQueries(id, i);
+    trackedProjects.forEach((id) => {
+      runProjectQueries(id);
     });
   });
 

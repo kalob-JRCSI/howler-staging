@@ -15,53 +15,55 @@ interface FakeElement extends FieldDashboardElement {
   trigger(type: string, event?: unknown): void;
 }
 
-function makeElement(overrides: Partial<FakeElement> = {}): FakeElement {
-  const listeners: Record<string, ((event?: unknown) => void)[]> = {};
-  return {
-    value: "",
-    textContent: "",
-    disabled: false,
-    hidden: false,
-    innerHTML: "",
-    addEventListener(type, handler) {
-      (listeners[type] ??= []).push(handler);
-    },
-    trigger(type, event) {
-      for (const handler of listeners[type] ?? []) handler(event);
-    },
-    ...overrides,
-  };
-}
-
-function makeFakeDocument(
-  staticIds: string[],
-  containerIds: string[],
-): { document: FieldDashboardDocument; elements: Map<string, FakeElement> } {
+// A single shared registry backs every element (static and dynamically-rendered alike). Every
+// element's own innerHTML setter can register/prune ids into this same registry -- a real
+// browser's innerHTML setter discards the previous subtree and builds fresh nodes, and this needs
+// to hold for *any* element that gets one (a project card's own root, and nested sub-containers
+// like its "active workflows" list, which re-render independently of the outer card).
+function makeFakeDocument(staticIds: string[]): {
+  document: FieldDashboardDocument;
+  elements: Map<string, FakeElement>;
+} {
   const elements = new Map<string, FakeElement>();
-  for (const id of staticIds) elements.set(id, makeElement());
 
-  for (const containerId of containerIds) {
-    const container = elements.get(containerId);
-    if (!container) throw new Error(`unknown container id: ${containerId}`);
+  function createElement(initial: Partial<FakeElement> = {}): FakeElement {
+    const listeners: Record<string, ((event?: unknown) => void)[]> = {};
     let html = "";
-    Object.defineProperty(container, "innerHTML", {
-      get: () => html,
-      set: (value: string) => {
+    let ownedIds: string[] = [];
+    const element = {
+      value: "",
+      textContent: "",
+      disabled: false,
+      hidden: false,
+      addEventListener(type: string, handler: (event?: unknown) => void) {
+        (listeners[type] ??= []).push(handler);
+      },
+      trigger(type: string, event?: unknown) {
+        for (const handler of listeners[type] ?? []) handler(event);
+      },
+      ...initial,
+      get innerHTML(): string {
+        return html;
+      },
+      set innerHTML(value: string) {
         html = value;
-        // A real innerHTML setter discards the previous subtree and builds fresh nodes, so
-        // getElementById after a re-render must return brand-new elements, not stale ones from a
-        // prior render (a removed/reordered project shifts every later index's ids).
+        for (const id of ownedIds) elements.delete(id);
+        ownedIds = [];
         for (const match of value.matchAll(
           /<([a-zA-Z0-9]+)\b[^>]*\bid="([^"]+)"[^>]*>([^<]*)/g,
         )) {
           const id = match[2];
           const text = match[3] ?? "";
           if (!id) continue;
-          elements.set(id, makeElement({ textContent: text }));
+          elements.set(id, createElement({ textContent: text }));
+          ownedIds.push(id);
         }
       },
-    });
+    };
+    return element;
   }
+
+  for (const id of staticIds) elements.set(id, createElement());
 
   const document: FieldDashboardDocument = {
     getElementById(id) {
@@ -124,6 +126,70 @@ function makeFetch(respond: Respond): {
     });
   };
   return { fetchFn, calls };
+}
+
+interface DeferredResponse {
+  ok: boolean;
+  status: number;
+  bodyText: string;
+}
+
+interface DeferredCall {
+  call: FakeFetchCall;
+  resolve: (response: {
+    ok: boolean;
+    status: number;
+    text: () => Promise<string>;
+  }) => void;
+}
+
+/** A controllable fetch for tests that need to hold a response open (simulate an in-flight
+ * request) while other actions happen, then resolve it later on demand. */
+function makeDeferredFetch(): {
+  fetchFn: OperatorPanelFetch;
+  calls: FakeFetchCall[];
+  pending: DeferredCall[];
+} {
+  const calls: FakeFetchCall[] = [];
+  const pending: DeferredCall[] = [];
+  const fetchFn: OperatorPanelFetch = (path, options) => {
+    const headers = new Headers(
+      (options?.headers as HeadersInit | undefined) ?? {},
+    );
+    const call: FakeFetchCall = {
+      path,
+      method: options?.method ?? "GET",
+      headers,
+      body: options?.body,
+    };
+    calls.push(call);
+    return new Promise((resolve) => {
+      pending.push({ call, resolve });
+    });
+  };
+  return { fetchFn, calls, pending };
+}
+
+function resolvePending(
+  pending: DeferredCall[],
+  predicate: (call: FakeFetchCall) => boolean,
+  response: DeferredResponse,
+): void {
+  const index = pending.findIndex((entry) => predicate(entry.call));
+  if (index === -1) throw new Error("no matching pending fetch call");
+  const [entry] = pending.splice(index, 1);
+  entry?.resolve({
+    ok: response.ok,
+    status: response.status,
+    text: () => Promise.resolve(response.bodyText),
+  });
+}
+
+function byProjectAndKind(projectId: string, kind: string) {
+  return (call: FakeFetchCall): boolean => {
+    const body = callBody(call);
+    return body.projectId === projectId && body.kind === kind;
+  };
 }
 
 function makeCrypto(ids: string[]) {
@@ -231,20 +297,36 @@ interface Harness {
   testHooks: Required<FieldDashboardTestHooks>;
 }
 
-function mount(
-  respond: Respond,
+const DEFAULT_RANDOM_IDS = [
+  "intent-a",
+  "idem-a",
+  "intent-b",
+  "idem-b",
+  "intent-c",
+  "idem-c",
+  "intent-d",
+  "idem-d",
+  "intent-e",
+  "idem-e",
+  "intent-f",
+  "idem-f",
+  "intent-g",
+  "idem-g",
+  "intent-h",
+  "idem-h",
+];
+
+function mountWithFetch(
+  fetchFn: OperatorPanelFetch,
   options: { randomIds?: string[]; trackedProjects?: string[] } = {},
-): Harness {
-  const { document, elements } = makeFakeDocument(
-    [
-      "admin-key",
-      "new-project-id",
-      "add-project",
-      "refresh-all",
-      "projects-container",
-    ],
-    ["projects-container"],
-  );
+): Omit<Harness, "fetchCalls"> {
+  const { document, elements } = makeFakeDocument([
+    "admin-key",
+    "new-project-id",
+    "add-project",
+    "refresh-all",
+    "projects-container",
+  ]);
   const storage = makeStorage();
   if (options.trackedProjects) {
     storage.setItem(
@@ -252,32 +334,24 @@ function mount(
       JSON.stringify(options.trackedProjects),
     );
   }
-  const { fetchFn, calls } = makeFetch(respond);
-  const crypto = makeCrypto(
-    options.randomIds ?? [
-      "intent-a",
-      "idem-a",
-      "intent-b",
-      "idem-b",
-      "intent-c",
-      "idem-c",
-      "intent-d",
-      "idem-d",
-      "intent-e",
-      "idem-e",
-      "intent-f",
-      "idem-f",
-    ],
-  );
+  const crypto = makeCrypto(options.randomIds ?? DEFAULT_RANDOM_IDS);
   const testHooks: FieldDashboardTestHooks = {};
   fieldDashboardClientScript(document, storage, fetchFn, crypto, testHooks);
   return {
     document,
     elements,
     storage,
-    fetchCalls: calls,
     testHooks: testHooks as Required<FieldDashboardTestHooks>,
   };
+}
+
+function mount(
+  respond: Respond,
+  options: { randomIds?: string[]; trackedProjects?: string[] } = {},
+): Harness {
+  const { fetchFn, calls } = makeFetch(respond);
+  const rest = mountWithFetch(fetchFn, options);
+  return { ...rest, fetchCalls: calls };
 }
 
 async function flush(times = 8): Promise<void> {
@@ -286,7 +360,7 @@ async function flush(times = 8): Promise<void> {
   }
 }
 
-function el(h: Harness, id: string): FakeElement {
+function el(h: { document: FieldDashboardDocument }, id: string): FakeElement {
   return h.document.getElementById(id) as FakeElement;
 }
 
@@ -497,14 +571,15 @@ describe("workflow-state awareness", () => {
     });
     el(h, "fp-0-refresh").trigger("click");
     await flush();
-    expect(el(h, "fp-0-resume").hidden).toBe(false);
-    el(h, "fp-0-resume").trigger("click");
+    // Refresh fires all 3 read-only kinds; FORECAST_QUERY's own row exposes Resume.
+    expect(() => el(h, "fp-0-resume-FORECAST_QUERY")).not.toThrow();
+    el(h, "fp-0-resume-FORECAST_QUERY").trigger("click");
     await flush();
     const resumeCall = h.fetchCalls.find((c) => c.path.includes("/resume"));
     expect(resumeCall?.path).toBe("/v1/workflows/wf-xyz/resume");
   });
 
-  it("shows a structured problem for a BLOCKED/revision-conflict result", async () => {
+  it("shows a structured problem for a BLOCKED/revision-conflict result in the active-workflows list", async () => {
     const h = mount(() => ({
       ok: true,
       status: 409,
@@ -519,13 +594,18 @@ describe("workflow-state awareness", () => {
         }),
       ),
     }));
+    el(h, "fp-0-evidence-kind").value = "EVIDENCE_PREVIEW";
     el(h, "fp-0-evidence-json").value = "{}";
     el(h, "fp-0-evidence-run").trigger("click");
     await flush();
-    expect(el(h, "fp-0-problem").textContent).toContain("REVISION_CONFLICT");
+    expect(el(h, "fp-0-active-workflows").innerHTML).toContain(
+      "REVISION_CONFLICT",
+    );
+    // BLOCKED is not resumable -- no Resume control for it.
+    expect(() => el(h, "fp-0-resume-EVIDENCE_PREVIEW")).toThrow();
   });
 
-  it("shows SUCCEEDED workflow state plainly with no dominant raw JSON (expandable, non-empty)", async () => {
+  it("a SUCCEEDED result does not appear in the active-workflows/needs-attention list, but raw JSON is still populated", async () => {
     const h = mount(() => ({
       ok: true,
       status: 200,
@@ -533,7 +613,9 @@ describe("workflow-state awareness", () => {
     }));
     el(h, "fp-0-refresh").trigger("click");
     await flush();
-    expect(el(h, "fp-0-workflow-state").textContent).toBe("SUCCEEDED");
+    expect(el(h, "fp-0-active-workflows").innerHTML).toContain(
+      "No active or blocked workflows.",
+    );
     expect(el(h, "fp-0-raw").textContent.length).toBeGreaterThan(0);
   });
 });
@@ -685,16 +767,13 @@ describe("accessibility semantics", () => {
 
 describe("admin key handling", () => {
   it("preloads a previously saved admin key from sessionStorage", () => {
-    const { document, elements } = makeFakeDocument(
-      [
-        "admin-key",
-        "new-project-id",
-        "add-project",
-        "refresh-all",
-        "projects-container",
-      ],
-      ["projects-container"],
-    );
+    const { document, elements } = makeFakeDocument([
+      "admin-key",
+      "new-project-id",
+      "add-project",
+      "refresh-all",
+      "projects-container",
+    ]);
     const storage = makeStorage();
     storage.setItem("howler_admin_key", "saved-key");
     const { fetchFn } = makeFetch(() => ({
@@ -716,5 +795,177 @@ describe("admin key handling", () => {
     el(h, "fp-0-refresh").trigger("click");
     await flush();
     expect(h.fetchCalls[0]?.headers.get("Authorization")).toBe("Bearer my-key");
+  });
+});
+
+// -----------------------------------------------------------------------------------------------
+// TASK 16B CORRECTION: state and workflow ownership must be keyed by stable projectId (+ action
+// kind), never by mutable render index -- a card's index shifts whenever an earlier project is
+// removed, and a shared per-card workflow slot lets one action's response hide another's.
+// -----------------------------------------------------------------------------------------------
+
+describe("HIGH 1: state is keyed by stable projectId, not mutable render index", () => {
+  it("a delayed response for a removed project never writes into the project that shifted into its old slot", async () => {
+    const { fetchFn, pending } = makeDeferredFetch();
+    const h = mountWithFetch(fetchFn, {
+      trackedProjects: ["proj-a", "proj-b"],
+    });
+    el(h, "fp-0-refresh").trigger("click"); // proj-a's 3 queries, held open
+    await flush();
+    expect(el(h, "fp-1-title").textContent).toBe("proj-b");
+
+    el(h, "fp-0-remove").trigger("click"); // proj-b now occupies index 0
+    expect(el(h, "fp-0-title").textContent).toBe("proj-b");
+
+    resolvePending(
+      pending,
+      byProjectAndKind("proj-a", "FORECAST_HEALTH_QUERY"),
+      {
+        ok: true,
+        status: 200,
+        bodyText: json(submissionBody({ output: HEALTH_OUTPUT })),
+      },
+    );
+    await flush();
+
+    // proj-b, now at index 0, must show none of proj-a's data.
+    expect(el(h, "fp-0-priority-actions").textContent).toBe("None.");
+    expect(el(h, "fp-0-risks").textContent).toBe("None.");
+    expect(el(h, "fp-0-recommendation").textContent).toBe(
+      "Run Refresh to load project intelligence.",
+    );
+  });
+
+  it("an uncertain-delivery identity survives project removal and re-add, and a retry reuses it", async () => {
+    const { fetchFn, calls, pending } = makeDeferredFetch();
+    const h = mountWithFetch(fetchFn, { trackedProjects: ["proj-a"] });
+
+    el(h, "fp-0-evidence-kind").value = "EVIDENCE_PREVIEW";
+    el(h, "fp-0-evidence-json").value = "{}";
+    el(h, "fp-0-evidence-run").trigger("click");
+    await flush();
+    const firstBody = callBody(calls[0]);
+    resolvePending(pending, byProjectAndKind("proj-a", "EVIDENCE_PREVIEW"), {
+      ok: false,
+      status: 500,
+      bodyText: "server error",
+    });
+    await flush();
+
+    el(h, "fp-0-remove").trigger("click");
+    expect(() => el(h, "fp-0-title")).toThrow();
+
+    el(h, "new-project-id").value = "proj-a";
+    el(h, "add-project").trigger("click");
+    expect(el(h, "fp-0-title").textContent).toBe("proj-a");
+
+    el(h, "fp-0-evidence-kind").value = "EVIDENCE_PREVIEW";
+    el(h, "fp-0-evidence-json").value = "{}";
+    el(h, "fp-0-evidence-run").trigger("click");
+    await flush();
+    const secondBody = callBody(calls[1]);
+
+    expect(secondBody.intentId).toBe(firstBody.intentId);
+    expect(secondBody.idempotencyKey).toBe(firstBody.idempotencyKey);
+    expect(secondBody.submittedAt).toBe(firstBody.submittedAt);
+  });
+
+  it("removing a middle project leaves a newly added project with none of its cached state", async () => {
+    const h = mount(
+      (call) => {
+        const body = callBody(call);
+        if (
+          body.projectId === "proj-b" &&
+          body.kind === "FORECAST_HEALTH_QUERY"
+        ) {
+          return {
+            ok: true,
+            status: 200,
+            bodyText: json(submissionBody({ output: HEALTH_OUTPUT })),
+          };
+        }
+        return { ok: true, status: 200, bodyText: json(submissionBody({})) };
+      },
+      { trackedProjects: ["proj-a", "proj-b", "proj-c"] },
+    );
+    el(h, "fp-1-refresh").trigger("click"); // proj-b
+    await flush();
+    expect(el(h, "fp-1-priority-actions").textContent).toContain(
+      "Permit approval",
+    );
+
+    el(h, "fp-1-remove").trigger("click"); // tracked: [proj-a, proj-c]
+    expect(el(h, "fp-1-title").textContent).toBe("proj-c");
+
+    el(h, "new-project-id").value = "proj-d";
+    el(h, "add-project").trigger("click"); // tracked: [proj-a, proj-c, proj-d]
+    expect(el(h, "fp-2-title").textContent).toBe("proj-d");
+    expect(el(h, "fp-2-priority-actions").textContent).toBe("None.");
+    expect(el(h, "fp-2-risks").textContent).toBe("None.");
+    expect(el(h, "fp-2-recommendation").textContent).toBe(
+      "Run Refresh to load project intelligence.",
+    );
+  });
+});
+
+describe("HIGH 2: each action kind owns its own workflow state -- one kind's success cannot hide another kind's INTERRUPTED/Resume", () => {
+  it("FORECAST_HEALTH_QUERY going INTERRUPTED stays visible with Resume even after FORECAST_QUERY and RECOVERY_QUERY succeed", async () => {
+    const { fetchFn, calls, pending } = makeDeferredFetch();
+    const h = mountWithFetch(fetchFn, { trackedProjects: ["proj-a"] });
+    el(h, "fp-0-refresh").trigger("click");
+    await flush();
+
+    resolvePending(
+      pending,
+      byProjectAndKind("proj-a", "FORECAST_HEALTH_QUERY"),
+      {
+        ok: true,
+        status: 202,
+        bodyText: json(
+          submissionBody({
+            run: runBlock({ workflowId: "wf-health", state: "INTERRUPTED" }),
+            omitResult: true,
+          }),
+        ),
+      },
+    );
+    await flush();
+    resolvePending(pending, byProjectAndKind("proj-a", "FORECAST_QUERY"), {
+      ok: true,
+      status: 200,
+      bodyText: json(
+        submissionBody({
+          run: runBlock({ workflowId: "wf-forecast", state: "SUCCEEDED" }),
+        }),
+      ),
+    });
+    await flush();
+    resolvePending(pending, byProjectAndKind("proj-a", "RECOVERY_QUERY"), {
+      ok: true,
+      status: 200,
+      bodyText: json(
+        submissionBody({
+          run: runBlock({ workflowId: "wf-recovery", state: "SUCCEEDED" }),
+          output: RECOVERY_OUTPUT,
+        }),
+      ),
+    });
+    await flush();
+
+    // The INTERRUPTED health workflow is still represented with its own Resume control.
+    expect(() => el(h, "fp-0-resume-FORECAST_HEALTH_QUERY")).not.toThrow();
+    expect(el(h, "fp-0-active-workflows").innerHTML).toContain("INTERRUPTED");
+
+    // Its Resume calls exactly the stored workflowId via the resume endpoint, not a new intent.
+    const callsBeforeResume = calls.length;
+    el(h, "fp-0-resume-FORECAST_HEALTH_QUERY").trigger("click");
+    await flush();
+    expect(calls).toHaveLength(callsBeforeResume + 1);
+    const resumeCall = calls[callsBeforeResume];
+    expect(resumeCall?.path).toBe("/v1/workflows/wf-health/resume");
+    expect(resumeCall?.method).toBe("POST");
+
+    // Forecast/recovery's own successful results are still reflected, undisturbed by the resume.
+    expect(el(h, "fp-0-forecast").textContent).toContain("2026-09-05");
   });
 });
