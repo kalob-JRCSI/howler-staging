@@ -1,20 +1,19 @@
 {
   "schemaVersion": "1",
   "kind": "handoffRecord",
-  "taskId": "task-16a",
-  "title": "Task 16A: One-action staging operator panel",
+  "taskId": "task-16b",
+  "title": "Task 16B: Field PM dashboard pilot",
   "status": "IN_PROGRESS",
-  "baseSha": "877589ec033780144f9cb3627450b32c31789a8c",
-  "blocks": ["task-16b"],
-  "summary": "Task 15 is accepted (see context/receipts/accepted/through-task-015.json). Task 16A is implemented and verified on branch codex/v095-task16a-operator-panel: a new, independent GET /admin/operator page (thin transport adapter over the Task 15 HTTP contracts) coexists with the existing /admin PM dashboard, which is left byte-for-byte unchanged. Full repository test suite, context-pack tests, typecheck, lint, format, and build:dry all pass. Not yet merged, not yet accepted history, and not yet deployed. Task 16B (field PM dashboard pilot) and Task 17 remain blocked until 16A is reviewed and merged.",
+  "baseSha": "1c6fc15f9e17249ac6ea9d00df68540a79e84b35",
+  "blocks": ["task-17"],
+  "summary": "Task 16A is accepted (see context/receipts/accepted/through-task-016a.json). Task 16B adds a new, additive GET /admin/field project-scoped dashboard pilot, reusing the canonical Task 15 operator HTTP contracts and Task 16A's identity lifecycle unchanged -- no operator-core code is duplicated or modified. Existing routes (/, /admin, /admin/operator) are left unchanged. Task 17 remains blocked until 16B is reviewed and merged.",
   "relevantPaths": [
-    "src/worker/admin.ts",
     "src/worker/index.ts",
+    "src/worker/admin.ts",
     "src/operator/intent.ts",
     "src/operator/workflow.ts",
     "src/operator/result.ts",
-    "test/unit/admin-ui.test.ts",
-    "test/contract/admin-ui.test.ts",
-    "test/contract/operator-routes.test.ts"
+    "test/contract/field-dashboard.test.ts",
+    "test/unit/admin-ui.test.ts"
   ]
 }
