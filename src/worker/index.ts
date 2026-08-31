@@ -9,7 +9,7 @@ import type { ForecastSnapshotV094 } from "../engine/solver";
 import { validateProjectModel } from "../domain/validation";
 import { RevisionConflictError } from "../engine/storage";
 import { createDeboardSeed } from "./deboard-seed";
-import { adminPage, operatorPanelPage } from "./admin";
+import { adminPage, operatorPanelPage, fieldDashboardPage } from "./admin";
 import { buildHealthReport, projectHealth } from "./health";
 import { sha256Hex } from "./hash";
 import { json, readJson, HttpError, requireAdmin } from "./http";
@@ -417,6 +417,12 @@ async function handle(request: Request, env: Env): Promise<Response> {
   // Task 16A: a second, independent same-origin page — does not replace or modify /admin above.
   if (request.method === "GET" && url.pathname === "/admin/operator") {
     return operatorPanelPage();
+  }
+
+  // Task 16B: a third, independent same-origin page — does not replace or modify / or
+  // /admin/operator above.
+  if (request.method === "GET" && url.pathname === "/admin/field") {
+    return fieldDashboardPage();
   }
 
   if (request.method === "GET" && url.pathname === "/health") {
