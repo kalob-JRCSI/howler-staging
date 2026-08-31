@@ -1,19 +1,20 @@
 {
   "schemaVersion": "1",
   "kind": "handoffRecord",
-  "taskId": "task-16b",
-  "title": "Task 16B: Field PM dashboard pilot",
+  "taskId": "task-17",
+  "title": "Task 17: Observability + safety + release regression gates",
   "status": "IN_PROGRESS",
-  "baseSha": "1c6fc15f9e17249ac6ea9d00df68540a79e84b35",
-  "blocks": ["task-17"],
-  "summary": "Task 16A is accepted (see context/receipts/accepted/through-task-016a.json). Task 16B adds a new, additive GET /admin/field project-scoped dashboard pilot, reusing the canonical Task 15 operator HTTP contracts and Task 16A's identity lifecycle unchanged -- no operator-core code is duplicated or modified. Existing routes (/, /admin, /admin/operator) are left unchanged. Task 17 remains blocked until 16B is reviewed and merged.",
+  "baseSha": "1a9f03e03ee0f476febc9740311283162f6882d1",
+  "blocks": ["task-18"],
+  "summary": "Task 16B is accepted (see context/receipts/accepted/through-task-016b.json). Task 17 adds structured, deterministic observability for the canonical intent -> workflow -> permission/risk -> execution -> result -> verification pipeline, deterministic regression gates for the safety invariants established by Tasks 1-16B, and one composed release-regression gate that fails closed. Instrumentation only observes canonical execution; it must never become a second mutation path, duplicate workflow/retry/forecasting logic, or touch deployment/production configuration. Task 18 remains blocked until 17 is reviewed and merged.",
   "relevantPaths": [
     "src/worker/index.ts",
-    "src/worker/admin.ts",
     "src/operator/intent.ts",
     "src/operator/workflow.ts",
     "src/operator/result.ts",
-    "test/contract/field-dashboard.test.ts",
-    "test/unit/admin-ui.test.ts"
+    "src/operator/policy.ts",
+    "src/worker/admin.ts",
+    "wrangler.jsonc",
+    "package.json"
   ]
 }
