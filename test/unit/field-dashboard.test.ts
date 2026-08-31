@@ -78,6 +78,8 @@ function makeFakeDocument(staticIds: string[]): {
 interface FakeStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+  hasKey(key: string): boolean;
 }
 
 function makeStorage(): FakeStorage {
@@ -87,6 +89,10 @@ function makeStorage(): FakeStorage {
     setItem: (key, value) => {
       store.set(key, value);
     },
+    removeItem: (key) => {
+      store.delete(key);
+    },
+    hasKey: (key) => store.has(key),
   };
 }
 
@@ -967,5 +973,259 @@ describe("HIGH 2: each action kind owns its own workflow state -- one kind's suc
 
     // Forecast/recovery's own successful results are still reflected, undisturbed by the resume.
     expect(el(h, "fp-0-forecast").textContent).toContain("2026-09-05");
+  });
+});
+
+// -----------------------------------------------------------------------------------------------
+// TASK 16B FINAL SAFETY CORRECTION
+// -----------------------------------------------------------------------------------------------
+
+describe("HIGH: Resume and a fresh submission share the same project+kind ownership lock", () => {
+  it("a fresh EVIDENCE_APPLY_SHADOW submission is blocked while its own Resume is in flight; unrelated kinds are unaffected; a later Apply after resolution gets a fresh identity", async () => {
+    const { fetchFn, calls, pending } = makeDeferredFetch();
+    const h = mountWithFetch(fetchFn, { trackedProjects: ["proj-a"] });
+
+    el(h, "fp-0-evidence-kind").value = "EVIDENCE_APPLY_SHADOW";
+    el(h, "fp-0-evidence-json").value = "{}";
+    el(h, "fp-0-evidence-run").trigger("click");
+    await flush();
+    const firstIntentId = callBody(calls[0]).intentId;
+    resolvePending(
+      pending,
+      byProjectAndKind("proj-a", "EVIDENCE_APPLY_SHADOW"),
+      {
+        ok: true,
+        status: 202,
+        bodyText: json(
+          submissionBody({
+            run: runBlock({ workflowId: "wf-apply", state: "INTERRUPTED" }),
+            omitResult: true,
+          }),
+        ),
+      },
+    );
+    await flush();
+
+    el(h, "fp-0-resume-EVIDENCE_APPLY_SHADOW").trigger("click");
+    await flush();
+    const callsBeforeRetry = calls.length;
+    expect(el(h, "fp-0-evidence-run").disabled).toBe(true);
+
+    // A fresh EVIDENCE_APPLY_SHADOW submission while Resume is pending must not fire.
+    el(h, "fp-0-evidence-kind").value = "EVIDENCE_APPLY_SHADOW";
+    el(h, "fp-0-evidence-json").value = "{}";
+    el(h, "fp-0-evidence-run").trigger("click");
+    await flush();
+    expect(calls).toHaveLength(callsBeforeRetry);
+
+    const resumeCall = calls.find((c) => c.path.includes("/resume"));
+    expect(resumeCall?.path).toBe("/v1/workflows/wf-apply/resume");
+    expect(resumeCall?.method).toBe("POST");
+
+    // An unrelated kind for the same project is not blocked.
+    el(h, "fp-0-refresh").trigger("click");
+    await flush();
+    expect(calls.some((c) => callBody(c).kind === "FORECAST_QUERY")).toBe(true);
+
+    // Resolve Resume definitively.
+    resolvePending(pending, (c) => c.path === "/v1/workflows/wf-apply/resume", {
+      ok: true,
+      status: 200,
+      bodyText: json(
+        submissionBody({
+          run: runBlock({ workflowId: "wf-apply", state: "SUCCEEDED" }),
+        }),
+      ),
+    });
+    await flush();
+    expect(el(h, "fp-0-evidence-run").disabled).toBe(false);
+
+    // A later deliberate Apply now runs, and mints a fresh logical identity.
+    el(h, "fp-0-evidence-kind").value = "EVIDENCE_APPLY_SHADOW";
+    el(h, "fp-0-evidence-json").value = "{}";
+    el(h, "fp-0-evidence-run").trigger("click");
+    await flush();
+    const lastCall = calls[calls.length - 1];
+    expect(callBody(lastCall).intentId).not.toBe(firstIntentId);
+  });
+});
+
+describe("MEDIUM: resolved/inactive project state is cleaned up on removal; active/uncertain/resumable state is preserved", () => {
+  it("A: resolved, inactive project state (health/recovery/pending identity) is cleared on removal; re-add starts fresh", async () => {
+    const h = mount(
+      (call) => {
+        const body = callBody(call);
+        if (
+          body.projectId === "proj-a" &&
+          body.kind === "FORECAST_HEALTH_QUERY"
+        ) {
+          return {
+            ok: true,
+            status: 200,
+            bodyText: json(submissionBody({ output: HEALTH_OUTPUT })),
+          };
+        }
+        return { ok: true, status: 200, bodyText: json(submissionBody({})) };
+      },
+      { trackedProjects: ["proj-a"] },
+    );
+    el(h, "fp-0-refresh").trigger("click");
+    await flush();
+    expect(el(h, "fp-0-priority-actions").textContent).toContain(
+      "Permit approval",
+    );
+    expect(
+      h.storage.hasKey("howler_field_pending_proj-a_FORECAST_HEALTH_QUERY"),
+    ).toBe(true);
+
+    el(h, "fp-0-remove").trigger("click");
+    expect(() => el(h, "fp-0-title")).toThrow();
+    expect(
+      h.storage.hasKey("howler_field_pending_proj-a_FORECAST_HEALTH_QUERY"),
+    ).toBe(false);
+    expect(h.storage.hasKey("howler_field_pending_proj-a_FORECAST_QUERY")).toBe(
+      false,
+    );
+    expect(h.storage.hasKey("howler_field_pending_proj-a_RECOVERY_QUERY")).toBe(
+      false,
+    );
+
+    el(h, "new-project-id").value = "proj-a";
+    el(h, "add-project").trigger("click");
+    expect(el(h, "fp-0-title").textContent).toBe("proj-a");
+    expect(el(h, "fp-0-priority-actions").textContent).toBe("None.");
+    expect(el(h, "fp-0-recommendation").textContent).toBe(
+      "Run Refresh to load project intelligence.",
+    );
+  });
+
+  it("B: an uncertain (PENDING) submission's identity is preserved on removal and reused on re-add + retry", async () => {
+    const { fetchFn, calls, pending } = makeDeferredFetch();
+    const h = mountWithFetch(fetchFn, { trackedProjects: ["proj-a"] });
+
+    el(h, "fp-0-evidence-kind").value = "EVIDENCE_PREVIEW";
+    el(h, "fp-0-evidence-json").value = "{}";
+    el(h, "fp-0-evidence-run").trigger("click");
+    await flush();
+    const firstBody = callBody(calls[0]);
+    resolvePending(pending, byProjectAndKind("proj-a", "EVIDENCE_PREVIEW"), {
+      ok: false,
+      status: 500,
+      bodyText: "server error",
+    });
+    await flush();
+    expect(
+      h.storage.hasKey("howler_field_pending_proj-a_EVIDENCE_PREVIEW"),
+    ).toBe(true);
+
+    el(h, "fp-0-remove").trigger("click");
+    expect(
+      h.storage.hasKey("howler_field_pending_proj-a_EVIDENCE_PREVIEW"),
+    ).toBe(true);
+
+    el(h, "new-project-id").value = "proj-a";
+    el(h, "add-project").trigger("click");
+    el(h, "fp-0-evidence-kind").value = "EVIDENCE_PREVIEW";
+    el(h, "fp-0-evidence-json").value = "{}";
+    el(h, "fp-0-evidence-run").trigger("click");
+    await flush();
+    const secondBody = callBody(calls[1]);
+    expect(secondBody.intentId).toBe(firstBody.intentId);
+    expect(secondBody.idempotencyKey).toBe(firstBody.idempotencyKey);
+    expect(secondBody.submittedAt).toBe(firstBody.submittedAt);
+  });
+
+  it("C: an INTERRUPTED workflow is preserved on removal and can still Resume the exact workflowId after re-add", async () => {
+    const h = mount(
+      () => ({
+        ok: true,
+        status: 202,
+        bodyText: json(
+          submissionBody({
+            run: runBlock({ workflowId: "wf-c", state: "INTERRUPTED" }),
+            omitResult: true,
+          }),
+        ),
+      }),
+      { trackedProjects: ["proj-a"] },
+    );
+    el(h, "fp-0-evidence-kind").value = "EVIDENCE_APPLY_SHADOW";
+    el(h, "fp-0-evidence-json").value = "{}";
+    el(h, "fp-0-evidence-run").trigger("click");
+    await flush();
+
+    el(h, "fp-0-remove").trigger("click");
+    el(h, "new-project-id").value = "proj-a";
+    el(h, "add-project").trigger("click");
+
+    expect(() => el(h, "fp-0-resume-EVIDENCE_APPLY_SHADOW")).not.toThrow();
+    el(h, "fp-0-resume-EVIDENCE_APPLY_SHADOW").trigger("click");
+    await flush();
+    const resumeCall = h.fetchCalls.find((c) => c.path.includes("/resume"));
+    expect(resumeCall?.path).toBe("/v1/workflows/wf-c/resume");
+  });
+
+  it("D: state required for an in-flight Resume is not destroyed by removing the project mid-flight", async () => {
+    const { fetchFn, calls, pending } = makeDeferredFetch();
+    const h = mountWithFetch(fetchFn, { trackedProjects: ["proj-a"] });
+
+    el(h, "fp-0-evidence-kind").value = "EVIDENCE_APPLY_SHADOW";
+    el(h, "fp-0-evidence-json").value = "{}";
+    el(h, "fp-0-evidence-run").trigger("click");
+    await flush();
+    const firstIntentId = callBody(calls[0]).intentId;
+    resolvePending(
+      pending,
+      byProjectAndKind("proj-a", "EVIDENCE_APPLY_SHADOW"),
+      {
+        ok: true,
+        status: 202,
+        bodyText: json(
+          submissionBody({
+            run: runBlock({ workflowId: "wf-d", state: "INTERRUPTED" }),
+            omitResult: true,
+          }),
+        ),
+      },
+    );
+    await flush();
+
+    el(h, "fp-0-resume-EVIDENCE_APPLY_SHADOW").trigger("click");
+    await flush();
+
+    // Remove the project while its Resume is still in flight.
+    el(h, "fp-0-remove").trigger("click");
+    expect(() => el(h, "fp-0-title")).toThrow();
+
+    // The deferred Resume resolves after removal -- must not throw, and must reach the
+    // preserved (not destroyed) state.
+    expect(() => {
+      resolvePending(pending, (c) => c.path === "/v1/workflows/wf-d/resume", {
+        ok: true,
+        status: 200,
+        bodyText: json(
+          submissionBody({
+            run: runBlock({ workflowId: "wf-d", state: "SUCCEEDED" }),
+          }),
+        ),
+      });
+    }).not.toThrow();
+    await flush();
+
+    // Re-adding shows the resolved outcome was correctly applied to preserved state, not lost.
+    el(h, "new-project-id").value = "proj-a";
+    el(h, "add-project").trigger("click");
+    expect(el(h, "fp-0-active-workflows").innerHTML).toContain(
+      "No active or blocked workflows.",
+    );
+
+    // The definitive SUCCEEDED resolution reached the actual persisted identity record (not a
+    // copy that got silently dropped) -- a later deliberate Apply mints a fresh logical identity.
+    el(h, "fp-0-evidence-kind").value = "EVIDENCE_APPLY_SHADOW";
+    el(h, "fp-0-evidence-json").value = "{}";
+    el(h, "fp-0-evidence-run").trigger("click");
+    await flush();
+    const lastCall = calls[calls.length - 1];
+    expect(callBody(lastCall).intentId).not.toBe(firstIntentId);
   });
 });

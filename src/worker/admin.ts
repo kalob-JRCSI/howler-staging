@@ -224,6 +224,11 @@ export interface OperatorPanelDocument {
 export interface OperatorPanelStorage {
   getItem(key: string): string | null;
   setItem(key: string, value: string): void;
+  /** Optional: real sessionStorage has this natively. Task 16A never needs it (its single
+   * identity slot is simply overwritten). Task 16B's field dashboard uses it to release a
+   * resolved, no-longer-active project's pending-identity record on removal, so a long field
+   * session doesn't grow sessionStorage without bound. */
+  removeItem?(key: string): void;
 }
 
 export interface OperatorPanelResponse {
@@ -1242,6 +1247,37 @@ export function fieldDashboardClientScript(
     );
   }
 
+  function isActionPending(storageKey: string): boolean {
+    const raw = sessionStorage.getItem(storageKey);
+    if (!raw) return false;
+    try {
+      const stored = JSON.parse(raw) as { state?: string };
+      return stored.state === "PENDING";
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * A project is safe to fully forget once none of its per-kind action state is still active:
+   * no in-flight request (including an in-flight Resume, which shares its kind's key), no
+   * uncertain (PENDING) delivery still awaiting a definitive outcome, and no INTERRUPTED workflow
+   * still waiting on an explicit Resume. Anything else (SUCCEEDED/BLOCKED/FAILED/never-run, with
+   * a RESOLVED-or-absent identity record) is a resolved, inactive result that removal may forget.
+   */
+  function isProjectSafeToPurge(projectId: string): boolean {
+    for (const kind of ACTION_KINDS) {
+      const key = `${projectId}:${kind}`;
+      if (inFlight.has(key)) return false;
+      if (isActionPending(`howler_field_pending_${projectId}_${kind}`)) {
+        return false;
+      }
+      const state = actionStateByKey.get(key);
+      if (state?.workflowState === "INTERRUPTED") return false;
+    }
+    return true;
+  }
+
   function setCardStatus(projectId: string, text: string): void {
     const index = indexOfProject(projectId);
     if (index === -1) return;
@@ -1266,6 +1302,10 @@ export function fieldDashboardClientScript(
         ? `Working${String.fromCharCode(8230)}`
         : "Ready.",
     );
+    // Resume shares its in-flight key with a fresh submission for the same project+kind (see
+    // resumeAction) -- re-render the active-workflows list so its Resume buttons visually reflect
+    // that shared busy state too, not just the Refresh/Run-evidence-action controls above.
+    renderActiveWorkflows(projectId);
   }
 
   function updateProjectSummary(projectId: string): void {
@@ -1350,12 +1390,15 @@ export function fieldDashboardClientScript(
       .map(({ kind, state }) => {
         const label = ACTION_LABELS[kind] ?? kind;
         const showResume = state?.workflowState === "INTERRUPTED";
+        // Resume shares its in-flight ownership lock with a fresh submission for the same
+        // project+kind -- reflect that shared busy state on the button itself.
+        const busy = inFlight.has(`${projectId}:${kind}`);
         const problemSuffix = state?.problemText
           ? ` ${EM_DASH} ${escapeHtml(state.problemText)}`
           : "";
         return `<div class="workflow-row">
           <span>${escapeHtml(label)}: ${escapeHtml(state?.workflowState ?? EM_DASH)}${problemSuffix}</span>
-          ${showResume ? `<button type="button" id="fp-${String(index)}-resume-${kind}">Resume</button>` : ""}
+          ${showResume ? `<button type="button" id="fp-${String(index)}-resume-${kind}"${busy ? " disabled" : ""}>Resume</button>` : ""}
         </div>`;
       })
       .join("");
@@ -1522,12 +1565,22 @@ export function fieldDashboardClientScript(
       });
   }
 
+  /**
+   * Resume shares the exact same `${projectId}:${kind}` in-flight ownership lock as a fresh
+   * submission for that project/kind (runQuery/runEvidenceAction) -- not a separate `:RESUME`
+   * key. A mutation workflow (e.g. EVIDENCE_APPLY_SHADOW) has exactly one logical action in
+   * flight for a given project+kind at a time, whether that's a first submission or its Resume;
+   * two different keys would let a fresh submission race a Resume that is still operating on the
+   * interrupted workflow. Sharing the key means runEvidenceAction/runQuery's own
+   * `if (inFlight.has(key)) return;` guard, and their busy-indicator disabling, apply to Resume
+   * for free -- and Resume's own guard below refuses to start if a fresh submission somehow got
+   * there first.
+   */
   function resumeAction(projectId: string, kind: string): void {
     const actionKey = `${projectId}:${kind}`;
-    const resumeKey = `${actionKey}:RESUME`;
     const state = actionStateByKey.get(actionKey);
-    if (!state?.workflowId || inFlight.has(resumeKey)) return;
-    inFlight.add(resumeKey);
+    if (!state?.workflowId || inFlight.has(actionKey)) return;
+    inFlight.add(actionKey);
     refreshBusyIndicators(projectId);
     void callApi(
       fetch,
@@ -1543,22 +1596,35 @@ export function fieldDashboardClientScript(
         setCardStatus(projectId, `Error: ${describeError(error)}`);
       })
       .then(() => {
-        inFlight.delete(resumeKey);
+        inFlight.delete(actionKey);
         refreshBusyIndicators(projectId);
       });
   }
 
+  /**
+   * Removing a project always takes it out of the tracked list and off the page. Whether its
+   * backing state is also forgotten depends on whether any of that state is still active or
+   * uncertain (see `isProjectSafeToPurge`): a still-in-flight request, an unresolved (PENDING)
+   * delivery, or an unresumed INTERRUPTED workflow must survive removal so a later re-add under
+   * the same projectId can still resolve/reuse/resume it correctly. Once every kind's state is a
+   * resolved, inactive result, removal releases it -- otherwise a long field session that
+   * repeatedly adds and removes projects would grow these maps and sessionStorage without bound.
+   */
   function removeProject(projectId: string): void {
     const index = indexOfProject(projectId);
     if (index === -1) return;
     trackedProjects.splice(index, 1);
     saveTrackedProjects(sessionStorage, trackedProjects);
-    // Deliberately not clearing healthByProject/recoveryByProject/actionStateByKey/sessionStorage
-    // pending identities for this projectId here: a still-in-flight request for it must still be
-    // able to resolve (or stay correctly PENDING) so a later re-add under the same projectId picks
-    // up exactly where an unresolved action left off. handleActionResult already skips all DOM
-    // writes once a project is no longer tracked, and a different, newly-added projectId can never
-    // read another projectId's map entries, so nothing here leaks into an unrelated project.
+    if (isProjectSafeToPurge(projectId)) {
+      healthByProject.delete(projectId);
+      recoveryByProject.delete(projectId);
+      for (const kind of ACTION_KINDS) {
+        actionStateByKey.delete(`${projectId}:${kind}`);
+        sessionStorage.removeItem?.(
+          `howler_field_pending_${projectId}_${kind}`,
+        );
+      }
+    }
     renderProjects();
   }
 
