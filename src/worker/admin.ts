@@ -1124,7 +1124,7 @@ ${PENTHOUSE_TOKENS}
     <section class="card" id="evidence-field" hidden>
       <label for="evidence-event-json">Evidence event (JSON)</label>
       <textarea id="evidence-event-json" rows="8" spellcheck="false" aria-describedby="evidence-help"></textarea>
-      <div id="evidence-help" class="sub">Paste the full ProjectEventInput JSON body.</div>
+      <div id="evidence-help" class="hw-sub">Paste the full ProjectEventInput JSON body.</div>
     </section>
 
     <button id="run-intent" type="submit">Run intent</button>
@@ -2014,9 +2014,11 @@ ${PENTHOUSE_TOKENS}
     .active-workflows h3 { margin-bottom: 6px; }
     .workflow-row {
       display: flex; align-items: center; justify-content: space-between; gap: 10px;
-      padding: 8px 0; border-top: 1px solid var(--hw-border); font-size: 13px;
+      padding: 8px 10px; font-size: 13px;
+      border-left: 2px solid var(--hw-danger); background: var(--hw-danger-bg);
+      border-radius: 0 var(--hw-radius-sm) var(--hw-radius-sm) 0;
     }
-    .workflow-row:first-child { border-top: 0; }
+    .workflow-row + .workflow-row { margin-top: 6px; }
     .none { color: var(--hw-ink-faint); font-size: 13px; margin: 0; }
     .evidence-block { border-top: 1px solid var(--hw-border); margin-top: 12px; padding-top: 12px; }
     details { margin-top: 10px; }
@@ -2035,12 +2037,13 @@ ${PENTHOUSE_TOKENS}
       padding: 5px 10px; border-radius: var(--hw-radius-sm); background: var(--hw-bg);
       border: 1px solid var(--hw-border); letter-spacing: 0.02em;
     }
-    #voice-section[data-voice-state="LISTENING"] #voice-push-to-talk,
-    #voice-section[data-voice-state="PROCESSING"] #voice-push-to-talk {
+    #voice-section[data-voice-state="LISTENING"] #voice-push-to-talk {
       border-color: var(--hw-accent); color: var(--hw-accent-strong);
     }
     #voice-section[data-voice-state="LISTENING"] #voice-status { color: var(--hw-accent-strong); border-color: var(--hw-accent); }
-    #voice-section[data-voice-state="PROCESSING"] #voice-status { color: var(--hw-ink); }
+    #voice-section[data-voice-state="PROCESSING"] #voice-status {
+      color: var(--hw-ink); border-color: var(--hw-border-strong); border-style: dashed;
+    }
     #voice-section[data-voice-state="CONFIRMATION"] {
       border-color: var(--hw-warn); background: var(--hw-warn-bg);
     }
