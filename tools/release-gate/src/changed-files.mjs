@@ -15,6 +15,32 @@ function parseGitFileList(output) {
 }
 
 /**
+ * Resolve a comparison base from explicit input, CI pull-request metadata, or a caller-provided
+ * local remote ref. No historical commit is safe as an implicit fallback.
+ *
+ * @param {{ explicitSha?: string; explicitShaValid: boolean; ciBaseRef?: string; ciBaseSha?: string; ciBaseShaValid: boolean; localBaseRef?: string; localBaseRefSha?: string }} input
+ * @returns {{ ok: true; base: string } | { ok: false; reason: string }}
+ */
+export function resolveComparisonBase(input) {
+  if (input.explicitSha && !input.explicitShaValid) {
+    return {
+      ok: false,
+      reason: "explicit comparison base is not a valid revision",
+    };
+  }
+  if (input.explicitSha && input.explicitShaValid) {
+    return { ok: true, base: input.explicitSha };
+  }
+  if (input.ciBaseSha && input.ciBaseShaValid) {
+    return { ok: true, base: input.ciBaseSha };
+  }
+  if (input.localBaseRef && input.localBaseRefSha) {
+    return { ok: true, base: input.localBaseRefSha };
+  }
+  return { ok: false, reason: "no valid comparison base could be resolved" };
+}
+
+/**
  * @param {{ diffOutput: string; untrackedOutput: string }} input
  * @returns {string[]}
  */

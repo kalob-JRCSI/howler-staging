@@ -17,19 +17,38 @@ import { tmpdir } from "node:os";
 import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { classifyVitestRun } from "./classify.mjs";
-import { resolveChangedFiles } from "./changed-files.mjs";
+import {
+  resolveChangedFiles,
+  resolveComparisonBase,
+} from "./changed-files.mjs";
 
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 
-/**
- * The comparison base for dynamic changed-file discovery -- overridable per invocation
- * (`RELEASE_GATE_BASE_SHA=<sha> npm run gate:release`) so a future candidate can supply its own
- * accepted base rather than this file staying hardcoded to one task's base forever. Defaults to
- * the currently accepted base this correction was written against.
- */
-const BASE_SHA =
-  process.env.RELEASE_GATE_BASE_SHA ??
-  "1a9f03e03ee0f476febc9740311283162f6882d1";
+function resolveGitRevision(revision) {
+  const result = runCommand("git", ["rev-parse", "--verify", revision]);
+  return result.status === 0 ? result.stdout.trim() : undefined;
+}
+
+function comparisonBase() {
+  const explicitSha = process.env.RELEASE_GATE_BASE_SHA;
+  const ciBaseRef = process.env.GITHUB_BASE_REF;
+  const ciBaseSha = process.env.GITHUB_BASE_SHA;
+  const ciBaseRefSha = ciBaseRef
+    ? resolveGitRevision(`origin/${ciBaseRef}`)
+    : undefined;
+  const localBaseRef =
+    process.env.RELEASE_GATE_BASE_REF ?? "origin/v0.9.5-dashboard-bridge";
+  const resolved = resolveComparisonBase({
+    explicitSha,
+    explicitShaValid: Boolean(explicitSha && resolveGitRevision(explicitSha)),
+    ciBaseRef,
+    ciBaseSha,
+    ciBaseShaValid: Boolean(ciBaseSha && resolveGitRevision(ciBaseSha)),
+    localBaseRef,
+    localBaseRefSha: ciBaseRefSha ?? resolveGitRevision(localBaseRef),
+  });
+  return resolved;
+}
 
 /** Extensions Prettier reliably formats in this repo -- filters the dynamic changed-file list so
  * an unrelated binary/unsupported file never produces gate noise. Still fully dynamic: this is a
@@ -191,7 +210,9 @@ function runVitestJson(id, args) {
  * compared against anything.
  */
 function getChangedFiles() {
-  const diffResult = runCommand("git", ["diff", "--name-only", BASE_SHA]);
+  const base = comparisonBase();
+  if (!base.ok) return base;
+  const diffResult = runCommand("git", ["diff", "--name-only", base.base]);
   const untrackedResult = runCommand("git", [
     "ls-files",
     "--others",
@@ -201,7 +222,10 @@ function getChangedFiles() {
 }
 
 function runFormatCheckOnChangedFiles() {
-  const gateId = `format:check (changed files vs ${BASE_SHA.slice(0, 12)})`;
+  const base = comparisonBase();
+  const gateId = base.ok
+    ? `format:check (changed files vs ${base.base.slice(0, 12)})`
+    : "format:check (changed files vs unresolved base)";
   const discovery = getChangedFiles();
   if (!discovery.ok) {
     steps.push({

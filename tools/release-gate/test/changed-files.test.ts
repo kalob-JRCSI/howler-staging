@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   computeChangedFiles,
+  resolveComparisonBase,
   resolveChangedFiles,
 } from "../src/changed-files.mjs";
 
@@ -41,6 +42,24 @@ function ok(stdout: string) {
 }
 
 describe("resolveChangedFiles: fail-closed Git discovery", () => {
+  it("keeps previously accepted files out when the resolved base is the later accepted parent", () => {
+    const result = resolveChangedFiles({
+      diffResult: ok(
+        "src/worker/voice-transport.ts\ntest/unit/voice-transport.test.ts\n",
+      ),
+      untrackedResult: ok("test/contract/voice-transport.test.ts\n"),
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.files).toEqual([
+        "src/worker/voice-transport.ts",
+        "test/unit/voice-transport.test.ts",
+        "test/contract/voice-transport.test.ts",
+      ]);
+      expect(result.files).not.toContain("tools/release-gate/src/gates.ts");
+    }
+  });
+
   it("1: a valid base with real Git output resolves to the expected changed files", () => {
     const result = resolveChangedFiles({
       diffResult: ok("src/a.ts\n"),
@@ -109,5 +128,83 @@ describe("resolveChangedFiles: fail-closed Git discovery", () => {
     });
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.files).toContain("src/deleted-file.ts");
+  });
+});
+
+describe("resolveComparisonBase: durable base selection", () => {
+  it("prefers an explicit valid SHA", () => {
+    expect(
+      resolveComparisonBase({
+        explicitSha: "6697435e0efd14da5c1addf635c0353fadee0355",
+        explicitShaValid: true,
+        ciBaseRef: undefined,
+        ciBaseSha: undefined,
+        ciBaseShaValid: false,
+        localBaseRef: undefined,
+        localBaseRefSha: undefined,
+      }),
+    ).toEqual({ ok: true, base: "6697435e0efd14da5c1addf635c0353fadee0355" });
+  });
+
+  it("uses the CI pull-request base SHA when supplied", () => {
+    expect(
+      resolveComparisonBase({
+        explicitSha: undefined,
+        explicitShaValid: false,
+        ciBaseRef: "v0.9.5-dashboard-bridge",
+        ciBaseSha: "6697435e0efd14da5c1addf635c0353fadee0355",
+        ciBaseShaValid: true,
+        localBaseRef: undefined,
+        localBaseRefSha: undefined,
+      }),
+    ).toEqual({ ok: true, base: "6697435e0efd14da5c1addf635c0353fadee0355" });
+  });
+
+  it("uses an explicit local remote base ref without embedding a historical SHA", () => {
+    expect(
+      resolveComparisonBase({
+        explicitSha: undefined,
+        explicitShaValid: false,
+        ciBaseRef: undefined,
+        ciBaseSha: undefined,
+        ciBaseShaValid: false,
+        localBaseRef: "origin/v0.9.5-dashboard-bridge",
+        localBaseRefSha: "6697435e0efd14da5c1addf635c0353fadee0355",
+      }),
+    ).toEqual({ ok: true, base: "6697435e0efd14da5c1addf635c0353fadee0355" });
+  });
+
+  it("fails closed for an explicitly invalid SHA instead of silently falling back", () => {
+    expect(
+      resolveComparisonBase({
+        explicitSha: "definitely-invalid-sha",
+        explicitShaValid: false,
+        ciBaseRef: undefined,
+        ciBaseSha: undefined,
+        ciBaseShaValid: false,
+        localBaseRef: "origin/v0.9.5-dashboard-bridge",
+        localBaseRefSha: "6697435e0efd14da5c1addf635c0353fadee0355",
+      }),
+    ).toEqual({
+      ok: false,
+      reason: "explicit comparison base is not a valid revision",
+    });
+  });
+
+  it("fails closed when no valid explicit, CI, or local base exists", () => {
+    expect(
+      resolveComparisonBase({
+        explicitSha: undefined,
+        explicitShaValid: false,
+        ciBaseRef: undefined,
+        ciBaseSha: undefined,
+        ciBaseShaValid: false,
+        localBaseRef: undefined,
+        localBaseRefSha: undefined,
+      }),
+    ).toEqual({
+      ok: false,
+      reason: "no valid comparison base could be resolved",
+    });
   });
 });
