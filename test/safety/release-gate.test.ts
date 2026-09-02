@@ -47,6 +47,15 @@ const wranglerSources = import.meta.glob<string>("../../wrangler.jsonc", {
 });
 const wrangler = readSource(wranglerSources, "wrangler.jsonc");
 
+const voiceTransportSources = import.meta.glob<string>(
+  "../../src/worker/voice-transport.ts",
+  { eager: true, import: "default", query: "?raw" },
+);
+const voiceTransportSource = readSource(
+  voiceTransportSources,
+  "src/worker/voice-transport.ts",
+);
+
 // The sandboxed Workers test runtime has no Node `fs` (nodejs_compat is deliberately not
 // enabled), so real source text is read the same way repository-policy.test.ts reads ci.yml --
 // via Vite's `?raw` glob import at build time, not readFileSync.
@@ -134,6 +143,12 @@ describe("release gate: EVIDENCE_APPLY_SHADOW is never implicitly selected (real
     ).toBe(true);
   });
 
+  it("the shared voice transport source passes checkEvidenceApplyShadowExplicit", () => {
+    expect(
+      checkEvidenceApplyShadowExplicit("", voiceTransportSource).pass,
+    ).toBe(true);
+  });
+
   it("the actually-served GET /admin/operator response passes too", async () => {
     const response = await worker.fetch(
       new Request("https://example.test/admin/operator"),
@@ -191,6 +206,9 @@ describe("release gate: no browser-side business logic (real repo)", () => {
       true,
     );
     expect(checkNoBrowserBusinessLogic(fieldSource, forbidden).pass).toBe(true);
+    expect(
+      checkNoBrowserBusinessLogic(voiceTransportSource, forbidden).pass,
+    ).toBe(true);
   });
 });
 
@@ -233,6 +251,9 @@ describe("release gate: no source-level live connector references (real repo)", 
       createSubmissionKernel.toString() + fieldDashboardClientScript.toString();
     expect(checkNoLiveConnectorReferences(operatorSource).pass).toBe(true);
     expect(checkNoLiveConnectorReferences(fieldSource).pass).toBe(true);
+    expect(checkNoLiveConnectorReferences(voiceTransportSource).pass).toBe(
+      true,
+    );
   });
 
   it("every real source file under src/worker, src/operator, src/engine, and src/domain passes -- not just index.ts", () => {

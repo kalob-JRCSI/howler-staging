@@ -1,3 +1,5 @@
+import { voiceBrowserClient } from "./voice-transport";
+
 export function adminHtml(version: string): string {
   return `<!doctype html>
 <html lang="en">
@@ -1737,6 +1739,12 @@ export function fieldDashboardHtml(): string {
   <h1>Howler Field Dashboard (Pilot)</h1>
   <p class="sub">Read-only forecast/health/recovery intelligence and explicit staging-only evidence actions, one project at a time. This page submits requests only; all forecasting, revision, retry, and mutation logic runs server-side.</p>
 
+  <section class="card" aria-labelledby="voice-heading">
+    <h2 id="voice-heading">Voice transport</h2>
+    <button id="voice-push-to-talk" type="button" aria-label="Push to talk">Push to talk</button>
+    <div id="voice-status" role="status" aria-live="polite">IDLE</div>
+  </section>
+
   <section class="card">
     <label for="admin-key">HOWLER_ADMIN_KEY</label>
     <input id="admin-key" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Paste the staging admin key">
@@ -1754,6 +1762,7 @@ export function fieldDashboardHtml(): string {
 <script>
 ${createSubmissionKernel.toString()}
 (${fieldDashboardClientScript.toString()})(document, sessionStorage, fetch, crypto);
+(${voiceBrowserClient.toString()})(document, sessionStorage, createSubmissionKernel(), fetch, crypto.randomUUID);
 </script>
 </body>
 </html>`;
