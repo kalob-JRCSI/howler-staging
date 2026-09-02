@@ -506,3 +506,170 @@ describe("BLOCKER 2: known-defect suppression never excuses process-level abnorm
     expect(result.pass).toBe(true);
   });
 });
+
+describe("BLOCKER 3 (final): known-defect suppression requires an internally consistent process exit code", () => {
+  // Prior to this fix, once a failure was classified as an exact known baseline defect, the
+  // classifier stopped caring what the numeric exit code actually was -- only the *unclassified*
+  // path checked exit code at all. That meant a report showing only the accepted known defect,
+  // paired with a process exit code that could never actually occur for an ordinary vitest
+  // assertion-failure run (0 -- contradicts the report; 2, 130, etc -- not vitest's normal
+  // failure code), was still suppressed into a silent PASS.
+  const cleanKnownDefectReport = { testResults: [fileResult()] };
+
+  const bothKnownDefectsReport = {
+    testResults: [
+      fileResult(),
+      {
+        name: "C:/repo/tools/context-pack/test/select.test.ts",
+        status: "failed",
+        assertionResults: [
+          {
+            fullName: CONTEXT_PACK_DEFECT.fullName,
+            status: "failed",
+            failureMessages: [
+              `${CONTEXT_PACK_DEFECT.fingerprint}\n    at select.ts:${CONTEXT_PACK_DEFECT.sourceLocation}`,
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  const noFailuresReport = {
+    testResults: [
+      {
+        name: "test/unit/x.test.ts",
+        status: "passed",
+        assertionResults: [{ fullName: "x works", status: "passed" }],
+      },
+    ],
+  };
+
+  const knownPlusUnknownReport = {
+    testResults: [
+      fileResult(),
+      {
+        name: "test/unit/other.test.ts",
+        status: "failed",
+        assertionResults: [
+          {
+            fullName: "something genuinely broke",
+            status: "failed",
+            failureMessages: ["AssertionError: broke\n    at x:1:1"],
+          },
+        ],
+      },
+    ],
+  };
+
+  it("1: exact known defect + exitCode 1 -> allowed known baseline defect", () => {
+    const result = classifyVitestRun({
+      exitCode: 1,
+      signal: null,
+      report: cleanKnownDefectReport,
+      knownDefects: KNOWN_DEFECTS,
+    });
+    expect(result.pass).toBe(true);
+    expect(result.knownDefectsMatched).toEqual([REPO_POLICY_DEFECT]);
+  });
+
+  it("2: both exact known defects + exitCode 1 -> allowed known baseline defects", () => {
+    const result = classifyVitestRun({
+      exitCode: 1,
+      signal: null,
+      report: bothKnownDefectsReport,
+      knownDefects: KNOWN_DEFECTS,
+    });
+    expect(result.pass).toBe(true);
+    expect(result.knownDefectsMatched).toEqual([
+      REPO_POLICY_DEFECT,
+      CONTEXT_PACK_DEFECT,
+    ]);
+  });
+
+  it("3: exact known defect + exitCode 0 -> FAIL (report/process contradiction)", () => {
+    const result = classifyVitestRun({
+      exitCode: 0,
+      signal: null,
+      report: cleanKnownDefectReport,
+      knownDefects: KNOWN_DEFECTS,
+    });
+    expect(result.pass).toBe(false);
+    expect(result.unknownFailures.length).toBeGreaterThan(0);
+  });
+
+  it("4: exact known defect + exitCode 2 -> FAIL (unexpected process exit)", () => {
+    const result = classifyVitestRun({
+      exitCode: 2,
+      signal: null,
+      report: cleanKnownDefectReport,
+      knownDefects: KNOWN_DEFECTS,
+    });
+    expect(result.pass).toBe(false);
+    expect(result.unknownFailures.length).toBeGreaterThan(0);
+  });
+
+  it("5: exact known defect + an arbitrary nonzero exit code other than the expected one -> FAIL", () => {
+    const result = classifyVitestRun({
+      exitCode: 130,
+      signal: null,
+      report: cleanKnownDefectReport,
+      knownDefects: KNOWN_DEFECTS,
+    });
+    expect(result.pass).toBe(false);
+    expect(result.unknownFailures.length).toBeGreaterThan(0);
+  });
+
+  it("6: known defect + signal -> FAIL", () => {
+    const result = classifyVitestRun({
+      exitCode: null,
+      signal: "SIGTERM",
+      report: cleanKnownDefectReport,
+      knownDefects: KNOWN_DEFECTS,
+    });
+    expect(result.pass).toBe(false);
+    expect(result.knownDefectsMatched).toHaveLength(0);
+  });
+
+  it("7: known defect + null exitCode (no signal reported) -> FAIL", () => {
+    const result = classifyVitestRun({
+      exitCode: null,
+      signal: null,
+      report: cleanKnownDefectReport,
+      knownDefects: KNOWN_DEFECTS,
+    });
+    expect(result.pass).toBe(false);
+    expect(result.knownDefectsMatched).toHaveLength(0);
+  });
+
+  it("8: known defect + unknown assertion + otherwise-expected failure exit (1) -> FAIL, known defect still reported", () => {
+    const result = classifyVitestRun({
+      exitCode: 1,
+      signal: null,
+      report: knownPlusUnknownReport,
+      knownDefects: KNOWN_DEFECTS,
+    });
+    expect(result.pass).toBe(false);
+    expect(result.knownDefectsMatched).toEqual([REPO_POLICY_DEFECT]);
+  });
+
+  it("9: no failures anywhere + exitCode 0 -> PASS", () => {
+    const result = classifyVitestRun({
+      exitCode: 0,
+      signal: null,
+      report: noFailuresReport,
+      knownDefects: KNOWN_DEFECTS,
+    });
+    expect(result.pass).toBe(true);
+  });
+
+  it("10: no failures anywhere + exitCode 1 -> FAIL (unexplained nonzero exit)", () => {
+    const result = classifyVitestRun({
+      exitCode: 1,
+      signal: null,
+      report: noFailuresReport,
+      knownDefects: KNOWN_DEFECTS,
+    });
+    expect(result.pass).toBe(false);
+  });
+});

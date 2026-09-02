@@ -64,6 +64,13 @@ function isAbnormalProcessTermination(exitCode, signal) {
   return Boolean(signal) || exitCode === null;
 }
 
+/** The numeric exit code a normal `vitest run` uses when one or more tests failed. Known-defect
+ * suppression is a statement about the *content* of an otherwise-ordinary failing run's report --
+ * it must never be allowed to also excuse a process exit code that could not have come from that
+ * same ordinary run (0, despite the report showing a failure; 2, 130, or any other code besides
+ * this one). */
+const VITEST_ASSERTION_FAILURE_EXIT_CODE = 1;
+
 /**
  * @param {{ exitCode: number | null; signal?: string | null; report: unknown; knownDefects: KnownDefect[] }} input
  * @returns {ClassificationResult}
@@ -181,16 +188,27 @@ export function classifyVitestRun({
     }
   }
 
-  // A nonzero exit that produced no classifiable failure at all is itself suspicious (a signal,
-  // a crash before the reporter could record anything meaningful, etc.) -- never silently PASS.
-  if (
-    exitCode !== 0 &&
-    unknownFailures.length === 0 &&
-    knownDefectsMatched.length === 0
-  ) {
+  // Known-defect suppression is only ever valid when the numeric exit code is internally
+  // consistent with what the report actually says happened: 0 when nothing failed anywhere
+  // (including known defects), and exactly VITEST_ASSERTION_FAILURE_EXIT_CODE when something did
+  // -- whether that something is entirely known defects, entirely unknown failures, or a mix. Any
+  // other exit code is a process/report contradiction and is never excused by a matched known
+  // defect; this is checked once, after classification, rather than folded into the matching loop
+  // above, so it applies uniformly regardless of which failures were found.
+  const hasAnyFailure =
+    knownDefectsMatched.length > 0 || unknownFailures.length > 0;
+  if (!hasAnyFailure && exitCode !== 0) {
     unknownFailures.push({
       file: "(process)",
       description: `vitest exited with code ${String(exitCode)} but no failure was found in its report`,
+    });
+  } else if (hasAnyFailure && exitCode !== VITEST_ASSERTION_FAILURE_EXIT_CODE) {
+    unknownFailures.push({
+      file: "(process)",
+      description:
+        exitCode === 0
+          ? "vitest exited with code 0 but its report shows failure(s) (report/process contradiction)"
+          : `vitest exited with code ${String(exitCode)} but its report shows failure(s); expected exit code ${String(VITEST_ASSERTION_FAILURE_EXIT_CODE)} for an ordinary assertion-failure run (unexpected process exit)`,
     });
   }
 
