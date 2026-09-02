@@ -189,7 +189,7 @@ describe("safe voice presentation", () => {
   it.each([
     ["raw JSON", JSON.stringify({ result: { secret: "admin-key" } })],
     ["problem details", "WorkflowProblem.message WorkflowProblem.details"],
-    ["credentials", "Authorization Bearer admin-key evidence payload"],
+    ["credentials", "Authorization Bearer admin-key"],
   ])("never speaks %s", (_label, forbidden) => {
     const spoken: string[] = [];
     speakVoicePresentation(safe, {
@@ -204,6 +204,18 @@ describe("safe voice presentation", () => {
       },
     });
     expect(spoken.join(" ")).not.toContain(forbidden);
+  });
+
+  it("never speaks the evidence payload", () => {
+    const spoken: string[] = [];
+    speakVoicePresentation(safe, {
+      SpeechSynthesisUtterance: class {
+        constructor(readonly text: string) {}
+        toString(): string { return this.text; }
+      },
+      speechSynthesis: { speak: (utterance: { text: string }) => spoken.push(utterance.text) },
+    });
+    expect(spoken.join(" ")).not.toContain("evidence payload");
   });
 });
 
