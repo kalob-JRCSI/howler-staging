@@ -16,6 +16,123 @@ import {
   voiceBrowserClient,
 } from "./voice-transport";
 
+/**
+ * Task 19 "Howler Penthouse" shared design tokens and base component styles. Presentation only --
+ * no execution/business logic lives here or anywhere in this file's markup changes. Interpolated
+ * into each page's own <style> block so /admin, /admin/operator, and /admin/field share one
+ * coherent visual language: obsidian/charcoal surfaces, warm ivory text, brushed-metal neutrals,
+ * and a single restrained amber/gold accent reserved for consequential (mutating) actions --
+ * routine and read-only actions stay neutral. System fonts and CSS only: no external fonts, icon
+ * CDNs, animation libraries, or network requests exist solely for appearance.
+ */
+const PENTHOUSE_TOKENS = `
+    :root {
+      color-scheme: dark;
+      --hw-bg: #0a0b0d;
+      --hw-surface: #16181d;
+      --hw-surface-raised: #1c1f26;
+      --hw-border: rgba(214, 219, 230, 0.09);
+      --hw-border-strong: rgba(214, 219, 230, 0.18);
+      --hw-ink: #f2ede2;
+      --hw-ink-muted: #a3a6ad;
+      --hw-ink-faint: #6d7078;
+      --hw-accent: #c6a15b;
+      --hw-accent-strong: #d8b876;
+      --hw-accent-ink: #1a1300;
+      --hw-ok: #7fa889;
+      --hw-ok-bg: #10201a;
+      --hw-warn: #c6a15b;
+      --hw-warn-bg: #241d0e;
+      --hw-danger: #b3604a;
+      --hw-danger-bg: #241511;
+      --hw-focus: #d8b876;
+      --hw-radius-sm: 6px;
+      --hw-radius: 10px;
+      --hw-radius-lg: 16px;
+      --hw-font: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      --hw-font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: max(18px, env(safe-area-inset-top)) 18px max(28px, env(safe-area-inset-bottom));
+      background:
+        radial-gradient(1100px 460px at 50% -14%, rgba(198, 161, 91, 0.05), transparent 60%),
+        var(--hw-bg);
+      color: var(--hw-ink);
+      font-family: var(--hw-font);
+      -webkit-font-smoothing: antialiased;
+    }
+    h1, h2, h3 { font-weight: 600; letter-spacing: -0.01em; }
+    h1 { font-size: 19px; margin: 0 0 4px; }
+    h2 { font-size: 14px; margin: 0; }
+    h3 {
+      font-size: 11px; margin: 0 0 4px; color: var(--hw-ink-faint);
+      text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600;
+    }
+    .hw-sub { color: var(--hw-ink-muted); margin: 0 0 16px; line-height: 1.5; font-size: 13px; }
+    .hw-banner, #env-banner {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      border: 1px solid var(--hw-border-strong);
+      background: var(--hw-surface);
+      color: var(--hw-ink-muted);
+      padding: 9px 12px; border-radius: var(--hw-radius);
+      margin-bottom: 16px; font-size: 11px; font-weight: 600;
+      letter-spacing: 0.08em; text-transform: uppercase; text-align: center;
+    }
+    .hw-banner::before, #env-banner::before {
+      content: ""; width: 6px; height: 6px; border-radius: 50%;
+      background: var(--hw-ok); flex-shrink: 0;
+      box-shadow: 0 0 0 3px var(--hw-ok-bg);
+    }
+    .card {
+      background: var(--hw-surface);
+      border: 1px solid var(--hw-border);
+      border-radius: var(--hw-radius-lg);
+      padding: 16px;
+      margin: 12px 0;
+    }
+    label {
+      display: block; font-weight: 600; margin-bottom: 7px; font-size: 12px;
+      color: var(--hw-ink-muted); letter-spacing: 0.02em;
+    }
+    input, select, textarea {
+      box-sizing: border-box; width: 100%; font-size: 15px; padding: 11px 12px;
+      border-radius: var(--hw-radius-sm); border: 1px solid var(--hw-border-strong);
+      background: var(--hw-bg); color: var(--hw-ink); font-family: inherit;
+    }
+    input::placeholder, textarea::placeholder { color: var(--hw-ink-faint); }
+    textarea { font-family: var(--hw-font-mono); font-size: 13px; }
+    input:focus-visible, select:focus-visible, textarea:focus-visible,
+    button:focus-visible, a:focus-visible {
+      outline: 2px solid var(--hw-focus); outline-offset: 2px;
+    }
+    button {
+      min-height: 44px; border: 1px solid var(--hw-border-strong); border-radius: var(--hw-radius-sm);
+      padding: 10px 14px; font-size: 14px; font-weight: 600; letter-spacing: 0.01em;
+      background: var(--hw-surface-raised); color: var(--hw-ink); cursor: pointer;
+    }
+    button:hover:not(:disabled) { border-color: var(--hw-border-strong); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    button.secondary { background: transparent; border-color: var(--hw-border); color: var(--hw-ink-muted); }
+    button.danger,
+    button.btn-consequential {
+      background: var(--hw-accent); border-color: var(--hw-accent-strong); color: var(--hw-accent-ink);
+      font-weight: 700;
+    }
+    button.danger:hover:not(:disabled),
+    button.btn-consequential:hover:not(:disabled) { background: var(--hw-accent-strong); }
+    pre {
+      white-space: pre-wrap; overflow-wrap: anywhere;
+      background: var(--hw-bg); border: 1px solid var(--hw-border);
+      border-radius: var(--hw-radius); padding: 14px;
+      font-family: var(--hw-font-mono); font-size: 12px; line-height: 1.5; color: var(--hw-ink);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+    }
+`;
+
 export function adminHtml(version: string): string {
   return `<!doctype html>
 <html lang="en">
@@ -233,6 +350,9 @@ export interface OperatorPanelElement {
   disabled: boolean;
   hidden: boolean;
   addEventListener(type: string, handler: (event?: unknown) => void): void;
+  /** Optional: only used for a purely cosmetic class toggle (see updateConditionalFields), never
+   * for behavior. Optional so existing minimal test fakes that omit it remain valid. */
+  classList?: { toggle(name: string, force?: boolean): void };
 }
 
 export interface OperatorPanelDocument {
@@ -831,6 +951,12 @@ export function operatorPanelClientScript(
     const isEvidence = EVIDENCE_KINDS.has(els.intentKind.value);
     els.revisionField.hidden = !isEvidence;
     els.evidenceField.hidden = !isEvidence;
+    // Presentation only: visually distinguishes the one consequential (mutating) intent kind from
+    // every routine/read-only one. Never affects which intent is actually submitted.
+    els.runButton.classList?.toggle(
+      "btn-consequential",
+      els.intentKind.value === "EVIDENCE_APPLY_SHADOW",
+    );
   }
   els.intentKind.addEventListener("change", updateConditionalFields);
   updateConditionalFields();
@@ -952,23 +1078,13 @@ export function operatorPanelHtml(): string {
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Howler Operator Panel</title>
   <style>
-    :root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    body { margin: 0; padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); background: #111318; color: #f4f6f8; font-size: 15px; }
+${PENTHOUSE_TOKENS}
+    body { font-size: 15px; }
     main { max-width: 640px; margin: 0 auto; }
-    h1 { font-size: 20px; margin: 0 0 4px; }
-    h2 { font-size: 15px; margin: 0 0 10px; }
-    .sub { color: #b8c0cc; margin: 0 0 14px; line-height: 1.4; font-size: 13px; }
-    #env-banner { border: 1px solid #1f7a3d; background: #0d2416; color: #7be3a3; padding: 10px 12px; border-radius: 10px; margin-bottom: 14px; font-weight: 700; letter-spacing: 0.02em; text-align: center; }
-    .card { background: #1b1f27; border: 1px solid #303744; border-radius: 12px; padding: 14px; margin: 10px 0; }
-    label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 13px; }
-    input, select, textarea { box-sizing: border-box; width: 100%; font-size: 15px; padding: 10px; border-radius: 8px; border: 1px solid #4b5565; background: #0f1217; color: #fff; font-family: inherit; }
-    textarea { font-family: ui-monospace, monospace; font-size: 13px; }
-    button { min-height: 44px; border: 0; border-radius: 8px; padding: 10px 14px; font-size: 15px; font-weight: 700; background: #315efb; color: #fff; cursor: pointer; }
-    button:disabled { opacity: 0.55; cursor: not-allowed; }
-    dl { margin: 0; display: grid; grid-template-columns: minmax(120px, auto) 1fr; gap: 6px 12px; font-size: 13px; }
-    dt { color: #b8c0cc; }
-    dd { margin: 0; word-break: break-word; }
-    #status { font-size: 13px; color: #b8c0cc; margin-top: 10px; }
+    dl { margin: 0; display: grid; grid-template-columns: minmax(120px, auto) 1fr; gap: 8px 12px; font-size: 13px; }
+    dt { color: var(--hw-ink-faint); }
+    dd { margin: 0; word-break: break-word; color: var(--hw-ink); }
+    #status { font-size: 12px; color: var(--hw-ink-muted); margin-top: 10px; }
     @media (max-width: 480px) { dl { grid-template-columns: 1fr; } dt { margin-top: 6px; } }
   </style>
 </head>
@@ -976,7 +1092,7 @@ export function operatorPanelHtml(): string {
 <main>
   <div id="env-banner" role="status">STAGING &middot; SHADOW &middot; NO LIVE SYSTEMS</div>
   <h1>Howler Operator Panel</h1>
-  <p class="sub">One canonical intent per action. This page submits requests only; all forecasting, revision, retry, and mutation logic runs server-side.</p>
+  <p class="hw-sub">One canonical intent per action. This page submits requests only; all forecasting, revision, retry, and mutation logic runs server-side.</p>
 
   <form id="intent-form">
     <section class="card">
@@ -1167,7 +1283,7 @@ export function fieldDashboardClientScript(
       <div class="project-grid">
         <div><h3>Current status</h3><p id="fp-${String(index)}-status">${EM_DASH}</p></div>
         <div><h3>Priority actions</h3><p id="fp-${String(index)}-priority-actions">${EM_DASH}</p></div>
-        <div><h3>Top risks / blockers</h3><p id="fp-${String(index)}-risks">${EM_DASH}</p></div>
+        <div class="cell-risk"><h3>Top risks / blockers</h3><p id="fp-${String(index)}-risks">${EM_DASH}</p></div>
         <div><h3>Upcoming forecast</h3><p id="fp-${String(index)}-forecast">${EM_DASH}</p></div>
       </div>
       <p><strong>Recommended next move:</strong> <span id="fp-${String(index)}-recommendation">Run Refresh to load project intelligence.</span></p>
@@ -1688,11 +1804,25 @@ export function fieldDashboardClientScript(
       .addEventListener("click", () => {
         runEvidenceAction(projectId, index);
       });
-    document
-      .getElementById(`fp-${String(index)}-evidence-kind`)
-      .addEventListener("change", () => {
-        refreshBusyIndicators(projectId);
-      });
+    const evidenceKindEl = document.getElementById(
+      `fp-${String(index)}-evidence-kind`,
+    );
+    const evidenceRunEl = document.getElementById(
+      `fp-${String(index)}-evidence-run`,
+    );
+    function updateEvidenceRunEmphasis(): void {
+      // Presentation only: visually distinguishes the one consequential (mutating) evidence
+      // action from the routine preview. Never affects which kind is actually submitted.
+      evidenceRunEl.classList?.toggle(
+        "btn-consequential",
+        evidenceKindEl.value === "EVIDENCE_APPLY_SHADOW",
+      );
+    }
+    evidenceKindEl.addEventListener("change", () => {
+      refreshBusyIndicators(projectId);
+      updateEvidenceRunEmphasis();
+    });
+    updateEvidenceRunEmphasis();
   }
 
   function renderProjects(): void {
@@ -1790,6 +1920,72 @@ export function fieldDashboardClientScript(
   return voiceBridge;
 }
 
+/**
+ * Task 19: purely presentational voice-state indicator. Watches #voice-status's existing
+ * textContent (set entirely by voiceBrowserClient in voice-transport.ts, which this function
+ * never imports, calls, or modifies) and reflects it as a `data-voice-state` attribute on the
+ * voice section for CSS styling only -- READY/LISTENING/PROCESSING/CONFIRMATION/COMPLETED/FAILED.
+ * Read-only observer: it never writes to #voice-status, never touches the capture/resolver/
+ * confirmation/identity path, and has no effect if #voice-status or #voice-section are absent.
+ * `.toString()`-embedded the same way as every other field-dashboard script piece, so it must stay
+ * fully self-contained (no module-scope references).
+ */
+export function wireVoicePresentationState(document: {
+  getElementById(id: string): {
+    textContent: string | null;
+    setAttribute(name: string, value: string): void;
+  } | null;
+}): void {
+  const status = document.getElementById("voice-status");
+  const section = document.getElementById("voice-section");
+  if (!status || !section) return;
+
+  function classify(text: string): string {
+    const value = text.trim().toUpperCase();
+    if (
+      value.startsWith("LISTENING") ||
+      value.startsWith("REQUESTING_PERMISSION")
+    )
+      return "LISTENING";
+    if (value.startsWith("RESOLVING") || value.startsWith("SUBMITTING"))
+      return "PROCESSING";
+    if (value.startsWith("CONFIRMATION_REQUIRED")) return "CONFIRMATION";
+    if (value.startsWith("RESULT")) return "COMPLETED";
+    if (
+      value.startsWith("ERROR") ||
+      value.startsWith("CLARIFICATION") ||
+      value.startsWith("CANCELLED")
+    )
+      return "FAILED";
+    return "READY";
+  }
+
+  function apply(): void {
+    section?.setAttribute(
+      "data-voice-state",
+      classify(status?.textContent ?? ""),
+    );
+  }
+
+  apply();
+
+  const ObserverCtor = (
+    globalThis as unknown as {
+      MutationObserver?: new (callback: () => void) => {
+        observe(target: unknown, options: unknown): void;
+      };
+    }
+  ).MutationObserver;
+  if (ObserverCtor) {
+    const observer = new ObserverCtor(apply);
+    observer.observe(status, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+  }
+}
+
 export function fieldDashboardHtml(): string {
   return `<!doctype html>
 <html lang="en">
@@ -1798,37 +1994,68 @@ export function fieldDashboardHtml(): string {
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Howler Field Dashboard</title>
   <style>
-    :root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    body { margin: 0; padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); background: #111318; color: #f4f6f8; font-size: 15px; }
-    main { max-width: 920px; margin: 0 auto; }
-    h1 { font-size: 20px; margin: 0 0 4px; }
-    h2 { font-size: 16px; margin: 0; }
-    h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: #8891a0; margin: 0 0 4px; }
-    .sub { color: #b8c0cc; margin: 0 0 14px; line-height: 1.4; font-size: 13px; }
-    #env-banner { border: 1px solid #1f7a3d; background: #0d2416; color: #7be3a3; padding: 10px 12px; border-radius: 10px; margin-bottom: 14px; font-weight: 700; letter-spacing: 0.02em; text-align: center; }
-    .card { background: #1b1f27; border: 1px solid #303744; border-radius: 12px; padding: 14px; margin: 10px 0; }
-    .project-card { padding: 16px; }
-    .project-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
-    .project-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 10px; }
-    .project-grid p { margin: 0; font-size: 13px; word-break: break-word; }
-    label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 13px; }
-    input, select, textarea { box-sizing: border-box; width: 100%; font-size: 15px; padding: 10px; border-radius: 8px; border: 1px solid #4b5565; background: #0f1217; color: #fff; font-family: inherit; margin-bottom: 8px; }
-    textarea { font-family: ui-monospace, monospace; font-size: 13px; }
-    button { min-height: 40px; border: 0; border-radius: 8px; padding: 8px 12px; font-size: 14px; font-weight: 700; background: #315efb; color: #fff; cursor: pointer; }
-    button:disabled { opacity: 0.55; cursor: not-allowed; }
-    .evidence-block { border-top: 1px solid #303744; margin-top: 10px; padding-top: 10px; }
+${PENTHOUSE_TOKENS}
+    body { font-size: 15px; }
+    main { max-width: 960px; margin: 0 auto; }
+    h1 { font-size: 20px; }
+    .project-card { padding: 18px; }
+    .project-head {
+      display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+      margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--hw-border);
+    }
+    .project-head h2 { font-size: 15px; letter-spacing: 0.01em; }
+    .project-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px 16px; margin-bottom: 12px;
+    }
+    .project-grid p { margin: 0; font-size: 13px; word-break: break-word; color: var(--hw-ink); }
+    .cell-risk h3 { color: var(--hw-danger); }
+    .active-workflows { margin: 12px 0; }
+    .active-workflows h3 { margin-bottom: 6px; }
+    .workflow-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      padding: 8px 0; border-top: 1px solid var(--hw-border); font-size: 13px;
+    }
+    .workflow-row:first-child { border-top: 0; }
+    .none { color: var(--hw-ink-faint); font-size: 13px; margin: 0; }
+    .evidence-block { border-top: 1px solid var(--hw-border); margin-top: 12px; padding-top: 12px; }
     details { margin-top: 10px; }
-    pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; max-height: 220px; overflow: auto; }
-    [id$="-card-status"] { font-size: 12px; color: #b8c0cc; margin-top: 8px; }
+    details summary { cursor: pointer; font-size: 12px; color: var(--hw-ink-muted); }
+    [id$="-card-status"] { font-size: 12px; color: var(--hw-ink-muted); margin-top: 10px; }
+    #voice-section {
+      display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+      border-color: var(--hw-border);
+    }
+    #voice-section h2 { flex: 1 1 auto; min-width: 140px; }
+    #voice-push-to-talk {
+      min-width: 132px; background: var(--hw-surface-raised); border-color: var(--hw-border-strong);
+    }
+    #voice-status {
+      font-family: var(--hw-font-mono); font-size: 12px; color: var(--hw-ink-muted);
+      padding: 5px 10px; border-radius: var(--hw-radius-sm); background: var(--hw-bg);
+      border: 1px solid var(--hw-border); letter-spacing: 0.02em;
+    }
+    #voice-section[data-voice-state="LISTENING"] #voice-push-to-talk,
+    #voice-section[data-voice-state="PROCESSING"] #voice-push-to-talk {
+      border-color: var(--hw-accent); color: var(--hw-accent-strong);
+    }
+    #voice-section[data-voice-state="LISTENING"] #voice-status { color: var(--hw-accent-strong); border-color: var(--hw-accent); }
+    #voice-section[data-voice-state="PROCESSING"] #voice-status { color: var(--hw-ink); }
+    #voice-section[data-voice-state="CONFIRMATION"] {
+      border-color: var(--hw-warn); background: var(--hw-warn-bg);
+    }
+    #voice-section[data-voice-state="CONFIRMATION"] #voice-status { color: var(--hw-ink); background: transparent; border-color: var(--hw-warn); }
+    #voice-section[data-voice-state="COMPLETED"] #voice-status { color: var(--hw-ok); border-color: var(--hw-ok); }
+    #voice-section[data-voice-state="FAILED"] #voice-status { color: var(--hw-danger); border-color: var(--hw-danger); }
   </style>
 </head>
 <body>
 <main>
   <div id="env-banner" role="status">STAGING &middot; SHADOW &middot; NO LIVE SYSTEMS</div>
   <h1>Howler Field Dashboard (Pilot)</h1>
-  <p class="sub">Read-only forecast/health/recovery intelligence and explicit staging-only evidence actions, one project at a time. This page submits requests only; all forecasting, revision, retry, and mutation logic runs server-side.</p>
+  <p class="hw-sub">Read-only forecast/health/recovery intelligence and explicit staging-only evidence actions, one project at a time. This page submits requests only; all forecasting, revision, retry, and mutation logic runs server-side.</p>
 
-  <section class="card" aria-labelledby="voice-heading">
+  <section class="card" id="voice-section" aria-labelledby="voice-heading" data-voice-state="READY">
     <h2 id="voice-heading">Voice transport</h2>
     <button id="voice-push-to-talk" type="button" aria-label="Push to talk">Push to talk</button>
     <div id="voice-status" role="status" aria-live="polite">IDLE</div>
@@ -1865,6 +2092,7 @@ ${classifyWorkflowStateForVoice.toString()}
 ${speakVoicePresentation.toString()}
 const __howlerFieldVoiceBridge = (${fieldDashboardClientScript.toString()})(document, sessionStorage, fetch, crypto);
 (${voiceBrowserClient.toString()})(document, __howlerFieldVoiceBridge, () => crypto.randomUUID());
+(${wireVoicePresentationState.toString()})(document);
 </script>
 </body>
 </html>`;
