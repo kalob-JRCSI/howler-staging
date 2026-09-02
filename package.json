@@ -19,8 +19,10 @@
     "test:safety": "vitest run --passWithNoTests test/safety",
     "test:unit": "vitest run --passWithNoTests test/unit",
     "test:context-pack": "vitest run --config tools/context-pack/vitest.config.ts",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json && tsc --noEmit -p tools/context-pack/tsconfig.json",
-    "verify": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run test:context-pack && npm run cf-typegen:check && npm run build:dry"
+    "test:release-gate": "vitest run --config tools/release-gate/vitest.config.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json && tsc --noEmit -p tools/context-pack/tsconfig.json && tsc --noEmit -p tools/release-gate/tsconfig.json",
+    "verify": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run test:context-pack && npm run test:release-gate && npm run cf-typegen:check && npm run build:dry",
+    "gate:release": "node tools/release-gate/src/run.mjs"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.1.0",

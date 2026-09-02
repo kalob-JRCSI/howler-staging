@@ -12,7 +12,8 @@
       "receipt-through-phase0-2",
       "receipt-through-task-014",
       "receipt-through-task-015",
-      "receipt-through-task-016a"
+      "receipt-through-task-016a",
+      "receipt-through-task-016b"
     ],
     "parity": ["skill-parity-review", "test-dir-parity"],
     "fixtures": ["test-dir-parity"],

@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "moduleResolution": "Bundler",
+    "types": ["node"]
+  },
+  "include": [
+    "./**/*.ts",
+    "../../worker-configuration.d.ts",
+    "../../src/worker/env.d.ts"
+  ]
+}

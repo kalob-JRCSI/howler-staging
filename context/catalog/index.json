@@ -104,6 +104,15 @@
       "summary": "Compact receipt: Task 16A (one-action staging operator panel, pending/resolved identity lifecycle) accepted through 1c6fc15, layered on through-task-015."
     },
     {
+      "id": "receipt-through-task-016b",
+      "kind": "receipt",
+      "path": "context/receipts/accepted/through-task-016b.json",
+      "authority": "ACCEPTED_RECEIPT",
+      "tags": ["accepted-history"],
+      "taskTypes": ["accepted-history-lookup", "implementation-handoff"],
+      "summary": "Compact receipt: Task 16B (field PM dashboard pilot, stable projectId/kind state ownership, shared Resume/fresh-submission lock, purge-on-settlement lifecycle) accepted through 1a9f03e, layered on through-task-016a."
+    },
+    {
       "id": "spec-foundation-design",
       "kind": "spec",
       "path": "docs/superpowers/specs/2026-08-27-howler-v095-foundation-design.md",
