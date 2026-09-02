@@ -211,9 +211,13 @@ describe("safe voice presentation", () => {
     speakVoicePresentation(safe, {
       SpeechSynthesisUtterance: class {
         constructor(readonly text: string) {}
-        toString(): string { return this.text; }
+        toString(): string {
+          return this.text;
+        }
       },
-      speechSynthesis: { speak: (utterance: { text: string }) => spoken.push(utterance.text) },
+      speechSynthesis: {
+        speak: (utterance: { text: string }) => spoken.push(utterance.text),
+      },
     });
     expect(spoken.join(" ")).not.toContain("evidence payload");
   });

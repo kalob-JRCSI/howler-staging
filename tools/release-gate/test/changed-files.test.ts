@@ -5,6 +5,21 @@ import {
   resolveChangedFiles,
 } from "../src/changed-files.mjs";
 
+type ComparisonBaseInput = {
+  explicitSha?: string | undefined;
+  explicitShaValid: boolean;
+  ciBaseRef?: string | undefined;
+  ciBaseSha?: string | undefined;
+  ciBaseShaValid: boolean;
+  localBaseRef?: string | undefined;
+  localBaseRefSha?: string | undefined;
+};
+type ComparisonBaseResult =
+  { ok: true; base: string } | { ok: false; reason: string };
+const resolveComparisonBaseTyped = resolveComparisonBase as (
+  input: ComparisonBaseInput,
+) => ComparisonBaseResult;
+
 describe("computeChangedFiles: pure parsing/combination logic", () => {
   it("combines diff-against-base output and untracked-file output, deduplicated", () => {
     const result = computeChangedFiles({
@@ -134,7 +149,7 @@ describe("resolveChangedFiles: fail-closed Git discovery", () => {
 describe("resolveComparisonBase: durable base selection", () => {
   it("prefers an explicit valid SHA", () => {
     expect(
-      resolveComparisonBase({
+      resolveComparisonBaseTyped({
         explicitSha: "6697435e0efd14da5c1addf635c0353fadee0355",
         explicitShaValid: true,
         ciBaseRef: undefined,
@@ -148,7 +163,7 @@ describe("resolveComparisonBase: durable base selection", () => {
 
   it("uses the CI pull-request base SHA when supplied", () => {
     expect(
-      resolveComparisonBase({
+      resolveComparisonBaseTyped({
         explicitSha: undefined,
         explicitShaValid: false,
         ciBaseRef: "v0.9.5-dashboard-bridge",
@@ -162,7 +177,7 @@ describe("resolveComparisonBase: durable base selection", () => {
 
   it("uses an explicit local remote base ref without embedding a historical SHA", () => {
     expect(
-      resolveComparisonBase({
+      resolveComparisonBaseTyped({
         explicitSha: undefined,
         explicitShaValid: false,
         ciBaseRef: undefined,
@@ -176,7 +191,7 @@ describe("resolveComparisonBase: durable base selection", () => {
 
   it("fails closed for an explicitly invalid SHA instead of silently falling back", () => {
     expect(
-      resolveComparisonBase({
+      resolveComparisonBaseTyped({
         explicitSha: "definitely-invalid-sha",
         explicitShaValid: false,
         ciBaseRef: undefined,
@@ -193,7 +208,7 @@ describe("resolveComparisonBase: durable base selection", () => {
 
   it("fails closed when no valid explicit, CI, or local base exists", () => {
     expect(
-      resolveComparisonBase({
+      resolveComparisonBaseTyped({
         explicitSha: undefined,
         explicitShaValid: false,
         ciBaseRef: undefined,

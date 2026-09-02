@@ -6,10 +6,7 @@
     "deploy": ["skill-cloudflare-safety", "runtime-wrangler-config"],
     "staging": ["runtime-wrangler-config"],
     "handoff": ["handoff-current", "skill-task-handoff"],
-    "accepted-history": [
-      "skill-accepted-history",
-      "receipt-through-task-017"
-    ],
+    "accepted-history": ["skill-accepted-history", "receipt-through-task-017"],
     "parity": ["skill-parity-review", "test-dir-parity"],
     "fixtures": ["test-dir-parity"],
     "spec": ["spec-task-018-voice-transport"],
