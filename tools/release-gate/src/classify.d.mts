@@ -3,6 +3,7 @@ export interface KnownDefect {
   fileSuffix: string;
   fullName: string;
   fingerprint: string;
+  sourceLocation: string;
   note: string;
 }
 
@@ -19,6 +20,7 @@ export interface ClassificationResult {
 
 export function classifyVitestRun(input: {
   exitCode: number | null;
+  signal?: string | null;
   report: unknown;
   knownDefects: KnownDefect[];
 }): ClassificationResult;

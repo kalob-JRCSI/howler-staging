@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
 import { classifyVitestRun } from "../src/classify.mjs";
 
+// sourceLocation is the exact "line:column" of the *specific* accepted assertion within its
+// multi-assertion test -- the accepted context-pack test has several `expect(...).toBe(...)`
+// calls with the same generic failure text ("expected false to be true"), so file+fullName+
+// fingerprint alone cannot tell the accepted `fixture-budget-a` assertion apart from, say, its
+// neighboring `fixture-mandatory-safety` assertion failing for a real, unrelated reason. These
+// exact values were captured from a real run against the current accepted source
+// (test/safety/repository-policy.test.ts:45:74, tools/context-pack/test/select.test.ts:306:63).
+// If either accepted assertion's line ever moves (an unrelated edit above it in the same file),
+// this signature stops matching and the defect correctly reverts to an unrecognized, blocking
+// failure -- updating these two location values is then an intentional, reviewed action, not an
+// automatic one.
 const REPO_POLICY_DEFECT = {
   id: "repository-policy-crlf-regex",
   fileSuffix: "test/safety/repository-policy.test.ts",
@@ -8,6 +19,7 @@ const REPO_POLICY_DEFECT = {
     "repository policy: CI never receives Cloudflare credentials ci.yml's pull_request trigger has no branch restriction",
   fingerprint:
     "AssertionError: pull_request trigger must be present: expected null not to be null // Object.is equality",
+  sourceLocation: "45:74",
   note: "CRLF-sensitive regex.",
 };
 
@@ -18,6 +30,7 @@ const CONTEXT_PACK_DEFECT = {
     "context-budget pruning prunes lower-priority-tier entries first, and mandatory material survives budget pressure",
   fingerprint:
     "AssertionError: expected false to be true // Object.is equality",
+  sourceLocation: "306:63",
   note: "CRLF-checked-out fixture budget boundary.",
 };
 
@@ -27,7 +40,9 @@ function assertion(overrides = {}) {
   return {
     fullName: REPO_POLICY_DEFECT.fullName,
     status: "failed",
-    failureMessages: [`${REPO_POLICY_DEFECT.fingerprint}\n    at file.ts:1:1`],
+    failureMessages: [
+      `${REPO_POLICY_DEFECT.fingerprint}\n    at file.ts:${REPO_POLICY_DEFECT.sourceLocation}`,
+    ],
     ...overrides,
   };
 }
@@ -158,7 +173,7 @@ describe("HIGH 1: exact known-defect signature matching", () => {
                 fullName: CONTEXT_PACK_DEFECT.fullName,
                 status: "failed",
                 failureMessages: [
-                  `${CONTEXT_PACK_DEFECT.fingerprint}\n    at select.ts:99:1`,
+                  `${CONTEXT_PACK_DEFECT.fingerprint}\n    at select.ts:${CONTEXT_PACK_DEFECT.sourceLocation}`,
                 ],
               },
             ],
@@ -194,6 +209,88 @@ describe("HIGH 1: exact known-defect signature matching", () => {
     });
     expect(result.pass).toBe(false);
     expect(result.knownDefectsMatched).toEqual([REPO_POLICY_DEFECT]);
+    expect(result.unknownFailures).toHaveLength(1);
+  });
+});
+
+describe("BLOCKER 1: known-defect signature includes the exact assertion's source location", () => {
+  // The accepted context-pack test has several `expect(...).toBe(...)` calls that share the same
+  // generic "expected false to be true" first-line message. Simulates the two *other* real
+  // assertions in that same test (fixture-mandatory-safety, fixture-handoff-current) failing for
+  // a genuinely unrelated reason, at their own distinct source lines -- neither may be mistaken
+  // for the one accepted `fixture-budget-a` defect merely because the file/name/generic message
+  // line all coincide.
+  function contextPackFileResult(sourceLocation: string) {
+    return {
+      name: "C:/repo/tools/context-pack/test/select.test.ts",
+      status: "failed",
+      assertionResults: [
+        {
+          fullName: CONTEXT_PACK_DEFECT.fullName,
+          status: "failed",
+          failureMessages: [
+            `${CONTEXT_PACK_DEFECT.fingerprint}\n    at select.ts:${sourceLocation}`,
+          ],
+        },
+      ],
+    };
+  }
+
+  it("1: the exact accepted context-budget assertion (matching source location) -> KNOWN BASELINE DEFECT", () => {
+    const result = classifyVitestRun({
+      exitCode: 1,
+      report: {
+        testResults: [
+          contextPackFileResult(CONTEXT_PACK_DEFECT.sourceLocation),
+        ],
+      },
+      knownDefects: KNOWN_DEFECTS,
+    });
+    expect(result.pass).toBe(true);
+    expect(result.knownDefectsMatched).toEqual([CONTEXT_PACK_DEFECT]);
+  });
+
+  it("2: same test, but the mandatory-safety assertion fails instead (earlier line) -> FAIL", () => {
+    const result = classifyVitestRun({
+      exitCode: 1,
+      // fixture-mandatory-safety's expect() is several lines above fixture-budget-a's.
+      report: { testResults: [contextPackFileResult("299:10")] },
+      knownDefects: KNOWN_DEFECTS,
+    });
+    expect(result.pass).toBe(false);
+    expect(result.knownDefectsMatched).toHaveLength(0);
+    expect(result.unknownFailures).toHaveLength(1);
+  });
+
+  it("3: same test, but the handoff-current assertion fails instead (a different line) -> FAIL", () => {
+    const result = classifyVitestRun({
+      exitCode: 1,
+      report: { testResults: [contextPackFileResult("302:10")] },
+      knownDefects: KNOWN_DEFECTS,
+    });
+    expect(result.pass).toBe(false);
+    expect(result.knownDefectsMatched).toHaveLength(0);
+  });
+
+  it("4: same file/name/generic-first-line, any other source location -> FAIL", () => {
+    const result = classifyVitestRun({
+      exitCode: 1,
+      report: { testResults: [contextPackFileResult("999:99")] },
+      knownDefects: KNOWN_DEFECTS,
+    });
+    expect(result.pass).toBe(false);
+    expect(result.knownDefectsMatched).toHaveLength(0);
+  });
+
+  it("5: the accepted assertion appears to have moved (location shifted by an unrelated edit) -> fails closed until the signature is deliberately updated", () => {
+    const result = classifyVitestRun({
+      exitCode: 1,
+      // One plausible shift: four lines were added above the assertion.
+      report: { testResults: [contextPackFileResult("310:63")] },
+      knownDefects: KNOWN_DEFECTS,
+    });
+    expect(result.pass).toBe(false);
+    expect(result.knownDefectsMatched).toHaveLength(0);
     expect(result.unknownFailures).toHaveLength(1);
   });
 });
@@ -298,5 +395,114 @@ describe("HIGH 2: nonzero exit must never silently become PASS", () => {
       knownDefects: KNOWN_DEFECTS,
     });
     expect(result.pass).toBe(false);
+  });
+});
+
+describe("BLOCKER 2: known-defect suppression never excuses process-level abnormality", () => {
+  const cleanKnownDefectReport = {
+    testResults: [fileResult()],
+  };
+
+  it("1: known defect + normal expected exit (signal null) -> KNOWN BASELINE DEFECT, nonblocking", () => {
+    const result = classifyVitestRun({
+      exitCode: 1,
+      signal: null,
+      report: cleanKnownDefectReport,
+      knownDefects: KNOWN_DEFECTS,
+    });
+    expect(result.pass).toBe(true);
+    expect(result.knownDefectsMatched).toEqual([REPO_POLICY_DEFECT]);
+  });
+
+  it("2: known defect present, but the process was killed by a signal -> FAIL", () => {
+    const result = classifyVitestRun({
+      exitCode: null,
+      signal: "SIGTERM",
+      report: cleanKnownDefectReport,
+      knownDefects: KNOWN_DEFECTS,
+    });
+    expect(result.pass).toBe(false);
+    expect(result.knownDefectsMatched).toHaveLength(0);
+  });
+
+  it("3: known defect present, but exitCode is null with no signal reported -> FAIL", () => {
+    const result = classifyVitestRun({
+      exitCode: null,
+      signal: null,
+      report: cleanKnownDefectReport,
+      knownDefects: KNOWN_DEFECTS,
+    });
+    expect(result.pass).toBe(false);
+    expect(result.knownDefectsMatched).toHaveLength(0);
+  });
+
+  it("4: known defect + an extra unexplained suite failure (normal process) -> FAIL, known defect still reported", () => {
+    const result = classifyVitestRun({
+      exitCode: 1,
+      signal: null,
+      report: {
+        testResults: [
+          fileResult(),
+          {
+            name: "test/unit/other.test.ts",
+            status: "failed",
+            assertionResults: [],
+          },
+        ],
+      },
+      knownDefects: KNOWN_DEFECTS,
+    });
+    expect(result.pass).toBe(false);
+    expect(result.knownDefectsMatched).toEqual([REPO_POLICY_DEFECT]);
+  });
+
+  it("5: exactly the two known defects, normal process -> allowed (PASS)", () => {
+    const result = classifyVitestRun({
+      exitCode: 1,
+      signal: null,
+      report: {
+        testResults: [
+          fileResult(),
+          {
+            name: "C:/repo/tools/context-pack/test/select.test.ts",
+            status: "failed",
+            assertionResults: [
+              {
+                fullName: CONTEXT_PACK_DEFECT.fullName,
+                status: "failed",
+                failureMessages: [
+                  `${CONTEXT_PACK_DEFECT.fingerprint}\n    at select.ts:${CONTEXT_PACK_DEFECT.sourceLocation}`,
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      knownDefects: KNOWN_DEFECTS,
+    });
+    expect(result.pass).toBe(true);
+    expect(result.knownDefectsMatched).toEqual([
+      REPO_POLICY_DEFECT,
+      CONTEXT_PACK_DEFECT,
+    ]);
+  });
+
+  it("6: known defect + an unrecognized process failure (exitCode null) -> FAIL", () => {
+    const result = classifyVitestRun({
+      exitCode: null,
+      signal: null,
+      report: cleanKnownDefectReport,
+      knownDefects: KNOWN_DEFECTS,
+    });
+    expect(result.pass).toBe(false);
+  });
+
+  it("omitting signal entirely (backward compatible) behaves like signal: null for a normal exit", () => {
+    const result = classifyVitestRun({
+      exitCode: 1,
+      report: cleanKnownDefectReport,
+      knownDefects: KNOWN_DEFECTS,
+    });
+    expect(result.pass).toBe(true);
   });
 });

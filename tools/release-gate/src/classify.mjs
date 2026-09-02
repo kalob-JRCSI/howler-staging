@@ -14,7 +14,7 @@
 // is never silently trusted into a PASS.
 
 /**
- * @typedef {{ id: string; fileSuffix: string; fullName: string; fingerprint: string; note: string }} KnownDefect
+ * @typedef {{ id: string; fileSuffix: string; fullName: string; fingerprint: string; sourceLocation: string; note: string }} KnownDefect
  * @typedef {{ file: string; description: string }} ClassifiedFailure
  * @typedef {{ pass: boolean; knownDefectsMatched: KnownDefect[]; unknownFailures: ClassifiedFailure[] }} ClassificationResult
  */
@@ -24,20 +24,71 @@ function firstLine(message) {
   return index === -1 ? message : message.slice(0, index);
 }
 
-function matchKnownDefect(file, fullName, fingerprint, knownDefects) {
+/** Extracts the first stack frame's `line:column` from a failure message -- the exact call site
+ * of the assertion that threw, not merely which file/test it lives in. A multi-assertion test can
+ * have several `expect(...)` calls that produce byte-identical first-line messages; this is what
+ * tells them apart. */
+function extractSourceLocation(message) {
+  const match = /:(\d+):(\d+)\b/.exec(message);
+  if (!match) return null;
+  return `${match[1]}:${match[2]}`;
+}
+
+function matchKnownDefect(
+  file,
+  fullName,
+  fingerprint,
+  sourceLocation,
+  knownDefects,
+) {
   return knownDefects.find(
     (defect) =>
       file.replaceAll("\\", "/").endsWith(defect.fileSuffix) &&
       fullName === defect.fullName &&
-      fingerprint === defect.fingerprint,
+      fingerprint === defect.fingerprint &&
+      sourceLocation !== null &&
+      sourceLocation === defect.sourceLocation,
   );
 }
 
 /**
- * @param {{ exitCode: number | null; report: unknown; knownDefects: KnownDefect[] }} input
+ * A known-defect signature may excuse only its own exact assertion failure -- never a
+ * process-level abnormality. `signal` truthy means the process was killed by a signal (never a
+ * normal vitest completion, whether tests pass or fail); `exitCode === null` with no signal is
+ * equally inexplicable (a spawn error, or any other case Node did not attribute to a specific
+ * exit code or signal). Either makes the report -- even one that otherwise looks like it contains
+ * only known-defect assertions -- untrustworthy, since an abnormal process may not have finished
+ * writing it.
+ */
+function isAbnormalProcessTermination(exitCode, signal) {
+  return Boolean(signal) || exitCode === null;
+}
+
+/**
+ * @param {{ exitCode: number | null; signal?: string | null; report: unknown; knownDefects: KnownDefect[] }} input
  * @returns {ClassificationResult}
  */
-export function classifyVitestRun({ exitCode, report, knownDefects }) {
+export function classifyVitestRun({
+  exitCode,
+  signal = null,
+  report,
+  knownDefects,
+}) {
+  if (isAbnormalProcessTermination(exitCode, signal)) {
+    return {
+      pass: false,
+      knownDefectsMatched: [],
+      unknownFailures: [
+        {
+          file: "(process)",
+          description: signal
+            ? `vitest process terminated abnormally by signal ${signal}`
+            : "vitest process exited with no recognized exit code (exitCode is null and no signal was reported)",
+        },
+      ],
+    };
+  }
+
   if (report === null || typeof report !== "object") {
     return {
       pass: false,
@@ -111,10 +162,12 @@ export function classifyVitestRun({ exitCode, report, knownDefects }) {
       const firstMessage =
         typeof failureMessages[0] === "string" ? failureMessages[0] : "";
       const fingerprint = firstLine(firstMessage);
+      const sourceLocation = extractSourceLocation(firstMessage);
       const match = matchKnownDefect(
         fileName,
         fullName,
         fingerprint,
+        sourceLocation,
         knownDefects,
       );
       if (match) {

@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { classifyVitestRun } from "./classify.mjs";
-import { computeChangedFiles } from "./changed-files.mjs";
+import { resolveChangedFiles } from "./changed-files.mjs";
 
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 
@@ -55,6 +55,14 @@ const FORMATTABLE_EXTENSIONS = new Set([
 // must match; a failure with the same file+name but a different message is a different failure
 // and fails closed. See tools/release-gate/test/classify.test.ts for the exhaustive matching
 // behavior this feeds.
+// `sourceLocation` (the exact "line:column" of this one assertion, captured from a real run
+// against the current accepted source) is required alongside file+fullName+fingerprint because
+// the accepted context-pack test has several `expect(...).toBe(...)` calls sharing the same
+// generic "expected false to be true" message -- without it, a different assertion in that same
+// test failing for a real, unrelated reason could be mistaken for this defect. If either
+// accepted assertion's line ever moves (an unrelated edit above it in the same file), this
+// signature stops matching by design; updating these two values back to reality is then a
+// deliberate, reviewed action, not automatic.
 const KNOWN_BASELINE_DEFECTS = [
   {
     id: "repository-policy-crlf-regex",
@@ -63,6 +71,7 @@ const KNOWN_BASELINE_DEFECTS = [
       "repository policy: CI never receives Cloudflare credentials ci.yml's pull_request trigger has no branch restriction",
     fingerprint:
       "AssertionError: pull_request trigger must be present: expected null not to be null // Object.is equality",
+    sourceLocation: "45:74",
     note: "CRLF-sensitive regex assumes LF line endings; the committed content is compliant, only this worktree's checkout line endings trip the check.",
   },
   {
@@ -72,6 +81,7 @@ const KNOWN_BASELINE_DEFECTS = [
       "context-budget pruning prunes lower-priority-tier entries first, and mandatory material survives budget pressure",
     fingerprint:
       "AssertionError: expected false to be true // Object.is equality",
+    sourceLocation: "306:63",
     note: "CRLF-checked-out fixture shifts a hardcoded byte-count budget threshold across a pass/fail boundary.",
   },
 ];
@@ -133,6 +143,7 @@ function runVitestJson(id, args) {
 
     const classification = classifyVitestRun({
       exitCode: result.status,
+      signal: result.signal,
       report,
       knownDefects: KNOWN_BASELINE_DEFECTS,
     });
@@ -172,6 +183,12 @@ function runVitestJson(id, args) {
  * changes, staged or not) plus any new untracked file -- rather than a hardcoded list frozen to
  * one task's file set. A future candidate with a different diff is checked correctly without
  * this script needing to be edited first.
+ *
+ * Fails closed: any failure to resolve/discover comparison state (an invalid BASE_SHA, a
+ * nonexistent commit, a spawn error, an untracked-file discovery failure) is surfaced as an
+ * `ok:false` result with a reason -- it is never silently converted into an empty file list,
+ * which would make the format-check gate vacuously PASS over a candidate that was never actually
+ * compared against anything.
  */
 function getChangedFiles() {
   const diffResult = runCommand("git", ["diff", "--name-only", BASE_SHA]);
@@ -180,20 +197,24 @@ function getChangedFiles() {
     "--others",
     "--exclude-standard",
   ]);
-  return computeChangedFiles({
-    diffOutput: diffResult.status === 0 ? (diffResult.stdout ?? "") : "",
-    untrackedOutput:
-      untrackedResult.status === 0 ? (untrackedResult.stdout ?? "") : "",
-  });
+  return resolveChangedFiles({ diffResult, untrackedResult });
 }
 
 function runFormatCheckOnChangedFiles() {
-  const changed = getChangedFiles();
-  const formattable = changed.filter(
+  const gateId = `format:check (changed files vs ${BASE_SHA.slice(0, 12)})`;
+  const discovery = getChangedFiles();
+  if (!discovery.ok) {
+    steps.push({
+      id: gateId,
+      pass: false,
+      reason: `changed-file discovery failed: ${discovery.reason}`,
+    });
+    return;
+  }
+  const formattable = discovery.files.filter(
     (f) =>
       FORMATTABLE_EXTENSIONS.has(extname(f)) && existsSync(join(repoRoot, f)),
   );
-  const gateId = `format:check (changed files vs ${BASE_SHA.slice(0, 12)})`;
   if (formattable.length === 0) {
     steps.push({
       id: gateId,

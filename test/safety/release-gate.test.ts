@@ -30,6 +30,7 @@ import {
   extractExportedValueNames,
   KNOWN_HARMLESS_NAME_COLLISIONS,
 } from "../../tools/release-gate/src/forbidden-symbols";
+import { scanSourcesForLiveConnectorReferences } from "../../tools/release-gate/src/scan-sources";
 
 function readSource(sources: Record<string, string>, suffix: string): string {
   const entry = Object.entries(sources).find(([modulePath]) =>
@@ -193,6 +194,37 @@ describe("release gate: no browser-side business logic (real repo)", () => {
   });
 });
 
+// BLOCKER 4: previously this describe block only ever fed checkNoLiveConnectorReferences the two
+// client-embedded scripts plus src/worker/index.ts -- a live connector added to any *other* file
+// under src/worker, src/operator, src/engine, or src/domain (a new file, or an existing file
+// gaining a new import) would never be scanned at all, so the release gate would falsely PASS.
+// This now discovers every source file under those four directories dynamically (Vite's
+// `import.meta.glob`, the same real-source-text mechanism repository-policy.test.ts and the
+// mutation-route/browser-boundary checks above already use in this sandboxed Workers runtime) and
+// scans all of them via scanSourcesForLiveConnectorReferences, which itself excludes tests/docs/
+// fixtures so asserting a token is forbidden never counts as a violation. See
+// tools/release-gate/test/scan-sources.test.ts for the fixture-level proof (new Calendar/Drive/
+// OAuth module -> FAIL; same tokens in a test/doc -> ignored; same-origin fetch -> PASS).
+const liveConnectorScanSources = import.meta.glob<string>(
+  [
+    "../../src/worker/**/*.ts",
+    "../../src/operator/**/*.ts",
+    "../../src/engine/**/*.ts",
+    "../../src/domain/**/*.ts",
+  ],
+  { eager: true, import: "default", query: "?raw" },
+);
+
+function toRepoRelativePaths(
+  sources: Record<string, string>,
+): Record<string, string> {
+  const normalized: Record<string, string> = {};
+  for (const [path, content] of Object.entries(sources)) {
+    normalized[path.replace(/^\.\.\/\.\.\//, "")] = content;
+  }
+  return normalized;
+}
+
 describe("release gate: no source-level live connector references (real repo)", () => {
   it("neither client-embedded script references a live connector integration point", () => {
     const operatorSource =
@@ -203,7 +235,13 @@ describe("release gate: no source-level live connector references (real repo)", 
     expect(checkNoLiveConnectorReferences(fieldSource).pass).toBe(true);
   });
 
-  it("the real src/worker/index.ts route table has no live connector reference", () => {
-    expect(checkNoLiveConnectorReferences(workerIndexSource).pass).toBe(true);
+  it("every real source file under src/worker, src/operator, src/engine, and src/domain passes -- not just index.ts", () => {
+    const sources = toRepoRelativePaths(liveConnectorScanSources);
+    // Sanity check that discovery actually found the real tree and isn't vacuously scanning zero
+    // files (which would make this test trivially, falsely PASS).
+    expect(Object.keys(sources).length).toBeGreaterThan(15);
+    expect(Object.keys(sources)).toContain("src/worker/index.ts");
+    const result = scanSourcesForLiveConnectorReferences(sources);
+    expect(result.pass).toBe(true);
   });
 });
