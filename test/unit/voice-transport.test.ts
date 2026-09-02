@@ -5,6 +5,7 @@ import {
   createVoicePresentation,
   normalizeProjectId,
   resolveVoiceCommand,
+  speakVoicePresentation,
   type VoiceCaptureRecognition,
 } from "../../src/worker/voice-transport";
 
@@ -139,6 +140,70 @@ describe("safe voice presentation", () => {
     expect(presentation.safeSummary).toBeTruthy();
     expect(presentation).not.toHaveProperty("rawResponse");
     expect(presentation).not.toHaveProperty("problemDetails");
+  });
+
+  const safe = createVoicePresentation({
+    status: "SUCCEEDED",
+    projectId: "carver-001",
+    actionKind: "FORECAST_QUERY",
+  });
+
+  it("speaks only the safe summary when synthesis is supported", () => {
+    const spoken: string[] = [];
+    const result = speakVoicePresentation(safe, {
+      SpeechSynthesisUtterance: class {
+        constructor(readonly text: string) {}
+        toString(): string {
+          return this.text;
+        }
+      },
+      speechSynthesis: {
+        speak: (utterance: { text: string }) => spoken.push(utterance.text),
+      },
+    });
+    expect(result).toBe(true);
+    expect(spoken).toEqual([safe.safeSummary]);
+  });
+
+  it("uses visual-only output when synthesis is unsupported", () => {
+    expect(speakVoicePresentation(safe, {})).toBe(false);
+  });
+
+  it("keeps workflow outcome successful when synthesis throws", () => {
+    expect(
+      speakVoicePresentation(safe, {
+        SpeechSynthesisUtterance: class {
+          constructor() {
+            throw new Error("internal synthesis failure");
+          }
+          toString(): string {
+            return "";
+          }
+        },
+        speechSynthesis: { speak: () => undefined },
+      }),
+    ).toBe(false);
+    expect(safe.status).toBe("RESULT");
+  });
+
+  it.each([
+    ["raw JSON", JSON.stringify({ result: { secret: "admin-key" } })],
+    ["problem details", "WorkflowProblem.message WorkflowProblem.details"],
+    ["credentials", "Authorization Bearer admin-key evidence payload"],
+  ])("never speaks %s", (_label, forbidden) => {
+    const spoken: string[] = [];
+    speakVoicePresentation(safe, {
+      SpeechSynthesisUtterance: class {
+        constructor(readonly text: string) {}
+        toString(): string {
+          return this.text;
+        }
+      },
+      speechSynthesis: {
+        speak: (utterance: { text: string }) => spoken.push(utterance.text),
+      },
+    });
+    expect(spoken.join(" ")).not.toContain(forbidden);
   });
 });
 

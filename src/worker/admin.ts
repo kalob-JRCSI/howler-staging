@@ -1,4 +1,4 @@
-import { voiceBrowserClient } from "./voice-transport";
+import { speakVoicePresentation, voiceBrowserClient } from "./voice-transport";
 
 export function adminHtml(version: string): string {
   return `<!doctype html>
@@ -1761,6 +1761,7 @@ export function fieldDashboardHtml(): string {
 </main>
 <script>
 ${createSubmissionKernel.toString()}
+${speakVoicePresentation.toString()}
 (${fieldDashboardClientScript.toString()})(document, sessionStorage, fetch, crypto);
 (${voiceBrowserClient.toString()})(document, sessionStorage, createSubmissionKernel(), fetch, crypto.randomUUID);
 </script>

@@ -259,6 +259,38 @@ export function createVoicePresentation(input: {
   };
 }
 
+export interface VoiceSpeechPresentation {
+  status: "RESULT" | "ERROR";
+  projectId: string;
+  actionKind: string;
+  summaryCode: string;
+  safeSummary: string;
+  requiresConfirmation: boolean;
+}
+
+export function speakVoicePresentation(
+  presentation: VoiceSpeechPresentation,
+  platform: {
+    speechSynthesis?: { speak(utterance: unknown): void };
+    SpeechSynthesisUtterance?: new (text: string) => unknown;
+  } = globalThis as unknown as {
+    speechSynthesis?: { speak(utterance: unknown): void };
+    SpeechSynthesisUtterance?: new (text: string) => unknown;
+  },
+): boolean {
+  if (!platform.speechSynthesis || !platform.SpeechSynthesisUtterance)
+    return false;
+  try {
+    const utterance = new platform.SpeechSynthesisUtterance(
+      presentation.safeSummary,
+    );
+    platform.speechSynthesis.speak(utterance);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function voiceBrowserClient(
   document: {
     getElementById(id: string): {
@@ -392,6 +424,14 @@ export function voiceBrowserClient(
         )
         .then(() => {
           status.textContent = "RESULT";
+          speakVoicePresentation({
+            status: "RESULT",
+            projectId,
+            actionKind: kind,
+            summaryCode: "completed",
+            safeSummary: `${projectId} ${kind} completed.`,
+            requiresConfirmation: false,
+          });
         })
         .catch(() => {
           status.textContent = "ERROR";
