@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "1",
+  "id": "through-task-017",
+  "kind": "acceptedReceipt",
+  "throughTask": 17,
+  "baseSha": "6697435e0efd14da5c1addf635c0353fadee0355",
+  "acceptedAt": "2026-09-02T00:00:00.000Z",
+  "summary": "Layered on top of through-task-016b: Task 17 is accepted history through merge commit 6697435 (PR #11), with implementation head ce407ad. Observability, deterministic safety regression gates, and the fail-closed release gate are accepted. No live systems were connected and no deployment occurred. Task 18 is not accepted history.",
+  "evidence": [
+    {
+      "authority": "ACCEPTED_RECEIPT",
+      "path": "context/receipts/accepted/through-task-016b.json",
+      "note": "Prior accepted layer: Tasks 1-16B unchanged."
+    },
+    {
+      "authority": "GIT_CANONICAL",
+      "path": "src/worker/index.ts",
+      "note": "Task 17 observability is attached to the canonical operator execution path."
+    },
+    {
+      "authority": "GIT_CANONICAL",
+      "path": "tools/release-gate/src/run.mjs",
+      "note": "Task 17 release gate is composed and fails closed on safety or regression failures."
+    },
+    {
+      "authority": "RUNTIME_TRUTH",
+      "path": "wrangler.jsonc",
+      "note": "Staging-only HOWLER_MODE=shadow configuration remains unchanged; no live systems."
+    },
+    {
+      "authority": "GIT_CANONICAL",
+      "path": "sha:ce407ad70f2a0eb70c058b2d9e1bdd256b95a393",
+      "note": "Task 17 implementation head."
+    },
+    {
+      "authority": "GIT_CANONICAL",
+      "path": "sha:6697435e0efd14da5c1addf635c0353fadee0355",
+      "note": "Accepted merge commit for PR #11."
+    }
+  ],
+  "notAccepted": [
+    "Task 18 (voice transport pilot) is not accepted history.",
+    "Task 19 is not accepted history.",
+    "No deployment occurred."
+  ]
+}

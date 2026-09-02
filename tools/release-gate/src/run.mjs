@@ -17,19 +17,39 @@ import { tmpdir } from "node:os";
 import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { classifyVitestRun } from "./classify.mjs";
-import { resolveChangedFiles } from "./changed-files.mjs";
+import {
+  resolveChangedFiles,
+  resolveComparisonBase,
+  resolveMergeBaseSha,
+} from "./changed-files.mjs";
 
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
 
-/**
- * The comparison base for dynamic changed-file discovery -- overridable per invocation
- * (`RELEASE_GATE_BASE_SHA=<sha> npm run gate:release`) so a future candidate can supply its own
- * accepted base rather than this file staying hardcoded to one task's base forever. Defaults to
- * the currently accepted base this correction was written against.
- */
-const BASE_SHA =
-  process.env.RELEASE_GATE_BASE_SHA ??
-  "1a9f03e03ee0f476febc9740311283162f6882d1";
+function resolveGitRevision(revision) {
+  const result = runCommand("git", ["rev-parse", "--verify", revision]);
+  return result.status === 0 ? result.stdout.trim() : undefined;
+}
+
+function comparisonBase() {
+  const explicitSha = process.env.RELEASE_GATE_BASE_SHA;
+  const ciBaseRef = process.env.GITHUB_BASE_REF;
+  const ciBaseSha = process.env.GITHUB_BASE_SHA;
+  const ciBaseRefSha = ciBaseRef
+    ? resolveGitRevision(`origin/${ciBaseRef}`)
+    : undefined;
+  const localBaseRef =
+    process.env.RELEASE_GATE_BASE_REF ?? "origin/v0.9.5-dashboard-bridge";
+  const resolved = resolveComparisonBase({
+    explicitSha,
+    explicitShaValid: Boolean(explicitSha && resolveGitRevision(explicitSha)),
+    ciBaseRef,
+    ciBaseSha,
+    ciBaseShaValid: Boolean(ciBaseSha && resolveGitRevision(ciBaseSha)),
+    localBaseRef,
+    localBaseRefSha: ciBaseRefSha ?? resolveGitRevision(localBaseRef),
+  });
+  return resolved;
+}
 
 /** Extensions Prettier reliably formats in this repo -- filters the dynamic changed-file list so
  * an unrelated binary/unsupported file never produces gate noise. Still fully dynamic: this is a
@@ -184,14 +204,26 @@ function runVitestJson(id, args) {
  * one task's file set. A future candidate with a different diff is checked correctly without
  * this script needing to be edited first.
  *
+ * Diffs from the actual merge-base (divergence point) between the comparison base and HEAD, not
+ * from the base ref's current tip -- a plain two-dot diff against a base ref that has advanced
+ * with unrelated commits since this branch diverged would otherwise pull those unrelated files
+ * into the changed-file scope (empirically reproduced: see resolveMergeBaseSha's own doc comment
+ * and tools/release-gate/test/changed-files.test.ts).
+ *
  * Fails closed: any failure to resolve/discover comparison state (an invalid BASE_SHA, a
- * nonexistent commit, a spawn error, an untracked-file discovery failure) is surfaced as an
- * `ok:false` result with a reason -- it is never silently converted into an empty file list,
- * which would make the format-check gate vacuously PASS over a candidate that was never actually
- * compared against anything.
+ * nonexistent commit, unrelated histories with no merge-base, a spawn error, an untracked-file
+ * discovery failure) is surfaced as an `ok:false` result with a reason -- it is never silently
+ * converted into an empty file list, which would make the format-check gate vacuously PASS over a
+ * candidate that was never actually compared against anything.
  */
 function getChangedFiles() {
-  const diffResult = runCommand("git", ["diff", "--name-only", BASE_SHA]);
+  const base = comparisonBase();
+  if (!base.ok) return base;
+  const mergeBase = resolveMergeBaseSha(
+    runCommand("git", ["merge-base", base.base, "HEAD"]),
+  );
+  if (!mergeBase.ok) return mergeBase;
+  const diffResult = runCommand("git", ["diff", "--name-only", mergeBase.sha]);
   const untrackedResult = runCommand("git", [
     "ls-files",
     "--others",
@@ -201,7 +233,10 @@ function getChangedFiles() {
 }
 
 function runFormatCheckOnChangedFiles() {
-  const gateId = `format:check (changed files vs ${BASE_SHA.slice(0, 12)})`;
+  const base = comparisonBase();
+  const gateId = base.ok
+    ? `format:check (changed files vs ${base.base.slice(0, 12)})`
+    : "format:check (changed files vs unresolved base)";
   const discovery = getChangedFiles();
   if (!discovery.ok) {
     steps.push({

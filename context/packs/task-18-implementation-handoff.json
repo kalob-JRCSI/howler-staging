@@ -1,0 +1,142 @@
+{
+  "schemaVersion": "1",
+  "input": {
+    "taskOrStage": "task-18",
+    "taskType": "implementation-handoff",
+    "affectedFiles": [
+      "src/worker/voice-transport.ts",
+      "src/worker/admin.ts",
+      "src/operator/intent.ts",
+      "src/operator/workflow.ts",
+      "src/operator/result.ts",
+      "tools/release-gate/src/scan-sources.ts",
+      "tools/release-gate/src/gates.ts",
+      "wrangler.jsonc"
+    ],
+    "tags": [
+      "accepted-history",
+      "handoff",
+      "safety",
+      "staging",
+      "spec",
+      "design",
+      "plan"
+    ]
+  },
+  "selected": [
+    {
+      "id": "runtime-wrangler-config",
+      "path": "wrangler.jsonc",
+      "authority": "RUNTIME_TRUTH",
+      "reason": "mandatory safety/invariant material",
+      "provenance": "catalog:runtime-wrangler-config",
+      "priorityTier": 1,
+      "mandatory": true,
+      "chars": 450,
+      "approxTokens": 113,
+      "stale": false,
+      "missing": false
+    },
+    {
+      "id": "skill-cloudflare-safety",
+      "path": ".agents/skills/howler-cloudflare-safety/SKILL.md",
+      "authority": "ACCEPTED_RECEIPT",
+      "reason": "mandatory safety/invariant material",
+      "provenance": "catalog:skill-cloudflare-safety",
+      "priorityTier": 1,
+      "mandatory": true,
+      "chars": 1968,
+      "approxTokens": 492,
+      "stale": false,
+      "missing": false
+    },
+    {
+      "id": "handoff-current",
+      "path": "context/handoff/current-task.json",
+      "authority": "ACCEPTED_RECEIPT",
+      "reason": "current handoff, always included",
+      "provenance": "catalog:handoff-current",
+      "priorityTier": 2,
+      "mandatory": false,
+      "chars": 1324,
+      "approxTokens": 331,
+      "stale": false,
+      "missing": false
+    },
+    {
+      "id": "receipt-through-task-017",
+      "path": "context/receipts/accepted/through-task-017.json",
+      "authority": "ACCEPTED_RECEIPT",
+      "reason": "taskType \"implementation-handoff\" matches catalog entry taskTypes",
+      "provenance": "catalog:receipt-through-task-017",
+      "priorityTier": 3,
+      "mandatory": false,
+      "chars": 1827,
+      "approxTokens": 457,
+      "stale": false,
+      "missing": false
+    },
+    {
+      "id": "plan-task-018-voice-transport",
+      "path": "docs/superpowers/plans/2026-09-02-howler-v095-task18-voice-transport-plan.md",
+      "authority": "GIT_CANONICAL",
+      "reason": "taskType \"implementation-handoff\" matches catalog entry taskTypes",
+      "provenance": "catalog:plan-task-018-voice-transport",
+      "priorityTier": 4,
+      "mandatory": false,
+      "chars": 17844,
+      "approxTokens": 4461,
+      "stale": false,
+      "missing": false
+    },
+    {
+      "id": "spec-task-018-voice-transport",
+      "path": "docs/superpowers/specs/2026-09-02-howler-v095-task18-voice-transport-design.md",
+      "authority": "GIT_CANONICAL",
+      "reason": "taskType \"implementation-handoff\" matches catalog entry taskTypes",
+      "provenance": "catalog:spec-task-018-voice-transport",
+      "priorityTier": 4,
+      "mandatory": false,
+      "chars": 7720,
+      "approxTokens": 1930,
+      "stale": false,
+      "missing": false
+    },
+    {
+      "id": "skill-accepted-history",
+      "path": ".agents/skills/howler-accepted-history/SKILL.md",
+      "authority": "ACCEPTED_RECEIPT",
+      "reason": "tag \"accepted-history\" matches",
+      "provenance": "catalog:skill-accepted-history",
+      "priorityTier": 5,
+      "mandatory": false,
+      "chars": 1702,
+      "approxTokens": 426,
+      "stale": false,
+      "missing": false
+    },
+    {
+      "id": "skill-task-handoff",
+      "path": ".agents/skills/howler-task-handoff/SKILL.md",
+      "authority": "ACCEPTED_RECEIPT",
+      "reason": "taskType \"implementation-handoff\" matches catalog entry taskTypes",
+      "provenance": "catalog:skill-task-handoff",
+      "priorityTier": 5,
+      "mandatory": false,
+      "chars": 1680,
+      "approxTokens": 420,
+      "stale": false,
+      "missing": false
+    }
+  ],
+  "omitted": [],
+  "measurement": {
+    "selectedFileCount": 8,
+    "selectedChars": 34515,
+    "approxTokens": 8629,
+    "acceptedHistoryRefsSelected": 1,
+    "mandatoryIncluded": true
+  },
+  "hash": "d74362c5fce3050bf909531537e5e6e41942609bce8357ebaf24c5713b590810",
+  "generatedAt": "2026-09-02T20:42:40.391Z"
+}

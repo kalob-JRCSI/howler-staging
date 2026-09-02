@@ -1,3 +1,21 @@
+import type { FieldVoiceBridge } from "./voice-transport";
+import {
+  classifyConfirmationResponse,
+  classifyWorkflowStateForVoice,
+  commandKind,
+  createCaptureController,
+  createPendingVoiceConfirmation,
+  createVoicePresentation,
+  fingerprint,
+  normalizeProjectId,
+  projectMention,
+  resolveVoiceCommand,
+  respondToVoiceConfirmation,
+  speakVoicePresentation,
+  stableSerialize,
+  voiceBrowserClient,
+} from "./voice-transport";
+
 export function adminHtml(version: string): string {
   return `<!doctype html>
 <html lang="en">
@@ -1078,7 +1096,7 @@ export function fieldDashboardClientScript(
   fetch: OperatorPanelFetch,
   crypto: OperatorPanelCrypto,
   testHooks?: FieldDashboardTestHooks,
-): void {
+): FieldVoiceBridge {
   const ADMIN_KEY_STORAGE_KEY = "howler_admin_key";
   const EM_DASH = String.fromCharCode(8212);
   const TRACKED_PROJECTS_KEY = "howler_field_tracked_projects";
@@ -1501,66 +1519,27 @@ export function fieldDashboardClientScript(
     }
   }
 
-  function runQuery(projectId: string, kind: string): void {
+  /**
+   * The one place that actually builds identity, submits, and settles bookkeeping for a fresh
+   * `/v1/intents` submission -- shared by the manual query/evidence buttons and (via the returned
+   * `FieldVoiceBridge`, see the bottom of this function) the voice transport, so neither can ever
+   * diverge from the other's identity/idempotency/busy-state handling. Always returns a promise:
+   * callers that don't care about the outcome (the manual buttons) attach a no-op `.catch`; the
+   * voice bridge attaches its own `.then`/`.catch` to speak the safe outcome.
+   */
+  function submitAction(
+    projectId: string,
+    kind: string,
+    expectedRevision: number | null,
+    evidenceEvent: unknown,
+  ): Promise<{ workflowState: string }> {
     const key = `${projectId}:${kind}`;
-    if (inFlight.has(key)) return;
+    if (inFlight.has(key))
+      return Promise.reject(new Error(`${key} is already in flight`));
     const fields: FormFields = {
       kind,
       projectId,
-      expectedRevision: null,
-      evidenceEvent: null,
-    };
-    const storageKey = `howler_field_pending_${projectId}_${kind}`;
-    const identity = resolveSubmissionIdentity(
-      computeFormSignature(fields),
-      sessionStorage,
-      () => new Date().toISOString(),
-      () => crypto.randomUUID(),
-      storageKey,
-    );
-    const intent = buildIntentPayload(fields, identity);
-    inFlight.add(key);
-    refreshBusyIndicators(projectId);
-    void callApi(fetch, sessionStorage, adminKeyValue(), "/v1/intents", {
-      method: "POST",
-      body: JSON.stringify(intent),
-    })
-      .then((result) => {
-        handleActionResult(projectId, kind, storageKey, result);
-      })
-      .catch((error: unknown) => {
-        setCardStatus(projectId, `Error: ${describeError(error)}`);
-      })
-      .then(() => {
-        inFlight.delete(key);
-        refreshBusyIndicators(projectId);
-        maybePurgeUntrackedProject(projectId);
-      });
-  }
-
-  function runProjectQueries(projectId: string): void {
-    for (const kind of QUERY_KINDS) runQuery(projectId, kind);
-  }
-
-  function runEvidenceAction(projectId: string, index: number): void {
-    const kindEl = document.getElementById(`fp-${String(index)}-evidence-kind`);
-    const revisionEl = document.getElementById(
-      `fp-${String(index)}-evidence-revision`,
-    );
-    const jsonEl = document.getElementById(`fp-${String(index)}-evidence-json`);
-    const kind = kindEl.value;
-    const key = `${projectId}:${kind}`;
-    if (inFlight.has(key)) return;
-    let evidenceEvent: unknown = null;
-    try {
-      evidenceEvent = JSON.parse(jsonEl.value || "null");
-    } catch {
-      evidenceEvent = null;
-    }
-    const fields: FormFields = {
-      kind,
-      projectId,
-      expectedRevision: Number(revisionEl.value),
+      expectedRevision,
       evidenceEvent,
     };
     const storageKey = `howler_field_pending_${projectId}_${kind}`;
@@ -1574,21 +1553,54 @@ export function fieldDashboardClientScript(
     const intent = buildIntentPayload(fields, identity);
     inFlight.add(key);
     refreshBusyIndicators(projectId);
-    void callApi(fetch, sessionStorage, adminKeyValue(), "/v1/intents", {
+    return callApi(fetch, sessionStorage, adminKeyValue(), "/v1/intents", {
       method: "POST",
       body: JSON.stringify(intent),
     })
       .then((result) => {
         handleActionResult(projectId, kind, storageKey, result);
+        return {
+          workflowState: String(mapOutcomeToDisplay(result.body).workflowState),
+        };
       })
       .catch((error: unknown) => {
         setCardStatus(projectId, `Error: ${describeError(error)}`);
+        throw error;
       })
-      .then(() => {
+      .finally(() => {
         inFlight.delete(key);
         refreshBusyIndicators(projectId);
         maybePurgeUntrackedProject(projectId);
       });
+  }
+
+  function runQuery(projectId: string, kind: string): void {
+    void submitAction(projectId, kind, null, null).catch(() => undefined);
+  }
+
+  function runProjectQueries(projectId: string): void {
+    for (const kind of QUERY_KINDS) runQuery(projectId, kind);
+  }
+
+  function runEvidenceAction(projectId: string, index: number): void {
+    const kindEl = document.getElementById(`fp-${String(index)}-evidence-kind`);
+    const revisionEl = document.getElementById(
+      `fp-${String(index)}-evidence-revision`,
+    );
+    const jsonEl = document.getElementById(`fp-${String(index)}-evidence-json`);
+    const kind = kindEl.value;
+    let evidenceEvent: unknown = null;
+    try {
+      evidenceEvent = JSON.parse(jsonEl.value || "null");
+    } catch {
+      evidenceEvent = null;
+    }
+    void submitAction(
+      projectId,
+      kind,
+      Number(revisionEl.value),
+      evidenceEvent,
+    ).catch(() => undefined);
   }
 
   /**
@@ -1602,13 +1614,19 @@ export function fieldDashboardClientScript(
    * for free -- and Resume's own guard below refuses to start if a fresh submission somehow got
    * there first.
    */
-  function resumeAction(projectId: string, kind: string): void {
+  function submitResume(
+    projectId: string,
+    kind: string,
+  ): Promise<{ workflowState: string }> {
     const actionKey = `${projectId}:${kind}`;
     const state = actionStateByKey.get(actionKey);
-    if (!state?.workflowId || inFlight.has(actionKey)) return;
+    if (!state?.workflowId || inFlight.has(actionKey))
+      return Promise.reject(
+        new Error(`no resumable workflow for ${actionKey}`),
+      );
     inFlight.add(actionKey);
     refreshBusyIndicators(projectId);
-    void callApi(
+    return callApi(
       fetch,
       sessionStorage,
       adminKeyValue(),
@@ -1617,15 +1635,23 @@ export function fieldDashboardClientScript(
     )
       .then((result) => {
         handleActionResult(projectId, kind, state.storageKey, result);
+        return {
+          workflowState: String(mapOutcomeToDisplay(result.body).workflowState),
+        };
       })
       .catch((error: unknown) => {
         setCardStatus(projectId, `Error: ${describeError(error)}`);
+        throw error;
       })
-      .then(() => {
+      .finally(() => {
         inFlight.delete(actionKey);
         refreshBusyIndicators(projectId);
         maybePurgeUntrackedProject(projectId);
       });
+  }
+
+  function resumeAction(projectId: string, kind: string): void {
+    void submitResume(projectId, kind).catch(() => undefined);
   }
 
   /**
@@ -1697,6 +1723,71 @@ export function fieldDashboardClientScript(
   });
 
   renderProjects();
+
+  /**
+   * The minimal, real integration surface the voice transport uses instead of ever
+   * reimplementing its own project/evidence/resume state or its own submission mechanics --
+   * every submit* method here delegates straight to the exact same submitAction/submitResume
+   * core the manual buttons above call. See `FieldVoiceBridge` in voice-transport.ts.
+   */
+  const voiceBridge: FieldVoiceBridge = {
+    listProjectIds: () => trackedProjects.slice(),
+    listResumableWorkflows: () => {
+      const resumable: {
+        workflowId: string;
+        projectId: string;
+        kind: string;
+      }[] = [];
+      for (const projectId of trackedProjects) {
+        for (const kind of ACTION_KINDS) {
+          const state = actionStateByKey.get(`${projectId}:${kind}`);
+          if (state?.workflowState === "INTERRUPTED" && state.workflowId) {
+            resumable.push({ workflowId: state.workflowId, projectId, kind });
+          }
+        }
+      }
+      return resumable;
+    },
+    getEvidenceFields: (projectId: string) => {
+      const index = indexOfProject(projectId);
+      if (index === -1) return null;
+      const revisionEl = document.getElementById(
+        `fp-${String(index)}-evidence-revision`,
+      );
+      const jsonEl = document.getElementById(
+        `fp-${String(index)}-evidence-json`,
+      );
+      let evidenceEvent: unknown = null;
+      try {
+        evidenceEvent = JSON.parse(jsonEl.value || "null");
+      } catch {
+        evidenceEvent = null;
+      }
+      const revisionRaw = revisionEl.value;
+      return {
+        evidenceSnapshot: evidenceEvent,
+        expectedProjectRevision:
+          revisionRaw === "" ? undefined : Number(revisionRaw),
+      };
+    },
+    submitQuery: (projectId, kind) => submitAction(projectId, kind, null, null),
+    submitPreview: (projectId, evidenceSnapshot, expectedProjectRevision) =>
+      submitAction(
+        projectId,
+        "EVIDENCE_PREVIEW",
+        expectedProjectRevision ?? null,
+        evidenceSnapshot ?? null,
+      ),
+    submitApply: (confirmation) =>
+      submitAction(
+        confirmation.projectId,
+        "EVIDENCE_APPLY_SHADOW",
+        confirmation.expectedProjectRevision ?? null,
+        confirmation.immutableSnapshot,
+      ),
+    resumeWorkflow: (projectId, kind) => submitResume(projectId, kind),
+  };
+  return voiceBridge;
 }
 
 export function fieldDashboardHtml(): string {
@@ -1737,6 +1828,12 @@ export function fieldDashboardHtml(): string {
   <h1>Howler Field Dashboard (Pilot)</h1>
   <p class="sub">Read-only forecast/health/recovery intelligence and explicit staging-only evidence actions, one project at a time. This page submits requests only; all forecasting, revision, retry, and mutation logic runs server-side.</p>
 
+  <section class="card" aria-labelledby="voice-heading">
+    <h2 id="voice-heading">Voice transport</h2>
+    <button id="voice-push-to-talk" type="button" aria-label="Push to talk">Push to talk</button>
+    <div id="voice-status" role="status" aria-live="polite">IDLE</div>
+  </section>
+
   <section class="card">
     <label for="admin-key">HOWLER_ADMIN_KEY</label>
     <input id="admin-key" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Paste the staging admin key">
@@ -1753,7 +1850,21 @@ export function fieldDashboardHtml(): string {
 </main>
 <script>
 ${createSubmissionKernel.toString()}
-(${fieldDashboardClientScript.toString()})(document, sessionStorage, fetch, crypto);
+${normalizeProjectId.toString()}
+${commandKind.toString()}
+${projectMention.toString()}
+${resolveVoiceCommand.toString()}
+${createCaptureController.toString()}
+${stableSerialize.toString()}
+${fingerprint.toString()}
+${createPendingVoiceConfirmation.toString()}
+${classifyConfirmationResponse.toString()}
+${respondToVoiceConfirmation.toString()}
+${createVoicePresentation.toString()}
+${classifyWorkflowStateForVoice.toString()}
+${speakVoicePresentation.toString()}
+const __howlerFieldVoiceBridge = (${fieldDashboardClientScript.toString()})(document, sessionStorage, fetch, crypto);
+(${voiceBrowserClient.toString()})(document, __howlerFieldVoiceBridge, () => crypto.randomUUID());
 </script>
 </body>
 </html>`;

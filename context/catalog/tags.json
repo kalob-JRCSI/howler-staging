@@ -6,21 +6,11 @@
     "deploy": ["skill-cloudflare-safety", "runtime-wrangler-config"],
     "staging": ["runtime-wrangler-config"],
     "handoff": ["handoff-current", "skill-task-handoff"],
-    "accepted-history": [
-      "skill-accepted-history",
-      "receipt-through-task-013",
-      "receipt-through-phase0-2",
-      "receipt-through-task-014",
-      "receipt-through-task-015",
-      "receipt-through-task-016a",
-      "receipt-through-task-016b"
-    ],
+    "accepted-history": ["skill-accepted-history", "receipt-through-task-017"],
     "parity": ["skill-parity-review", "test-dir-parity"],
     "fixtures": ["test-dir-parity"],
-    "spec": ["spec-foundation-design"],
-    "design": ["spec-foundation-design"],
-    "plan": ["plan-foundation"],
-    "schema": ["migration-0002"],
-    "operator": ["migration-0002"]
+    "spec": ["spec-task-018-voice-transport"],
+    "design": ["spec-task-018-voice-transport"],
+    "plan": ["plan-task-018-voice-transport"]
   }
 }

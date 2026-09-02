@@ -59,76 +59,13 @@
       "summary": "Procedure for verifying v0.9.4 engine/domain parity is preserved."
     },
     {
-      "id": "receipt-through-task-013",
+      "id": "receipt-through-task-017",
       "kind": "receipt",
-      "path": "context/receipts/accepted/through-task-013.json",
+      "path": "context/receipts/accepted/through-task-017.json",
       "authority": "ACCEPTED_RECEIPT",
       "tags": ["accepted-history"],
       "taskTypes": ["accepted-history-lookup", "implementation-handoff"],
-      "summary": "Compact receipt: Tasks 1-13 accepted through 2ffc939."
-    },
-    {
-      "id": "receipt-through-phase0-2",
-      "kind": "receipt",
-      "path": "context/receipts/accepted/through-phase0-2.json",
-      "authority": "ACCEPTED_RECEIPT",
-      "tags": ["accepted-history"],
-      "taskTypes": ["accepted-history-lookup", "implementation-handoff"],
-      "summary": "Compact receipt: Context + Skill Fabric Phase 0-2 accepted through 6df623c, layered on through-task-013."
-    },
-    {
-      "id": "receipt-through-task-014",
-      "kind": "receipt",
-      "path": "context/receipts/accepted/through-task-014.json",
-      "authority": "ACCEPTED_RECEIPT",
-      "tags": ["accepted-history"],
-      "taskTypes": ["accepted-history-lookup", "implementation-handoff"],
-      "summary": "Compact receipt: Task 14 (shadow mutation/resumability) accepted through c484a1c, layered on through-phase0-2."
-    },
-    {
-      "id": "receipt-through-task-015",
-      "kind": "receipt",
-      "path": "context/receipts/accepted/through-task-015.json",
-      "authority": "ACCEPTED_RECEIPT",
-      "tags": ["accepted-history"],
-      "taskTypes": ["accepted-history-lookup", "implementation-handoff"],
-      "summary": "Compact receipt: Task 15 (operator HTTP contracts) accepted through 877589e, layered on through-task-014."
-    },
-    {
-      "id": "receipt-through-task-016a",
-      "kind": "receipt",
-      "path": "context/receipts/accepted/through-task-016a.json",
-      "authority": "ACCEPTED_RECEIPT",
-      "tags": ["accepted-history"],
-      "taskTypes": ["accepted-history-lookup", "implementation-handoff"],
-      "summary": "Compact receipt: Task 16A (one-action staging operator panel, pending/resolved identity lifecycle) accepted through 1c6fc15, layered on through-task-015."
-    },
-    {
-      "id": "receipt-through-task-016b",
-      "kind": "receipt",
-      "path": "context/receipts/accepted/through-task-016b.json",
-      "authority": "ACCEPTED_RECEIPT",
-      "tags": ["accepted-history"],
-      "taskTypes": ["accepted-history-lookup", "implementation-handoff"],
-      "summary": "Compact receipt: Task 16B (field PM dashboard pilot, stable projectId/kind state ownership, shared Resume/fresh-submission lock, purge-on-settlement lifecycle) accepted through 1a9f03e, layered on through-task-016a."
-    },
-    {
-      "id": "spec-foundation-design",
-      "kind": "spec",
-      "path": "docs/superpowers/specs/2026-08-27-howler-v095-foundation-design.md",
-      "authority": "GIT_CANONICAL",
-      "tags": ["spec", "design"],
-      "taskTypes": ["implementation-handoff", "parity-review"],
-      "summary": "Normative design doc for schemas/behavior/workflow."
-    },
-    {
-      "id": "plan-foundation",
-      "kind": "plan",
-      "path": "docs/superpowers/plans/2026-08-27-howler-v095-foundation-plan.md",
-      "authority": "GIT_CANONICAL",
-      "tags": ["plan"],
-      "taskTypes": ["implementation-handoff"],
-      "summary": "Governing task-by-task plan for the foundation recovery."
+      "summary": "Compact receipt: Task 17 (observability, fail-closed release gate, and safety regression gates) accepted through 6697435, layered on through-task-016b."
     },
     {
       "id": "test-dir-parity",
@@ -140,13 +77,22 @@
       "summary": "Golden v0.9.4 parity tests and fixtures."
     },
     {
-      "id": "migration-0002",
+      "id": "spec-task-018-voice-transport",
       "kind": "spec",
-      "path": "migrations/0002_operator_runs.sql",
-      "authority": "RUNTIME_TRUTH",
-      "tags": ["schema", "operator"],
+      "path": "docs/superpowers/specs/2026-09-02-howler-v095-task18-voice-transport-design.md",
+      "authority": "GIT_CANONICAL",
+      "tags": ["spec", "design", "operator", "safety"],
       "taskTypes": ["implementation-handoff"],
-      "summary": "Additive operator persistence schema."
+      "summary": "Task 18 voice transport pilot design: browser capture boundary, canonical intent mapping, confirmation, identity reuse, and safe field integration."
+    },
+    {
+      "id": "plan-task-018-voice-transport",
+      "kind": "plan",
+      "path": "docs/superpowers/plans/2026-09-02-howler-v095-task18-voice-transport-plan.md",
+      "authority": "GIT_CANONICAL",
+      "tags": ["plan", "operator", "safety"],
+      "taskTypes": ["implementation-handoff"],
+      "summary": "Task 18 implementation sequence and TDD/release validation plan."
     }
   ]
 }
