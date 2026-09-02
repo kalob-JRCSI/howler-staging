@@ -41,6 +41,33 @@ export function resolveComparisonBase(input) {
 }
 
 /**
+ * Resolves the actual point of divergence between the comparison base and HEAD, so the caller can
+ * diff strictly from there -- a plain two-dot `git diff --name-only <base>` compares the base
+ * ref's CURRENT tip against HEAD, so if the base has advanced with unrelated commits since this
+ * branch diverged, those files would enter the changed-file scope even though this candidate never
+ * touched them. Fails closed (never silently diffs from "nothing", i.e. an empty/missing sha) on
+ * any git failure -- unrelated histories, an invalid base, or a spawn error alike.
+ *
+ * @param {{ status: number | null; stdout?: string; stderr?: string }} mergeBaseResult
+ * @returns {{ ok: true; sha: string } | { ok: false; reason: string }}
+ */
+export function resolveMergeBaseSha(mergeBaseResult) {
+  if (mergeBaseResult.status !== 0) {
+    return {
+      ok: false,
+      reason: `git merge-base failed (exit ${String(mergeBaseResult.status)})${
+        mergeBaseResult.stderr ? `: ${mergeBaseResult.stderr.trim()}` : ""
+      }`,
+    };
+  }
+  const sha = (mergeBaseResult.stdout ?? "").trim();
+  if (!sha) {
+    return { ok: false, reason: "git merge-base produced no output" };
+  }
+  return { ok: true, sha };
+}
+
+/**
  * @param {{ diffOutput: string; untrackedOutput: string }} input
  * @returns {string[]}
  */

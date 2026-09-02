@@ -17,3 +17,9 @@ export function resolveComparisonBase(input: {
   localBaseRef?: string;
   localBaseRefSha?: string;
 }): { ok: true; base: string } | { ok: false; reason: string };
+
+export function resolveMergeBaseSha(mergeBaseResult: {
+  status: number | null;
+  stdout?: string;
+  stderr?: string;
+}): { ok: true; sha: string } | { ok: false; reason: string };

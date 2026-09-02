@@ -3,6 +3,7 @@ import {
   computeChangedFiles,
   resolveComparisonBase,
   resolveChangedFiles,
+  resolveMergeBaseSha,
 } from "../src/changed-files.mjs";
 
 type ComparisonBaseInput = {
@@ -221,5 +222,55 @@ describe("resolveComparisonBase: durable base selection", () => {
       ok: false,
       reason: "no valid comparison base could be resolved",
     });
+  });
+});
+
+// Task 18 shipped-path correction, Medium finding: a plain two-dot `git diff --name-only <base>`
+// compares the base ref's CURRENT tip against HEAD -- if the base ref has advanced with unrelated
+// commits since this branch diverged, those files enter the changed-file scope even though this
+// candidate never touched them (empirically reproduced against a scratch repo: a file added only
+// to the base branch after divergence appeared in the two-dot diff, but not in a merge-base diff).
+// resolveMergeBaseSha resolves the actual point of divergence so the caller can diff from there
+// instead, scoping strictly to this candidate's own changes regardless of how far the base has
+// since moved.
+function mergeBaseResult(overrides: {
+  status?: number | null;
+  stdout?: string;
+  stderr?: string;
+}) {
+  return {
+    status: overrides.status ?? 0,
+    stdout: overrides.stdout ?? "",
+    stderr: overrides.stderr ?? "",
+  };
+}
+
+describe("resolveMergeBaseSha: divergence-point resolution for the changed-file diff", () => {
+  it("1: a successful git merge-base resolves to its trimmed sha", () => {
+    const result = resolveMergeBaseSha(
+      mergeBaseResult({ stdout: "abc123def456\n" }),
+    );
+    expect(result).toEqual({ ok: true, sha: "abc123def456" });
+  });
+
+  it("2: a nonzero exit (e.g. unrelated histories, invalid base) fails closed", () => {
+    const result = resolveMergeBaseSha(
+      mergeBaseResult({
+        status: 1,
+        stderr: "fatal: Not a valid commit name definitely-invalid-sha",
+      }),
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toMatch(/merge-base/i);
+  });
+
+  it("3: a spawn error (status null) fails closed", () => {
+    const result = resolveMergeBaseSha(mergeBaseResult({ status: null }));
+    expect(result.ok).toBe(false);
+  });
+
+  it("4: empty stdout despite a zero exit fails closed rather than diffing from nothing", () => {
+    const result = resolveMergeBaseSha(mergeBaseResult({ stdout: "" }));
+    expect(result.ok).toBe(false);
   });
 });

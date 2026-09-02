@@ -14,6 +14,7 @@
     "src/operator/result.ts",
     "src/operator/policy.ts",
     "src/worker/admin.ts",
+    "src/worker/voice-transport.ts",
     "tools/release-gate/src/run.mjs",
     "wrangler.jsonc",
     "package.json",

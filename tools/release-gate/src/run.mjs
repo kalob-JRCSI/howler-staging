@@ -20,6 +20,7 @@ import { classifyVitestRun } from "./classify.mjs";
 import {
   resolveChangedFiles,
   resolveComparisonBase,
+  resolveMergeBaseSha,
 } from "./changed-files.mjs";
 
 const repoRoot = fileURLToPath(new URL("../../..", import.meta.url));
@@ -203,16 +204,26 @@ function runVitestJson(id, args) {
  * one task's file set. A future candidate with a different diff is checked correctly without
  * this script needing to be edited first.
  *
+ * Diffs from the actual merge-base (divergence point) between the comparison base and HEAD, not
+ * from the base ref's current tip -- a plain two-dot diff against a base ref that has advanced
+ * with unrelated commits since this branch diverged would otherwise pull those unrelated files
+ * into the changed-file scope (empirically reproduced: see resolveMergeBaseSha's own doc comment
+ * and tools/release-gate/test/changed-files.test.ts).
+ *
  * Fails closed: any failure to resolve/discover comparison state (an invalid BASE_SHA, a
- * nonexistent commit, a spawn error, an untracked-file discovery failure) is surfaced as an
- * `ok:false` result with a reason -- it is never silently converted into an empty file list,
- * which would make the format-check gate vacuously PASS over a candidate that was never actually
- * compared against anything.
+ * nonexistent commit, unrelated histories with no merge-base, a spawn error, an untracked-file
+ * discovery failure) is surfaced as an `ok:false` result with a reason -- it is never silently
+ * converted into an empty file list, which would make the format-check gate vacuously PASS over a
+ * candidate that was never actually compared against anything.
  */
 function getChangedFiles() {
   const base = comparisonBase();
   if (!base.ok) return base;
-  const diffResult = runCommand("git", ["diff", "--name-only", base.base]);
+  const mergeBase = resolveMergeBaseSha(
+    runCommand("git", ["merge-base", base.base, "HEAD"]),
+  );
+  if (!mergeBase.ok) return mergeBase;
+  const diffResult = runCommand("git", ["diff", "--name-only", mergeBase.sha]);
   const untrackedResult = runCommand("git", [
     "ls-files",
     "--others",

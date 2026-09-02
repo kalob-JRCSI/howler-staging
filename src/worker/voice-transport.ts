@@ -1,3 +1,14 @@
+// Task 18 shipped-path correction: every function below that the browser needs at runtime is a
+// standalone, self-contained, directly-testable top-level export -- exactly the
+// `createSubmissionKernel`/`speakVoicePresentation` pattern already used elsewhere in this file's
+// sibling `admin.ts`. Each is `.toString()`-embedded verbatim into the field dashboard's
+// `<script>` tag (see `fieldDashboardHtml`), so none may reference module-level `let`/`const`
+// state or another module's import -- only its own parameters, locals, and (by name, since
+// function declarations in one `<script>` are visible to all following statements in that same
+// script) other functions embedded the same way. `voiceBrowserClient` at the bottom is the ONLY
+// thing actually served to the browser; it calls these functions directly rather than
+// reimplementing any of their logic, so there is exactly one tested voice behavior path, not two.
+
 export type VoiceIntentKind =
   | "FORECAST_QUERY"
   | "FORECAST_HEALTH_QUERY"
@@ -28,7 +39,7 @@ export function normalizeProjectId(value: string): string {
   return value.trim().toLocaleLowerCase().replace(/\s+/g, " ");
 }
 
-function commandKind(text: string): VoiceIntentKind | "RESUME" | null {
+export function commandKind(text: string): VoiceIntentKind | "RESUME" | null {
   const value = normalizeProjectId(text);
   if (/\bresume\b/.test(value)) return "RESUME";
   if (/\bapply\b/.test(value)) return "EVIDENCE_APPLY_SHADOW";
@@ -41,7 +52,7 @@ function commandKind(text: string): VoiceIntentKind | "RESUME" | null {
   return null;
 }
 
-function projectMention(
+export function projectMention(
   text: string,
   context: VoiceProjectContext,
 ): string | null {
@@ -127,11 +138,18 @@ export interface VoiceCaptureController {
   currentSessionId(): string | null;
 }
 
-let captureSequence = 0;
+/**
+ * `captureSequence` is deliberately a local inside the function body (not module scope): a
+ * `.toString()`-embedded function only carries its own source text, so any module-level state it
+ * referenced by name would be a `ReferenceError` the first time the real page ran it -- invisible
+ * to every test here, which all call this function directly within the module. Each call gets its
+ * own fresh counter; nothing anywhere compares session ids across two different controllers.
+ */
 export function createCaptureController(options: {
   createRecognition: () => VoiceCaptureRecognition;
   onFinal: (transcript: string, captureSessionId: string) => void;
 }): VoiceCaptureController {
+  let captureSequence = 0;
   let active: {
     id: string;
     recognition: VoiceCaptureRecognition;
@@ -156,6 +174,10 @@ export function createCaptureController(options: {
       const event = value as { isFinal?: boolean; transcript?: string };
       if (!event.isFinal || typeof event.transcript !== "string") return;
       current.finalClaimed = true;
+      // A claimed final ends this capture -- the controller is no longer "in progress", so the
+      // next deliberate start (a fresh push-to-talk press) begins a genuinely new session rather
+      // than the caller's next press being misread as "abort the one that already finished".
+      if (active === current) active = null;
       options.onFinal(event.transcript, current.id);
     });
     current.recognition.start();
@@ -185,7 +207,7 @@ export interface PendingVoiceConfirmation {
   state: "PENDING" | "CONSUMED" | "CANCELLED" | "EXPIRED";
 }
 
-function stableSerialize(value: unknown): string {
+export function stableSerialize(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(stableSerialize).join(",")}]`;
   const record = value as Record<string, unknown>;
@@ -195,7 +217,7 @@ function stableSerialize(value: unknown): string {
     .join(",")}}`;
 }
 
-function fingerprint(value: unknown): string {
+export function fingerprint(value: unknown): string {
   const text = stableSerialize(value);
   let hash = 2166136261;
   for (const char of text)
@@ -232,18 +254,79 @@ export function createPendingVoiceConfirmation(input: {
   return confirmation;
 }
 
-export function createVoicePresentation(input: {
-  status: "SUCCEEDED" | "BLOCKED" | "FAILED" | "INTERRUPTED";
-  projectId: string;
-  actionKind: string;
-}): {
+export type VoiceConfirmationResponseKind =
+  "AFFIRMATIVE" | "NEGATIVE" | "OTHER";
+
+/** Classifies a spoken response as a yes/no answer to a pending confirmation, or as an unrelated
+ * utterance (which invalidates the pending confirmation rather than being misread as an answer to
+ * it -- see `resolveAndDispatch` in `voiceBrowserClient`). */
+export function classifyConfirmationResponse(
+  text: string,
+): VoiceConfirmationResponseKind {
+  const value = normalizeProjectId(text);
+  if (/\b(yes|yeah|yep|affirmative|confirm|correct)\b/.test(value))
+    return "AFFIRMATIVE";
+  if (/\b(no|nope|negative|cancel|stop)\b/.test(value)) return "NEGATIVE";
+  return "OTHER";
+}
+
+export type VoiceConfirmationOutcome =
+  | { outcome: "CONSUMED"; confirmation: PendingVoiceConfirmation }
+  | { outcome: "CANCELLED"; confirmation: PendingVoiceConfirmation }
+  | { outcome: "NOOP"; confirmation: PendingVoiceConfirmation; reason: string };
+
+/**
+ * The critical invariant: an affirmative response against a genuinely PENDING, non-expired
+ * confirmation is transitioned to CONSUMED and returned synchronously -- the caller submits only
+ * after seeing `outcome: "CONSUMED"`, never before, and never a second time for the same
+ * confirmation object (it is no longer PENDING once this returns). Never mutates its input;
+ * returns a new confirmation value so a caller cannot accidentally observe a half-updated state.
+ */
+export function respondToVoiceConfirmation(
+  confirmation: PendingVoiceConfirmation,
+  response: { affirmative: boolean },
+  now: number,
+): VoiceConfirmationOutcome {
+  if (confirmation.state !== "PENDING") {
+    return {
+      outcome: "NOOP",
+      confirmation,
+      reason: `confirmation is ${confirmation.state}`,
+    };
+  }
+  if (now >= confirmation.expiresAt) {
+    return {
+      outcome: "NOOP",
+      confirmation: { ...confirmation, state: "EXPIRED" },
+      reason: "confirmation expired",
+    };
+  }
+  if (!response.affirmative) {
+    return {
+      outcome: "CANCELLED",
+      confirmation: { ...confirmation, state: "CANCELLED" },
+    };
+  }
+  return {
+    outcome: "CONSUMED",
+    confirmation: { ...confirmation, state: "CONSUMED" },
+  };
+}
+
+export interface VoiceSpeechPresentation {
   status: "RESULT" | "ERROR";
   projectId: string;
   actionKind: string;
   summaryCode: string;
   safeSummary: string;
   requiresConfirmation: boolean;
-} {
+}
+
+export function createVoicePresentation(input: {
+  status: "SUCCEEDED" | "BLOCKED" | "FAILED" | "INTERRUPTED";
+  projectId: string;
+  actionKind: string;
+}): VoiceSpeechPresentation {
   const status = input.status === "SUCCEEDED" ? "RESULT" : "ERROR";
   const summaryCode = input.status.toLowerCase();
   return {
@@ -259,13 +342,20 @@ export function createVoicePresentation(input: {
   };
 }
 
-export interface VoiceSpeechPresentation {
-  status: "RESULT" | "ERROR";
-  projectId: string;
-  actionKind: string;
-  summaryCode: string;
-  safeSummary: string;
-  requiresConfirmation: boolean;
+/** A Task 15 `run.state`/`workflowState` string that falls outside the four recognized terminal
+ * states (an unexpected shape, mid-flight state, or anything else not yet classifiable) is always
+ * treated as a safe generic failure for voice purposes -- never spoken as success, never thrown. */
+export function classifyWorkflowStateForVoice(
+  workflowState: string,
+): "SUCCEEDED" | "BLOCKED" | "FAILED" | "INTERRUPTED" {
+  if (
+    workflowState === "SUCCEEDED" ||
+    workflowState === "BLOCKED" ||
+    workflowState === "FAILED" ||
+    workflowState === "INTERRUPTED"
+  )
+    return workflowState;
+  return "FAILED";
 }
 
 export function speakVoicePresentation(
@@ -291,6 +381,42 @@ export function speakVoicePresentation(
   }
 }
 
+/**
+ * The minimal integration surface the shipped voice client needs from the field dashboard's own
+ * closure (`fieldDashboardClientScript`'s return value) -- real tracked projects, real resumable
+ * workflows, real per-project evidence form state, and the exact same submission functions the
+ * manual UI buttons call, so voice can never diverge from the manual path's identity/idempotency
+ * behavior. Voice never re-implements a query/apply/resume call of its own.
+ */
+export interface FieldVoiceBridge {
+  listProjectIds(): string[];
+  listResumableWorkflows(): {
+    workflowId: string;
+    projectId: string;
+    kind: string;
+  }[];
+  getEvidenceFields(projectId: string): {
+    evidenceSnapshot: unknown;
+    expectedProjectRevision: number | undefined;
+  } | null;
+  submitQuery(
+    projectId: string,
+    kind: string,
+  ): Promise<{ workflowState: string }>;
+  submitPreview(
+    projectId: string,
+    evidenceSnapshot: unknown,
+    expectedProjectRevision: number | undefined,
+  ): Promise<{ workflowState: string }>;
+  submitApply(
+    confirmation: PendingVoiceConfirmation,
+  ): Promise<{ workflowState: string }>;
+  resumeWorkflow(
+    projectId: string,
+    kind: string,
+  ): Promise<{ workflowState: string }>;
+}
+
 export function voiceBrowserClient(
   document: {
     getElementById(id: string): {
@@ -299,35 +425,16 @@ export function voiceBrowserClient(
       addEventListener(type: string, handler: () => void): void;
     };
   },
-  sessionStorage: {
-    getItem(key: string): string | null;
-    setItem(key: string, value: string): void;
-  },
-  kernel: {
-    computeFormSignature(fields: unknown): string;
-    resolveSubmissionIdentity(
-      signature: string,
-      storage: unknown,
-      now: () => string,
-      makeId: () => string,
-      storageKey?: string,
-    ): unknown;
-    buildIntentPayload(fields: unknown, identity: unknown): unknown;
-    callApi(
-      fetcher: unknown,
-      storage: unknown,
-      adminKey: string,
-      path: string,
-      options: { method: string; body?: string },
-    ): Promise<unknown>;
-  },
-  fetcher: unknown,
+  bridge: FieldVoiceBridge,
   makeId: () => string,
+  platform: {
+    speechSynthesis?: { speak(utterance: unknown): void };
+    SpeechSynthesisUtterance?: new (text: string) => unknown;
+  } = globalThis as unknown as {
+    speechSynthesis?: { speak(utterance: unknown): void };
+    SpeechSynthesisUtterance?: new (text: string) => unknown;
+  },
 ): void {
-  function normalize(value: string): string {
-    return value.trim().toLocaleLowerCase().replace(/\s+/g, " ");
-  }
-
   const button = document.getElementById("voice-push-to-talk");
   const status = document.getElementById("voice-status");
   const browser = globalThis as unknown as {
@@ -348,113 +455,224 @@ export function voiceBrowserClient(
       abort(): void;
     };
   };
-  const Recognition =
+  const detectedRecognition =
     browser.SpeechRecognition ?? browser.webkitSpeechRecognition;
-  if (!Recognition) {
+  if (!detectedRecognition) {
     button.disabled = true;
     status.textContent =
       "Voice input is unavailable in this browser. Manual controls remain available.";
     return;
   }
-  let recognition: InstanceType<NonNullable<typeof Recognition>> | null = null;
-  let session = 0;
-  let finalClaimed = false;
-  button.addEventListener("click", () => {
-    if (recognition) {
-      recognition.abort();
-      recognition = null;
-      status.textContent = "IDLE";
+  const Recognition = detectedRecognition;
+
+  let activeConfirmation: PendingVoiceConfirmation | null = null;
+
+  function speakOutcome(
+    workflowState: string,
+    projectId: string,
+    actionKind: string,
+  ): void {
+    const presentation = createVoicePresentation({
+      status: classifyWorkflowStateForVoice(workflowState),
+      projectId,
+      actionKind,
+    });
+    speakVoicePresentation(presentation, platform);
+  }
+
+  function resolveAndDispatch(
+    rawTranscript: string,
+    captureSessionId: string,
+  ): void {
+    const transcript = rawTranscript.trim();
+    status.textContent = `RESOLVING: ${transcript}`;
+    const now = Date.now();
+
+    if (activeConfirmation && activeConfirmation.state === "PENDING") {
+      const responseKind = classifyConfirmationResponse(transcript);
+      if (responseKind !== "OTHER") {
+        const outcome = respondToVoiceConfirmation(
+          activeConfirmation,
+          { affirmative: responseKind === "AFFIRMATIVE" },
+          now,
+        );
+        activeConfirmation = outcome.confirmation;
+        if (outcome.outcome === "CONSUMED") {
+          const confirmed = outcome.confirmation;
+          status.textContent = "SUBMITTING";
+          bridge
+            .submitApply(confirmed)
+            .then((result) => {
+              status.textContent = "RESULT";
+              speakOutcome(
+                result.workflowState,
+                confirmed.projectId,
+                "EVIDENCE_APPLY_SHADOW",
+              );
+            })
+            .catch(() => {
+              status.textContent = "ERROR";
+            });
+        } else if (outcome.outcome === "CANCELLED") {
+          status.textContent = "CANCELLED";
+        } else {
+          status.textContent = `CLARIFICATION: ${outcome.reason}`;
+        }
+        return;
+      }
+      // A new, unrelated utterance while a confirmation is pending invalidates it rather than
+      // ever being misread as a stale "yes" later.
+      activeConfirmation = { ...activeConfirmation, state: "CANCELLED" };
+    }
+
+    const projectIds = bridge.listProjectIds();
+    const resumable = bridge.listResumableWorkflows();
+    const mentionedProjectId = projectMention(transcript, {
+      projectIds,
+      aliases: [],
+    });
+    const evidenceFields = mentionedProjectId
+      ? bridge.getEvidenceFields(mentionedProjectId)
+      : null;
+
+    const context: VoiceProjectContext = {
+      projectIds,
+      aliases: [],
+      resumableWorkflows: resumable.map(({ workflowId, projectId }) => ({
+        workflowId,
+        projectId,
+      })),
+    };
+    if (evidenceFields && evidenceFields.evidenceSnapshot !== undefined) {
+      context.evidenceSnapshot = evidenceFields.evidenceSnapshot;
+    }
+    if (
+      evidenceFields &&
+      evidenceFields.expectedProjectRevision !== undefined
+    ) {
+      context.expectedProjectRevision = evidenceFields.expectedProjectRevision;
+    }
+
+    const resolution = resolveVoiceCommand(transcript, context);
+    if (resolution.kind === "CLARIFICATION") {
+      status.textContent = `CLARIFICATION: ${resolution.message}`;
       return;
     }
-    const currentSession = ++session;
-    finalClaimed = false;
-    recognition = new Recognition();
-    recognition.onresult = (event: unknown) => {
-      if (!recognition || currentSession !== session || finalClaimed) return;
-      const result = event as {
-        results?: { isFinal?: boolean; 0?: { transcript?: string } }[];
-      };
-      const first = result.results?.[0];
-      if (!first?.isFinal || typeof first[0]?.transcript !== "string") return;
-      finalClaimed = true;
-      const transcript = first[0].transcript.trim();
-      status.textContent = `RESOLVING: ${transcript}`;
-      const normalized = normalize(transcript);
-      const projectId = normalized.includes("deboard") ? "deboard-v091" : null;
-      if (!projectId) {
-        status.textContent = "ERROR: specify a known project ID";
-        return;
-      }
-      if (normalized.includes("apply")) {
-        status.textContent = `CONFIRMATION_REQUIRED: Apply evidence to ${projectId} in shadow mode?`;
-        return;
-      }
-      const kind = normalized.includes("recover")
-        ? "RECOVERY_QUERY"
-        : normalized.includes("health") || normalized.includes("block")
-          ? "FORECAST_HEALTH_QUERY"
-          : normalized.includes("preview")
-            ? "EVIDENCE_PREVIEW"
-            : "FORECAST_QUERY";
-      const fields = {
-        kind,
-        projectId,
-        expectedRevision: null,
-        evidenceEvent: null,
-      };
-      const storageKey = `howler_voice_pending_${projectId}_${kind}`;
-      const identity = kernel.resolveSubmissionIdentity(
-        kernel.computeFormSignature(fields),
-        sessionStorage,
-        () => new Date().toISOString(),
-        makeId,
-        storageKey,
+    if (resolution.kind === "RESUME") {
+      const match = resumable.find(
+        (workflow) => workflow.workflowId === resolution.workflowId,
       );
+      if (!match) {
+        status.textContent =
+          "CLARIFICATION: that workflow is no longer available.";
+        return;
+      }
       status.textContent = "SUBMITTING";
-      void kernel
-        .callApi(
-          fetcher,
-          sessionStorage,
-          sessionStorage.getItem("howler_admin_key") ?? "",
-          "/v1/intents",
-          {
-            method: "POST",
-            body: JSON.stringify(kernel.buildIntentPayload(fields, identity)),
-          },
-        )
-        .then(() => {
+      bridge
+        .resumeWorkflow(match.projectId, match.kind)
+        .then((result) => {
           status.textContent = "RESULT";
-          speakVoicePresentation({
-            status: "RESULT",
-            projectId,
-            actionKind: kind,
-            summaryCode: "completed",
-            safeSummary: `${projectId} ${kind} completed.`,
-            requiresConfirmation: false,
-          });
+          speakOutcome(result.workflowState, match.projectId, match.kind);
         })
         .catch(() => {
           status.textContent = "ERROR";
         });
+      return;
+    }
+    if (resolution.kind === "CONFIRMATION_REQUIRED") {
+      activeConfirmation = createPendingVoiceConfirmation({
+        confirmationId: makeId(),
+        projectId: resolution.projectId,
+        evidenceSnapshot: resolution.evidenceSnapshot,
+        captureSessionId,
+        createdAt: now,
+        ...(resolution.expectedProjectRevision !== undefined
+          ? { expectedProjectRevision: resolution.expectedProjectRevision }
+          : {}),
+      });
+      status.textContent = `CONFIRMATION_REQUIRED: Apply evidence to ${resolution.projectId} in shadow mode? Say yes or no.`;
+      return;
+    }
+    // resolution.kind === "INTENT"
+    status.textContent = "SUBMITTING";
+    const submission =
+      resolution.intentKind === "EVIDENCE_PREVIEW"
+        ? bridge.submitPreview(
+            resolution.projectId,
+            evidenceFields?.evidenceSnapshot,
+            evidenceFields?.expectedProjectRevision,
+          )
+        : bridge.submitQuery(resolution.projectId, resolution.intentKind);
+    submission
+      .then((result) => {
+        status.textContent = "RESULT";
+        speakOutcome(
+          result.workflowState,
+          resolution.projectId,
+          resolution.intentKind,
+        );
+      })
+      .catch(() => {
+        status.textContent = "ERROR";
+      });
+  }
+
+  function createRecognition(): VoiceCaptureRecognition {
+    const instance = new Recognition();
+    const handlers = new Map<string, (value?: unknown) => void>();
+    let sawFinal = false;
+    instance.onresult = (event: unknown) => {
+      const result = event as {
+        results?: { isFinal?: boolean; 0?: { transcript?: string } }[];
+      };
+      const first = result.results?.[0];
+      if (!first) return;
+      if (first.isFinal) sawFinal = true;
+      handlers.get("result")?.({
+        isFinal: Boolean(first.isFinal),
+        transcript: first[0]?.transcript,
+      });
     };
-    recognition.onerror = (event: unknown) => {
+    instance.onerror = (event: unknown) => {
       const error = event as { error?: string };
       status.textContent = `ERROR: ${error.error ?? "recognition"}`;
-      recognition = null;
     };
-    recognition.onend = () => {
-      if (currentSession === session && recognition) {
-        recognition = null;
-        status.textContent = finalClaimed ? "RESULT" : "IDLE";
-      }
+    instance.onend = () => {
+      status.textContent = sawFinal ? "RESULT" : "IDLE";
     };
+    return {
+      start: () => {
+        instance.start();
+      },
+      stop: () => {
+        instance.stop();
+      },
+      abort: () => {
+        instance.abort();
+      },
+      on: (event, handler) => handlers.set(event, handler),
+    };
+  }
+
+  const controller = createCaptureController({
+    createRecognition,
+    onFinal: (transcript, captureSessionId) => {
+      resolveAndDispatch(transcript, captureSessionId);
+    },
+  });
+
+  button.addEventListener("click", () => {
+    if (controller.currentSessionId() !== null) {
+      controller.abort();
+      status.textContent = "IDLE";
+      return;
+    }
     status.textContent = "REQUESTING_PERMISSION";
     try {
-      recognition.start();
+      controller.start();
       status.textContent = "LISTENING";
     } catch {
       status.textContent = "ERROR: recognition could not start";
-      recognition = null;
     }
   });
 }
