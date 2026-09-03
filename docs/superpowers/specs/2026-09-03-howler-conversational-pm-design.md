@@ -29,15 +29,22 @@ The probabilistic interpreter's output boundary is fixed: it emits `Conversation
 
 ```ts
 export type ConversationClaimType =
-  | "DELIVERY_OCCURRED"
-  | "TRADE_DATE_CHANGED"
-  | "ACTIVITY_STARTED"
-  | "ACTIVITY_COMPLETED"
-  | "INSPECTION_COMPLETED"
+  // OBSERVED (past/already-occurred) — the compiler classifies every one of these FACT.
+  | "ACTIVITY_STARTED"          // "masonry started Friday"
+  | "ACTIVITY_COMPLETED"        // "Saul finished the trim"
+  | "ITEM_COMPLETED"            // same as ACTIVITY_COMPLETED for a constraint-shaped item
+  | "DELIVERY_RECEIVED"         // "the block package arrived yesterday"
+  | "INSPECTION_COMPLETED"      // "the inspection passed"
+  | "CONDITION_OBSERVED"        // "the crew is on site", "the wall is up" — observed constraint/blocker state
+  // COMMITMENT (future intent/schedule/promise/request) — the compiler classifies every one of these COMMITMENT.
+  | "SCHEDULE_CHANGED"          // "Jason is moving to Wednesday" (the plan changed, not yet performed)
+  | "DELIVERY_EXPECTED"         // "the block package is coming Monday"
+  | "TRADE_ATTENDANCE_PLANNED"  // "Sam will pour Friday"
+  | "WORK_REQUESTED"            // "schedule framing Thursday", "have Wayland come tomorrow"
+  | "DECISION_EXPECTED"         // "the client's decision is due Friday" — no mutation, tracked as an expectation
+  // NEUTRAL — no mutation is ever produced for these; they only confirm an item stays open.
   | "DECISION_UNRESOLVED"
-  | "CONSTRAINT_UNRESOLVED"
-  | "DATE_MOVED"
-  | "ITEM_COMPLETED";
+  | "CONSTRAINT_UNRESOLVED";
 
 export interface ConversationClaim {
   claimId: string;
@@ -55,7 +62,7 @@ export interface ConversationClaim {
 }
 ```
 
-The interpreter may identify *business meaning* only: that a delivery occurred, a trade's date changed, an activity started or completed, an inspection completed, a client decision or constraint remains unresolved, a date moved, or an item is done. It may **not** decide a mutation opcode, an activity ID, a constraint ID, a reducer state transition, a verification level, a `mutationClass`, or Apply authority. Those seven decisions are exclusively the deterministic compiler's job (next section), never the interpreter's. This is the enforceable boundary: `ConversationClaim` has no field that names an `EventMutationV094` op, no field that names a real `activityId`/`constraintId` from any project model, no field that carries a `VerificationState`, and no field that carries a `mutationClass`. `mutationClass` is assigned later, by the compiler, purely as a function of `claimType` (see the claim-type table below and Oversight model) — it is never read from, or influenced by, anything the interpreter produced. If the interpreter cannot express what it heard without one of those seven, it has overstepped its role by construction, not just by convention.
+The interpreter may identify *business meaning* only, expressed as one of the thirteen `ConversationClaimType` values above — including which side of the observed/future line it heard (`ACTIVITY_STARTED` vs. `SCHEDULE_CHANGED`, `DELIVERY_RECEIVED` vs. `DELIVERY_EXPECTED`, and so on). It may **not** decide a mutation opcode, an activity ID, a constraint ID, a reducer state transition, a verification level, a `mutationClass`, or Apply authority. Those seven decisions are exclusively the deterministic compiler's job (next section), never the interpreter's — critically, **selecting a `claimType` is not the same as selecting a `mutationClass`**: the interpreter picks the business-meaning label (is this an observed start, or a planned attendance?), and only the compiler's fixed `CLASSIFY` table (below) turns that label into `"FACT"` or `"COMMITMENT"`. `ConversationClaim` has no field that names an `EventMutationV094` op, no field that names a real `activityId`/`constraintId` from any project model, no field that carries a `VerificationState`, and no field that carries a `mutationClass` — the type simply doesn't have the property. If the interpreter cannot confidently tell which `claimType` a claim is — most commonly, whether "Jason moved to Wednesday" describes a schedule change (`SCHEDULE_CHANGED`) or completed work (`ACTIVITY_COMPLETED`) — it must return a `Clarification` instead of guessing a `claimType`. This is the only place temporal ambiguity gets resolved, and it never resolves toward `FACT` by default: an unresolved claim type has no mutation class at all, because it never reaches the compiler as a claim.
 
 ## Deterministic claim-to-mutation compiler
 
@@ -66,22 +73,28 @@ The interpreter may identify *business meaning* only: that a delivery occurred, 
 3. **Verify unique mapping.** More than one plausible activity/constraint match, or zero matches -> `CLARIFICATION` naming the ambiguous candidates. Never silently pick the first match.
 4. **Check allowed semantic transition.** Each `ConversationClaimType` maps to a fixed, small set of legal `EventMutationV094` ops (table below). If the claimed transition doesn't make sense against the entity's current state (e.g. `ACTIVITY_COMPLETED` claimed for an activity already `COMPLETE`), the compiler emits a `CLARIFICATION` ("that's already marked done — did something change?") rather than a no-op mutation.
 5. **Validate date/value.** `effectiveDate` must parse as a valid ISO date and must not be earlier than the entity's existing recorded start (for a completion/date-move claim) without an explicit correction context. Malformed or contradictory values -> `CLARIFICATION`.
-6. **Determine provenance.** Builds one `UpsertSourceMutationV094` per compiled claim: `type: "VOICE_CONVERSATION"`, `label` containing a short transcript excerpt (never full raw audio — text only) plus `sessionId`/`sourceTurnId`, `observedAt` = compile time. Event-level `verification` is `PM_CONFIRMED` once `userConfirmationState === "CONFIRMED"`; a claim can never compile into an applyable event before confirmation.
-7. **Emit `ProposedMutation`.** A `{ event: ProjectEventV094-shaped object, mutationClass: "FACT" }` (see Oversight model, next section) ready for the existing evidence-preview call — never submitted directly.
-8. **Refuse or clarify.** Any failure in steps 1-5 halts compilation for that claim and returns a typed refusal reason; it never falls through to a best-guess mutation.
+6. **Classify `mutationClass`.** `mutationClass = CLASSIFY[claim.claimType]` — a fixed, exhaustive, hand-written table (below), never a heuristic over `claim.value`/`effectiveDate`/free text. `CLASSIFY` is total over all thirteen `ConversationClaimType` values (a TypeScript exhaustiveness check — a `never`-typed fallthrough — makes it a compile error to add a fourteenth `claimType` without also adding its `CLASSIFY` entry). This is the one step that answers FACT-vs-COMMITMENT, and it never reads anything the interpreter wrote beyond the `claimType` label itself.
+7. **Determine provenance.** Builds one `UpsertSourceMutationV094` per compiled claim: `type: "VOICE_CONVERSATION"`, `label` containing a short transcript excerpt (never full raw audio — text only) plus `sessionId`/`sourceTurnId`, `observedAt` = compile time. Event-level `verification` is `PM_CONFIRMED` once `userConfirmationState === "CONFIRMED"`; a claim can never compile into an applyable event before confirmation.
+8. **Emit `ProposedMutation`.** A `{ event: ProjectEventV094-shaped object, mutationClass: "FACT" | "COMMITMENT" }` (see Oversight model, next section) ready for the existing evidence-preview call — never submitted directly.
+9. **Refuse or clarify.** Any failure in steps 1-5 halts compilation for that claim and returns a typed refusal reason; it never falls through to a best-guess mutation, and never falls through to a best-guess `mutationClass` either.
 
-Claim-type -> allowed-mutation table (closed set, extended only by a future spec revision, never inferred at runtime):
+Claim-type -> mutation-class -> allowed-mutation table (closed set, extended only by a future spec revision, never inferred at runtime):
 
-| `claimType` | Allowed mutation(s) |
-|---|---|
-| `DELIVERY_OCCURRED` | `SET_CONSTRAINT_STATE` (state `SATISFIED`) on a `MATERIAL`-type constraint |
-| `TRADE_DATE_CHANGED` / `DATE_MOVED` | `SET_SCHEDULE_LOCK` or `SET_DURATION` on the named activity, per which field the claim actually names |
-| `ACTIVITY_STARTED` | `SET_ACTUAL_START` |
-| `ACTIVITY_COMPLETED` / `ITEM_COMPLETED` | `SET_ACTUAL_FINISH`, and `SET_ACTIVITY_STATE` (`COMPLETE`) if the entity is an activity; `SET_CONSTRAINT_STATE` (`SATISFIED`) if it's a constraint |
-| `INSPECTION_COMPLETED` | `SET_CONSTRAINT_STATE` (`SATISFIED`) on an inspection-typed constraint |
-| `DECISION_UNRESOLVED` / `CONSTRAINT_UNRESOLVED` | no mutation — this claim type only ever *confirms an item stays open*; it feeds the `DebriefItem` view's `status` back to `OPEN`, it never produces an event |
+| `claimType` | `mutationClass` | Allowed mutation(s) |
+|---|---|---|
+| `ACTIVITY_STARTED` | `FACT` | `SET_ACTUAL_START` |
+| `ACTIVITY_COMPLETED` / `ITEM_COMPLETED` | `FACT` | `SET_ACTUAL_FINISH`, and `SET_ACTIVITY_STATE` (`COMPLETE`) if the entity is an activity; `SET_CONSTRAINT_STATE` (`SATISFIED`) if it's a constraint |
+| `DELIVERY_RECEIVED` | `FACT` | `SET_CONSTRAINT_STATE` (state `SATISFIED`) on a `MATERIAL`-type constraint |
+| `INSPECTION_COMPLETED` | `FACT` | `SET_CONSTRAINT_STATE` (`SATISFIED`) on an inspection-typed constraint |
+| `CONDITION_OBSERVED` | `FACT` | `SET_CONSTRAINT_STATE` (`SATISFIED`) on the named constraint (e.g. trade-mobilization, site-readiness) |
+| `SCHEDULE_CHANGED` | `COMMITMENT` | `SET_SCHEDULE_LOCK` on the named activity |
+| `DELIVERY_EXPECTED` | `COMMITMENT` | `SET_SCHEDULE_LOCK` or `SET_DURATION` on the material-dependent activity — documents an *expected* date, never treated as receipt |
+| `TRADE_ATTENDANCE_PLANNED` | `COMMITMENT` | `SET_SCHEDULE_LOCK` on the named activity |
+| `WORK_REQUESTED` | `COMMITMENT` | `SET_SCHEDULE_LOCK` on the named activity |
+| `DECISION_EXPECTED` | n/a | no mutation — tracks an expected-but-unconfirmed decision date; feeds `DebriefItem` only |
+| `DECISION_UNRESOLVED` / `CONSTRAINT_UNRESOLVED` | n/a | no mutation — this claim type only ever *confirms an item stays open*; it feeds the `DebriefItem` view's `status` back to `OPEN`, it never produces an event |
 
-No claim type maps to `UPSERT_ACTIVITY`, `UPSERT_CONSTRAINT`, `UPSERT_DEPENDENCY`, `UPSERT_CONFLICT`, `RESOLVE_CONFLICT`, or any commercial/workload-signal mutation — creating new graph structure or resolving a conflict from conversation is out of this spec's scope entirely, matching "no new forecasting engine."
+No claim type maps to `UPSERT_ACTIVITY`, `UPSERT_CONSTRAINT`, `UPSERT_DEPENDENCY`, `UPSERT_CONFLICT`, `RESOLVE_CONFLICT`, or any commercial/workload-signal mutation — creating new graph structure or resolving a conflict from conversation is out of this spec's scope entirely, matching "no new forecasting engine." Note the FACT/COMMITMENT split tracks *exactly* the OBSERVED/COMMITMENT grouping in the `ConversationClaimType` definition above — a `claimType` never appears in the "OBSERVED" comment group and classifies `COMMITMENT`, or vice versa; the two groupings are the same fact expressed twice (once in the type, once in this table) for readability, not two independent decisions that could drift apart.
 
 ## Oversight model: fact ingestion vs. action authorization
 
@@ -89,15 +102,21 @@ Approved direction (Option B). Verified empirically against the real system this
 
 **This does not fit the existing contract as-is.** `IntentV1`/`ProjectEventV094` (`src/domain/types.ts`) have no field distinguishing "this event only records a fact" from "this event authorizes downstream action," and the workflow layer's oversight-gate check (in `src/operator/workflow.ts`) is project-wide, not activity-scoped. A narrowly-scoped contract extension is required:
 
-- Add `mutationClass: "FACT" | "COMMITMENT"` to `ProjectEventV094` (`src/domain/types.ts`), required, defaulting to `"COMMITMENT"` for any existing caller that doesn't set it — this is the backward-compatibility hinge: every intent submitted today (the admin UI's manual evidence textarea, this session's own hand-built DeBoard sync) keeps today's exact strict behavior unless it explicitly opts into `"FACT"`.
-- The conversational claim compiler is the *only* producer that ever sets `mutationClass: "FACT"` on an event, and only for the claim types in the table above (none of which touch `UPSERT_CONFLICT`/`RESOLVE_CONFLICT`/dependency structure — the exact things a `BLOCK` finding is protecting).
-- The workflow layer's oversight-gate check gains one narrowly-scoped rule: an event with `mutationClass: "FACT"` may persist even while `oversight.decision === "BLOCK"`, **if and only if** none of the event's `impactSeedActivityIds` intersect any `BLOCK`-severity finding's `activityIds` on the current oversight review. Any overlap, or `mutationClass: "COMMITMENT"`, keeps today's exact refusal.
+- Add `mutationClass: "FACT" | "COMMITMENT"` to `ProjectEventV094` (`src/domain/types.ts`), optional, defaulting to `"COMMITMENT"` semantics for any existing caller that doesn't set it — this is the backward-compatibility hinge: every intent submitted today (the admin UI's manual evidence textarea, this session's own hand-built DeBoard sync) keeps today's exact strict behavior unless it explicitly opts into `"FACT"`.
+- The conversational claim compiler is the *only* producer that ever sets this field on an event, and it sets it to *either* value — `"FACT"` for the five OBSERVED claim types, `"COMMITMENT"` for the four future-facing claim types (see the claim-type table above). Both values only ever originate from the compiler's fixed `CLASSIFY` table, never from the interpreter and never inferred from a claim's wording — see Semantic claim boundary.
+- The workflow layer's oversight-gate check gains exactly one narrowly-scoped bypass rule, and it applies to `"FACT"` only: an event with `mutationClass: "FACT"` may persist even while `oversight.decision === "BLOCK"`, **if and only if** none of the event's `impactSeedActivityIds` intersect any `BLOCK`-severity finding's `activityIds` on the current oversight review. Every other combination keeps today's exact refusal — this explicitly includes a `"COMMITMENT"` event whose activities don't overlap any `BLOCK` finding at all: an unrelated `BLOCK` elsewhere in the project does not, and must not, become a reason to newly permit a `COMMITMENT` that would otherwise be refused today. The bypass is `mutationClass`-gated first, scope-gated second; it is not "any event that happens not to overlap a BLOCK finding gets through."
 - The `BLOCK` finding itself is never touched, downgraded, or auto-resolved by a `FACT` event — the next oversight review recomputed after a `FACT` apply re-evaluates from the *unmodified* `structural_reconcile`/`brick_veneer` conflicts and reports `BLOCK` again if they're still open, because they still are.
 - The overlap check in the previous bullet is a **scope test, not a semantic one** — the gate never inspects what a claim *says*, only which `activityIds` it touches. This is deliberate: it means the gate cannot be tricked by a claim's wording. A claim whose `impactSeedActivityIds` overlaps a `BLOCK` finding is refused via the `FACT` path *regardless of what the claim asserts* — including a claim that asserts the blocked condition is itself now resolved.
 
-**Worked "not automatically allowed" case.** Suppose a debrief answer is "the structural engineering conflict is resolved, the LVL calcs match the plans now." Its natural entity binding is `structural_reconcile`/`framing` — exactly the `BLOCK` finding's own `activityIds`. Under the scope test above, this claim's `impactSeedActivityIds` overlaps the `BLOCK` finding, so the `FACT` fast path refuses it, full stop — the compiler does not attempt to judge whether the claim, if true, would actually resolve the conflict. Resolving a `BLOCK`-scoped condition requires satisfying *that finding's own* evidence/oversight requirements (the same rigor Task 15-17's oversight review already applies to any `COMMITMENT`-class change), which is a distinct, stricter mechanism this spec does not define or build. In practice today that means: a claim overlapping an open `BLOCK` finding is never applied by the conversational layer at all — the debrief can surface the finding and the user's answer to `src/worker/admin.ts`'s existing manual evidence path (unchanged by this spec), but the voice/claim pipeline itself has no route to clear it. FACT ingestion never means action authorization, and it never means *block resolution* either — those are two different, both-forbidden things this pipeline cannot do.
+**Worked "not automatically allowed" case.** Suppose a debrief answer is "the structural engineering conflict is resolved, the LVL calcs match the plans now." Its natural entity binding is `structural_reconcile`/`framing` — exactly the `BLOCK` finding's own `activityIds`. Whatever `claimType` the interpreter picks for this (most plausibly `CONDITION_OBSERVED`, still `FACT`-classified), the claim's `impactSeedActivityIds` overlaps the `BLOCK` finding, so the scope test refuses it via the `FACT` path, full stop — the compiler does not attempt to judge whether the claim, if true, would actually resolve the conflict. Resolving a `BLOCK`-scoped condition requires satisfying *that finding's own* evidence/oversight requirements (the same rigor Task 15-17's oversight review already applies to any `COMMITMENT`-class change), which is a distinct, stricter mechanism this spec does not define or build. In practice today that means: a claim overlapping an open `BLOCK` finding is never applied by the conversational layer at all — the debrief can surface the finding and the user's answer to `src/worker/admin.ts`'s existing manual evidence path (unchanged by this spec), but the voice/claim pipeline itself has no route to clear it. FACT ingestion never means action authorization, and it never means *block resolution* either — those are two different, both-forbidden things this pipeline cannot do.
 
-Example under the allowed rule: "Masonry actually started Aug 28" compiles to a `FACT`-class event whose `impactSeedActivityIds` is `["masonry"]` — no overlap with `structural_reconcile`/`framing`/`brick_veneer` — so it applies, and DeBoard's forecast/recovery recompute from that new reality. "Proceed with framing despite the unresolved engineering conflict" is not a claim type this spec's compiler can even produce (framing/conflict resolution isn't in the allowed-mutation table), and even if it were, it would compile as `COMMITMENT`-class and stay exactly as blocked as it is today.
+**Worked FACT/COMMITMENT pairs** (the temporal-ambiguity distinction this section exists to make explicit):
+- "Masonry started Friday" -> `ACTIVITY_STARTED` -> `FACT`. "Jason will be there Wednesday" -> `TRADE_ATTENDANCE_PLANNED` -> `COMMITMENT`.
+- "Block arrived Monday" -> `DELIVERY_RECEIVED` -> `FACT`. "Block is coming Monday" -> `DELIVERY_EXPECTED` -> `COMMITMENT`.
+- "Schedule framing Thursday" -> `WORK_REQUESTED` -> `COMMITMENT` (a request is never an observation, regardless of how confidently it's stated).
+- "Jason moved to Wednesday," spoken with nothing in the session or utterance clarifying whether it means the schedule changed or the work happened -> the interpreter cannot safely pick between `SCHEDULE_CHANGED` and `ACTIVITY_COMPLETED`, so it returns a `Clarification` ("did that happen, or is that when it's now planned?") instead of a claim. There is no default here; an unresolved `claimType` never reaches step 6 to be classified at all, so it is not possible for this ambiguity to resolve toward `FACT` by omission.
+
+Example under the allowed rule: "Masonry actually started Aug 28" (`ACTIVITY_STARTED`) compiles to a `FACT`-class event whose `impactSeedActivityIds` is `["masonry"]` — no overlap with `structural_reconcile`/`framing`/`brick_veneer` — so it applies, and DeBoard's forecast/recovery recompute from that new reality. "Proceed with framing despite the unresolved engineering conflict" is not expressible as any of the thirteen claim types this spec's compiler recognizes (there is no "authorize despite conflict" claim type, and conflict resolution isn't in the allowed-mutation table for any of them) — the interpreter has no `claimType` to reach for it, so this never becomes a claim in the first place, let alone a `COMMITMENT` one.
 
 This contract extension (the `mutationClass` field and the scoped gate check) is implementation work for a future plan, not built by this spec — it is called out explicitly because the rest of this design depends on it existing; without it, every conversational claim this spec produces would hit the same `OVERSIGHT_BLOCKED` wall the manual DeBoard sync did.
 
@@ -163,7 +182,7 @@ export interface ConversationSession {
 }
 ```
 
-`TENTATIVE`-certainty claims ("I think Friday but don't mark it yet") stay in `pendingClaims` at `userConfirmationState: "UNCONFIRMED"` forever within the session — they are structurally incapable of reaching the compiler's step 6 (provenance/`PM_CONFIRMED`), so they can never become canonical project truth. When the session ends, everything above is discarded; the only durable trace of the debrief is whatever claims actually completed the full pipeline into applied events, each carrying its own `VOICE_CONVERSATION` source — never a session transcript, never raw audio.
+`TENTATIVE`-certainty claims ("I think Friday but don't mark it yet") stay in `pendingClaims` at `userConfirmationState: "UNCONFIRMED"` forever within the session — they are structurally incapable of reaching the compiler's step 7 (provenance/`PM_CONFIRMED`), so they can never become canonical project truth. When the session ends, everything above is discarded; the only durable trace of the debrief is whatever claims actually completed the full pipeline into applied events, each carrying its own `VOICE_CONVERSATION` source — never a session transcript, never raw audio.
 
 ## Multi-fact parsing
 
@@ -202,7 +221,7 @@ The live doc (or its future replacement) remains an *input* to this pipeline eve
 
 ## DeBoard blockers
 
-`structural_reconcile`/`framing` (plans-vs-engineering conflict) and `brick_veneer` (match/quote) remain `BLOCK`-severity, unresolved, untouched by this spec. The three approved masonry facts (actual start Aug 28, `masonry-material` satisfied, `masonry-trade` satisfied) remain queued exactly as the Den-activation pass left them — proven representable and forecast-consistent via a real `EVIDENCE_PREVIEW`, refused at `EVIDENCE_APPLY_SHADOW` by the current project-wide oversight gate. They become eligible for application once the `mutationClass: "FACT"` scoped-gate extension above exists; this spec does not apply them.
+`structural_reconcile`/`framing` (plans-vs-engineering conflict) and `brick_veneer` (match/quote) remain `BLOCK`-severity, unresolved, untouched by this spec. The three approved masonry facts (actual start Aug 28 — `ACTIVITY_STARTED`; `masonry-material` satisfied — `DELIVERY_RECEIVED`; `masonry-trade` satisfied — `CONDITION_OBSERVED`) all classify `FACT` under the table above and remain queued exactly as the Den-activation pass left them — proven representable and forecast-consistent via a real `EVIDENCE_PREVIEW`, refused at `EVIDENCE_APPLY_SHADOW` by the current project-wide oversight gate. They become eligible for application once the scoped-gate extension above exists; this spec does not apply them. Should the second block delivery later come up in a debrief, "second block is coming Friday" classifies `DELIVERY_EXPECTED` -> `COMMITMENT` (a plan, not receipt), while "second block came Friday" classifies `DELIVERY_RECEIVED` -> `FACT` — the same distinction, on the same subject, still queued facts vs. still-open commitments.
 
 ## Morning debrief flow (illustrative)
 
@@ -229,8 +248,12 @@ Test files: `test/unit/conversation.test.ts`, `test/unit/claim-compiler.test.ts`
 - **Correction replaces pending claim**: "No, Thursday actually" mutates the single matching `AWAITING_CONFIRMATION` claim in place; asserts no second claim/event is created; asserts a correction with zero or multiple candidates clarifies instead of guessing.
 - **Uncertainty does not apply**: a `TENTATIVE` claim never reaches the compiler's provenance step; asserts no `EVIDENCE_APPLY_SHADOW` intent is ever constructed from it.
 - **Defer keeps item unresolved**: "leave that open" leaves the source `DebriefItem.status` at `OPEN`/`UNKNOWN` after the session, not `CONFIRMED_COMPLETE`.
+- **Claim-type classification is exhaustive and correct**: each of the nine mutation-producing `claimType` values compiles to exactly its table-specified `mutationClass` — `ACTIVITY_STARTED`/`ACTIVITY_COMPLETED`/`ITEM_COMPLETED`/`DELIVERY_RECEIVED`/`INSPECTION_COMPLETED`/`CONDITION_OBSERVED` all `FACT`; `SCHEDULE_CHANGED`/`DELIVERY_EXPECTED`/`TRADE_ATTENDANCE_PLANNED`/`WORK_REQUESTED` all `COMMITMENT`. Includes the six worked pairs from the Oversight model section verbatim as fixtures ("masonry started Friday" -> FACT, "Jason will be there Wednesday" -> COMMITMENT, "block arrived Monday" -> FACT, "block is coming Monday" -> COMMITMENT, "schedule framing Thursday" -> COMMITMENT, ambiguous "Jason moved Wednesday" with no disambiguating context -> `Clarification`, never a default `FACT`).
+- **Interpreter cannot set `mutationClass`**: a malformed/adversarial interpreter response that includes a `mutationClass` key is asserted to have zero effect on the compiler's output — the compiler's classification is proven identical whether or not that key is present, since `CLASSIFY` only ever reads `claimType`.
 - **Factual update accepted despite unrelated BLOCK**: a `FACT`-class event whose `impactSeedActivityIds` doesn't overlap an existing `BLOCK` finding's `activityIds` persists (mirrors this session's real DeBoard masonry preview, replayed once the scoped gate exists).
 - **Unsafe action remains BLOCKED**: a `COMMITMENT`-class event, or any event overlapping a `BLOCK` finding's activities, is refused exactly as today — regression-pins the current `OVERSIGHT_BLOCKED` behavior this session proved.
+- **An unrelated BLOCK never newly authorizes a COMMITMENT**: a `COMMITMENT`-class event scoped only to non-blocked activities is still refused while the project carries any open `BLOCK` finding, proving the bypass is `mutationClass`-gated and not merely scope-gated.
+- **A relevant BLOCK cannot be cleared by an overlapping FACT**: a `FACT`-class event whose `impactSeedActivityIds` includes an activity named in an open `BLOCK` finding is refused via the `FACT` path exactly like a `COMMITMENT` would be, regardless of what the claim's content asserts (the "not automatically allowed" worked case).
 - **Factual update cannot clear unrelated BLOCK**: after a `FACT` apply, the next oversight review still reports the same unrelated `BLOCK` findings, unchanged severity.
 - **Source-freshness handling**: an `OBSERVED/CONFIRMED` claim past-dates and overrides an earlier `PLANNED/SCHEDULED` claim on the same subject; a `PLANNED/SCHEDULED` claim whose date has passed with no confirming claim yields `UNKNOWN OUTCOME`.
 - **Old planned date becomes stale/unknown**: a fixture built from this session's actual Aug 31 KF dashboard read (Ciurlizza's Sep 3 meeting) demonstrates the exact `PLANNED -> STALE/EXPIRED -> UNKNOWN OUTCOME -> DebriefItem` transition once "now" passes Sep 3.
