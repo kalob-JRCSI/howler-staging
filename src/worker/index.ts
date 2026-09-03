@@ -29,7 +29,11 @@ import {
   routeConversationalTurn,
   type ConversationalTurnDeps,
 } from "../operator/conversation-turn";
-import { createSession } from "../operator/conversation";
+import {
+  confirmClaim,
+  createSession,
+  discardClaim,
+} from "../operator/conversation";
 import type { ConversationSession } from "../operator/conversation";
 import {
   createConversationalClaimGateway,
@@ -503,7 +507,46 @@ function buildServerFieldVoiceBridge(
           "resumeWorkflow is not used by the conversational claim gateway -- Task 18 direct commands call the canonical /v1/workflows/:id/resume route instead",
         ),
       ),
+    // Pilot activation: submitConversationalTurn/submitConversationalConfirm are the browser
+    // client's own FieldVoiceBridge methods (fieldDashboardClientScript's real implementation
+    // calls POST /v1/projects/:id/conversation/turn directly) -- this server-side bridge exists
+    // only to drive createConversationalClaimGateway's submitPreview/submitApply calls inside that
+    // same route handler, and never calls itself recursively. Same "not used here" rejection
+    // pattern as listProjectIds/submitQuery/resumeWorkflow above.
+    submitConversationalTurn: () =>
+      Promise.reject(
+        new Error(
+          "submitConversationalTurn is not used by the conversational claim gateway",
+        ),
+      ),
+    submitConversationalConfirm: () =>
+      Promise.reject(
+        new Error(
+          "submitConversationalConfirm is not used by the conversational claim gateway",
+        ),
+      ),
   };
+}
+
+/**
+ * Pilot activation fix: best-effort recovery of the `ConversationClaim.claimId` a
+ * `PendingVoiceConfirmation` resolves, from its own `canonicalEvidence.id` (the compiled event id,
+ * always `voice-conversation-${claimId}` per conversation-turn.ts's `eventIdFor` -- the only place
+ * that id shape is ever constructed). Returns `undefined` rather than throwing on anything
+ * unexpected: this only drives session bookkeeping hygiene (see the confirm branch below), never
+ * the Apply/Cancel decision itself, so a caller that can't confidently derive it simply skips the
+ * session update rather than failing the whole request over a cosmetic concern.
+ */
+function claimIdFromConfirmation(
+  confirmation: PendingVoiceConfirmation,
+): string | undefined {
+  const evidence = confirmation.canonicalEvidence as
+    { id?: unknown } | null | undefined;
+  const eventId =
+    evidence && typeof evidence === "object" ? evidence.id : undefined;
+  if (typeof eventId !== "string") return undefined;
+  const prefix = "voice-conversation-";
+  return eventId.startsWith(prefix) ? eventId.slice(prefix.length) : undefined;
 }
 
 /**
@@ -1072,9 +1115,22 @@ async function handle(request: Request, env: Env): Promise<Response> {
         stage: "confirmation_wait",
         durationMs: Date.now() - waitStartedAt,
       });
+      // Pilot activation fix: a real bug found via a real browser session -- without this, the
+      // claim this confirmation resolves stayed at AWAITING_CONFIRMATION in session.pendingClaims
+      // forever (this branch never touched claim state before), so a later, unrelated utterance
+      // could match `findAwaitingClaim` (routeConversationalTurn) against an already-resolved
+      // claim and misreport DEFERRED for it instead of falling through to fresh interpretation.
+      // `claimIdFromConfirmation` is best-effort and never blocks the real Apply/Cancel outcome
+      // below if it can't confidently derive the claimId -- this is session bookkeeping hygiene,
+      // never a security or Apply-authorization decision.
+      const resolvedClaimId = claimIdFromConfirmation(confirmation);
       if (respondOutcome.outcome !== "CONSUMED") {
+        const sessionAfterConfirm =
+          respondOutcome.outcome === "CANCELLED" && resolvedClaimId
+            ? discardClaim(session, resolvedClaimId)
+            : session;
         return json({
-          session,
+          session: sessionAfterConfirm,
           confirm: { outcome: respondOutcome.outcome },
           timing,
         });
@@ -1085,8 +1141,11 @@ async function handle(request: Request, env: Env): Promise<Response> {
         stage: "EVIDENCE_APPLY_SHADOW",
         durationMs: Date.now() - applyStartedAt,
       });
+      const sessionAfterApply = resolvedClaimId
+        ? confirmClaim(session, resolvedClaimId)
+        : session;
       return json({
-        session,
+        session: "kind" in sessionAfterApply ? session : sessionAfterApply,
         confirm: { outcome: "APPLIED", result },
         timing,
       });

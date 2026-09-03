@@ -140,6 +140,59 @@ describe("POST /v1/projects/:id/conversation/turn — real HTTP boundary", () =>
     expect(modelAfterApply.activities.masonry?.state).toBe("IN_PROGRESS");
   });
 
+  // Pilot activation: a real bug found via a real browser session -- the confirm branch never
+  // updated session.pendingClaims, so a claim stayed AWAITING_CONFIRMATION forever after being
+  // applied, and a later unrelated "not sure yet" utterance would match `findAwaitingClaim`
+  // against it and misreport DEFERRED instead of falling through to fresh interpretation.
+  it("after a claim is confirmed and applied, it no longer counts as AWAITING_CONFIRMATION -- a later unrelated 'not sure yet' does not defer it", async () => {
+    await seedDeboard();
+
+    const turnResponse = await worker.fetch(
+      jsonRequest("POST", "/v1/projects/deboard-v091/conversation/turn", {
+        text: "DeBoard foundation started today",
+      }),
+      adminEnv(),
+    );
+    const turnBody = await jsonBody<TurnResponse>(turnResponse);
+    const confirmation = turnBody.turn?.pending?.[0]?.confirmation;
+
+    const confirmResponse = await worker.fetch(
+      jsonRequest("POST", "/v1/projects/deboard-v091/conversation/turn", {
+        session: turnBody.session,
+        confirm: { confirmation, affirmative: true },
+      }),
+      adminEnv(),
+    );
+    const confirmBody = await jsonBody<TurnResponse>(confirmResponse);
+    expect(confirmBody.confirm?.outcome).toBe("APPLIED");
+    const confirmedSession = confirmBody.session as {
+      pendingClaims: { userConfirmationState: string }[];
+    };
+    expect(
+      confirmedSession.pendingClaims.every(
+        (c) => c.userConfirmationState !== "AWAITING_CONFIRMATION",
+      ),
+    ).toBe(true);
+
+    const unrelated = await worker.fetch(
+      jsonRequest("POST", "/v1/projects/deboard-v091/conversation/turn", {
+        session: confirmBody.session,
+        text: "Not sure yet about that one",
+      }),
+      adminEnv(),
+    );
+    expect(unrelated.status).toBe(200);
+    const unrelatedBody = await jsonBody<TurnResponse>(unrelated);
+    // Nothing is AWAITING_CONFIRMATION any more, so this cannot be a real DEFER of the
+    // already-applied claim -- it falls through to fresh interpretation instead.
+    expect(unrelatedBody.turn?.kind).not.toBe("DEFERRED");
+
+    // Still exactly one actualStart write on the masonry activity -- the stale-session bug never
+    // caused (or could have caused) a second Apply either.
+    const model = await loadDeboardModel();
+    expect(model.activities.masonry?.state).toBe("IN_PROGRESS");
+  });
+
   it("finding: the literal 'DeBoard masonry started today' phrase is genuinely, correctly ambiguous against DeBoard's real data (the masonry activity plus two unrelated constraints whose real labels also contain the word 'masonry') — clarifies rather than guessing, never silently picks one", async () => {
     await seedDeboard();
     const response = await worker.fetch(

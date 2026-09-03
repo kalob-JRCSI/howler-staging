@@ -393,10 +393,24 @@ describe("project card layout", () => {
     expect(el(h, "fp-1-title").textContent).toBe("proj-b");
   });
 
-  it("defaults to a single tracked project (deboard-v091) when nothing is stored", () => {
+  // Pilot activation: the default roster is now the full 7-project pilot ("KF Live PM
+  // Intelligence Dashboard -- New Model v2": DeBoard plus Stewart/Swiderski/Pratt/Carver/
+  // Ciurlizza/McMillan), not DeBoard alone -- see DEFAULT_TRACKED_PROJECTS in admin.ts.
+  it("defaults to the 7-project pilot roster when nothing is stored", () => {
     const h = mount(() => ({ ok: true, status: 200, bodyText: "{}" }));
-    expect(el(h, "fp-0-title").textContent).toBe("deboard-v091");
-    expect(() => el(h, "fp-1-title")).toThrow();
+    const expected = [
+      "deboard-v091",
+      "stewart-v1",
+      "swiderski-v1",
+      "pratt-v1",
+      "carver-v1",
+      "ciurlizza-v1",
+      "mcmillan-v1",
+    ];
+    expected.forEach((projectId, index) => {
+      expect(el(h, `fp-${String(index)}-title`).textContent).toBe(projectId);
+    });
+    expect(() => el(h, `fp-${String(expected.length)}-title`)).toThrow();
   });
 
   it("keeps each project's priority-actions/risks/status independent -- updating one never touches another", async () => {
@@ -742,7 +756,11 @@ describe("no browser-side forecasting or mutation logic", () => {
 
 describe("add / remove tracked projects (client-side, session-scoped list; no new server capability)", () => {
   it("Add project appends a new card without firing any request", () => {
-    const h = mount(() => ({ ok: true, status: 200, bodyText: "{}" }));
+    // Pinned to an explicit single-project starting list -- independent of the pilot default
+    // roster's own exact contents (covered separately above).
+    const h = mount(() => ({ ok: true, status: 200, bodyText: "{}" }), {
+      trackedProjects: ["deboard-v091"],
+    });
     el(h, "new-project-id").value = "proj-c";
     el(h, "add-project").trigger("click");
     expect(el(h, "fp-1-title").textContent).toBe("proj-c");

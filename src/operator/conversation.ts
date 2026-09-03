@@ -217,6 +217,25 @@ export function deferClaim(
 }
 
 /**
+ * Pilot activation: a real bug found via a real browser session -- confirming (or rejecting) a
+ * claim through the HTTP conversation/turn route's `confirm` branch previously left that claim
+ * sitting in `session.pendingClaims` at `AWAITING_CONFIRMATION` forever (the confirm branch never
+ * touched claim state at all), so a later, unrelated "not sure yet" utterance could match
+ * `findAwaitingClaim` against an already-resolved claim and defer it instead of falling through to
+ * fresh interpretation. `discardClaim` gives the confirm branch a real transition for the
+ * user-said-no case, mirroring `confirmClaim`'s user-said-yes transition exactly.
+ */
+export function discardClaim(
+  session: ConversationSession,
+  claimId: string,
+): ConversationSession {
+  return replaceClaim(session, claimId, (claim) => ({
+    ...claim,
+    userConfirmationState: "DISCARDED",
+  }));
+}
+
+/**
  * Field-readiness blocker fix: a `TENTATIVE` claim ("I think Friday but don't mark it yet") must
  * never reach `CONFIRMED` through this function, even if a caller mistakenly invokes it directly
  * — the design's own invariant is that a `TENTATIVE` claim is structurally incapable of reaching

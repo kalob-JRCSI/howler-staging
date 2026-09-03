@@ -1,4 +1,8 @@
-import type { FieldVoiceBridge } from "./voice-transport";
+import type {
+  ConversationalTurnResultSummary,
+  FieldVoiceBridge,
+  PendingVoiceConfirmation,
+} from "./voice-transport";
 import {
   classifyConfirmationResponse,
   classifyWorkflowStateForVoice,
@@ -6,8 +10,10 @@ import {
   createCaptureController,
   createPendingVoiceConfirmation,
   createVoicePresentation,
+  describeConversationalTurn,
   fingerprint,
   normalizeProjectId,
+  projectAliasesFromIds,
   projectMention,
   resolveVoiceCommand,
   respondToVoiceConfirmation,
@@ -1217,7 +1223,23 @@ export function fieldDashboardClientScript(
   const ADMIN_KEY_STORAGE_KEY = "howler_admin_key";
   const EM_DASH = String.fromCharCode(8212);
   const TRACKED_PROJECTS_KEY = "howler_field_tracked_projects";
-  const DEFAULT_TRACKED_PROJECTS = ["deboard-v091"];
+  // Pilot activation: the initial 7-project pilot roster ("KF Live PM Intelligence Dashboard --
+  // New Model v2"). Must stay a literal array, not an imported constant -- this whole function is
+  // `.toString()`-embedded into the browser <script> tag (see fieldDashboardHtml below), which
+  // carries only this function's own source text, never a module-level import. scripts/
+  // pilot-seed.ts (deliberately outside src/worker/ -- see
+  // test/integration/project-import.test.ts's "no new *-seed.ts files exist on disk" guard) holds
+  // the matching placeholder fixture data for these same 6 ids, seeded once through the existing
+  // POST /v1/projects/:id/import route -- never re-declared here.
+  const DEFAULT_TRACKED_PROJECTS = [
+    "deboard-v091",
+    "stewart-v1",
+    "swiderski-v1",
+    "pratt-v1",
+    "carver-v1",
+    "ciurlizza-v1",
+    "mcmillan-v1",
+  ];
   const QUERY_KINDS = [
     "FORECAST_QUERY",
     "FORECAST_HEALTH_QUERY",
@@ -1293,6 +1315,17 @@ export function fieldDashboardClientScript(
         <div id="fp-${String(index)}-active-workflows"><p class="none">No active or blocked workflows.</p></div>
       </section>
       <button type="button" id="fp-${String(index)}-refresh">Refresh</button>
+      <section class="conversation-block">
+        <label for="fp-${String(index)}-conv-input">Tell Howler what happened</label>
+        <input id="fp-${String(index)}-conv-input" type="text" placeholder="e.g. Foundation walls started today">
+        <button type="button" id="fp-${String(index)}-conv-send">Send</button>
+        <div id="fp-${String(index)}-conv-response" aria-live="polite"></div>
+        <div id="fp-${String(index)}-conv-confirm" hidden>
+          <p id="fp-${String(index)}-conv-confirm-text"></p>
+          <button type="button" id="fp-${String(index)}-conv-confirm-yes">Confirm</button>
+          <button type="button" id="fp-${String(index)}-conv-confirm-no">Reject</button>
+        </div>
+      </section>
       <section class="evidence-block">
         <label for="fp-${String(index)}-evidence-kind">Evidence action</label>
         <select id="fp-${String(index)}-evidence-kind">
@@ -1366,6 +1399,19 @@ export function fieldDashboardClientScript(
   const recoveryByProject = new Map<string, Record<string, unknown> | null>();
   const actionStateByKey = new Map<string, ActionState>();
   const inFlight = new Set<string>();
+  /** Pilot activation: one ConversationSession per project, opaque to this client -- it only ever
+   * round-trips whatever the server last returned, never inspects or mutates its fields. A
+   * project's dialogue never blocks another project's card or any manual query/evidence action:
+   * this owns its own busy lock (`conversationInFlight`, keyed by projectId only, separate from
+   * `inFlight`'s `${projectId}:${kind}` keys) so a reasoning/clarification problem for one project
+   * can never disable another project's controls. */
+  const conversationByProject = new Map<string, unknown>();
+  const conversationInFlight = new Set<string>();
+  /** The single conversational PM confirmation currently awaiting a yes/no per project, if any. */
+  const pendingConversationalConfirmation = new Map<
+    string,
+    PendingVoiceConfirmation
+  >();
 
   function indexOfProject(projectId: string): number {
     return trackedProjects.indexOf(projectId);
@@ -1692,6 +1738,196 @@ export function fieldDashboardClientScript(
       });
   }
 
+  /**
+   * Pilot activation: the one real call the manual text panel AND the voice client both use for a
+   * conversational PM turn -- POST the exact same /v1/projects/:id/conversation/turn route every
+   * other entry point (test/integration/conversation-http.test.ts) already proves end to end.
+   * `conversationByProject` round-trips whatever session the server last returned; this client
+   * never inspects or advances it itself. Busy state is scoped to this project's own conversation
+   * panel (`conversationInFlight`), never the shared `inFlight` set the manual query/evidence/
+   * Resume actions use -- a conversational turn in flight for one project must never disable
+   * another project's Refresh/evidence controls, or this project's own Refresh/evidence controls.
+   */
+  function submitConversationalTurn(
+    projectId: string,
+    text: string,
+  ): Promise<{ result: ConversationalTurnResultSummary }> {
+    if (conversationInFlight.has(projectId)) {
+      return Promise.reject(
+        new Error(`conversation turn already in flight for ${projectId}`),
+      );
+    }
+    conversationInFlight.add(projectId);
+    return callApi(
+      fetch,
+      sessionStorage,
+      adminKeyValue(),
+      `/v1/projects/${encodeURIComponent(projectId)}/conversation/turn`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          text,
+          session: conversationByProject.get(projectId) ?? null,
+        }),
+      },
+    )
+      .then((response) => {
+        const body = response.body as
+          | {
+              session?: unknown;
+              turn?: ConversationalTurnResultSummary;
+              error?: string;
+            }
+          | undefined;
+        if (!response.ok || !body?.turn) {
+          throw new Error(body?.error ?? `HTTP ${String(response.status)}`);
+        }
+        conversationByProject.set(projectId, body.session ?? null);
+        return { result: body.turn };
+      })
+      .finally(() => {
+        conversationInFlight.delete(projectId);
+      });
+  }
+
+  /** Pilot activation: resolves a conversational PM confirmation via the same route's `confirm`
+   * branch -- the one real Apply path, exactly matching the already-proven HTTP contract (a
+   * confirmation only ever consumes once; a duplicate or expired confirmation NOOPs server-side,
+   * never re-applies). */
+  function submitConversationalConfirm(
+    projectId: string,
+    confirmation: PendingVoiceConfirmation,
+    affirmative: boolean,
+  ): Promise<{
+    outcome: "APPLIED" | "CANCELLED" | "NOOP";
+    workflowState?: string;
+  }> {
+    if (conversationInFlight.has(projectId)) {
+      return Promise.reject(
+        new Error(`conversation turn already in flight for ${projectId}`),
+      );
+    }
+    conversationInFlight.add(projectId);
+    return callApi(
+      fetch,
+      sessionStorage,
+      adminKeyValue(),
+      `/v1/projects/${encodeURIComponent(projectId)}/conversation/turn`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          session: conversationByProject.get(projectId) ?? null,
+          confirm: { confirmation, affirmative },
+        }),
+      },
+    )
+      .then((response) => {
+        const body = response.body as
+          | {
+              session?: unknown;
+              confirm?: {
+                outcome?: string;
+                result?: { workflowState?: string };
+              };
+              error?: string;
+            }
+          | undefined;
+        if (!response.ok || !body?.confirm) {
+          throw new Error(body?.error ?? `HTTP ${String(response.status)}`);
+        }
+        conversationByProject.set(projectId, body.session ?? null);
+        const outcome = body.confirm.outcome;
+        const workflowState = body.confirm.result?.workflowState;
+        const resolvedOutcome: "APPLIED" | "CANCELLED" | "NOOP" =
+          outcome === "APPLIED" || outcome === "CANCELLED" ? outcome : "NOOP";
+        return workflowState !== undefined
+          ? { outcome: resolvedOutcome, workflowState }
+          : { outcome: resolvedOutcome };
+      })
+      .finally(() => {
+        conversationInFlight.delete(projectId);
+      });
+  }
+
+  /** Renders one conversational turn's safe summary into a project's card -- clarification,
+   * awaiting-confirmation (shows the Confirm/Reject controls), or a plain result line. Never
+   * throws: an unrecognized/errored outcome falls back to a short honest status line rather than
+   * ever freezing this or any other project's card. */
+  function renderConversationTurn(
+    projectId: string,
+    index: number,
+    result: ConversationalTurnResultSummary,
+  ): void {
+    const described = describeConversationalTurn(result);
+    document.getElementById(`fp-${String(index)}-conv-response`).textContent =
+      described.message;
+    const confirmBlock = document.getElementById(
+      `fp-${String(index)}-conv-confirm`,
+    );
+    if (described.pendingConfirmation) {
+      pendingConversationalConfirmation.set(
+        projectId,
+        described.pendingConfirmation,
+      );
+      document.getElementById(
+        `fp-${String(index)}-conv-confirm-text`,
+      ).textContent = described.message;
+      confirmBlock.hidden = false;
+    } else {
+      pendingConversationalConfirmation.delete(projectId);
+      confirmBlock.hidden = true;
+    }
+  }
+
+  function runConversationalTurn(projectId: string, index: number): void {
+    const inputEl = document.getElementById(`fp-${String(index)}-conv-input`);
+    const text = inputEl.value.trim();
+    if (!text) return;
+    document.getElementById(`fp-${String(index)}-conv-response`).textContent =
+      "Working…";
+    submitConversationalTurn(projectId, text)
+      .then((response) => {
+        inputEl.value = "";
+        renderConversationTurn(projectId, index, response.result);
+      })
+      .catch((error: unknown) => {
+        document.getElementById(
+          `fp-${String(index)}-conv-response`,
+        ).textContent = `Error: ${describeError(error)}`;
+      });
+  }
+
+  function runConversationalConfirm(
+    projectId: string,
+    index: number,
+    affirmative: boolean,
+  ): void {
+    const confirmation = pendingConversationalConfirmation.get(projectId);
+    if (!confirmation) return;
+    document.getElementById(`fp-${String(index)}-conv-response`).textContent =
+      "Working…";
+    submitConversationalConfirm(projectId, confirmation, affirmative)
+      .then((outcome) => {
+        pendingConversationalConfirmation.delete(projectId);
+        document.getElementById(`fp-${String(index)}-conv-confirm`).hidden =
+          true;
+        document.getElementById(
+          `fp-${String(index)}-conv-response`,
+        ).textContent =
+          outcome.outcome === "APPLIED"
+            ? "Recorded."
+            : outcome.outcome === "CANCELLED"
+              ? "Cancelled."
+              : "That update is no longer pending.";
+        renderActiveWorkflows(projectId);
+      })
+      .catch((error: unknown) => {
+        document.getElementById(
+          `fp-${String(index)}-conv-response`,
+        ).textContent = `Error: ${describeError(error)}`;
+      });
+  }
+
   function runQuery(projectId: string, kind: string): void {
     void submitAction(projectId, kind, null, null).catch(() => undefined);
   }
@@ -1805,6 +2041,21 @@ export function fieldDashboardClientScript(
       .getElementById(`fp-${String(index)}-evidence-run`)
       .addEventListener("click", () => {
         runEvidenceAction(projectId, index);
+      });
+    document
+      .getElementById(`fp-${String(index)}-conv-send`)
+      .addEventListener("click", () => {
+        runConversationalTurn(projectId, index);
+      });
+    document
+      .getElementById(`fp-${String(index)}-conv-confirm-yes`)
+      .addEventListener("click", () => {
+        runConversationalConfirm(projectId, index, true);
+      });
+    document
+      .getElementById(`fp-${String(index)}-conv-confirm-no`)
+      .addEventListener("click", () => {
+        runConversationalConfirm(projectId, index, false);
       });
     const evidenceKindEl = document.getElementById(
       `fp-${String(index)}-evidence-kind`,
@@ -2183,6 +2434,10 @@ export function fieldDashboardClientScript(
         confirmation.immutableSnapshot,
       ),
     resumeWorkflow: (projectId, kind) => submitResume(projectId, kind),
+    submitConversationalTurn: (projectId, text) =>
+      submitConversationalTurn(projectId, text),
+    submitConversationalConfirm: (projectId, confirmation, affirmative) =>
+      submitConversationalConfirm(projectId, confirmation, affirmative),
   };
   return voiceBridge;
 }
@@ -2602,6 +2857,7 @@ ${createSubmissionKernel.toString()}
 ${normalizeProjectId.toString()}
 ${commandKind.toString()}
 ${projectMention.toString()}
+${projectAliasesFromIds.toString()}
 ${resolveVoiceCommand.toString()}
 ${createCaptureController.toString()}
 ${stableSerialize.toString()}
@@ -2612,6 +2868,7 @@ ${respondToVoiceConfirmation.toString()}
 ${createVoicePresentation.toString()}
 ${classifyWorkflowStateForVoice.toString()}
 ${speakVoicePresentation.toString()}
+${describeConversationalTurn.toString()}
 const __howlerFieldVoiceBridge = (${fieldDashboardClientScript.toString()})(document, sessionStorage, fetch, crypto);
 (${voiceBrowserClient.toString()})(document, __howlerFieldVoiceBridge, () => crypto.randomUUID());
 (${wireVoicePresentationState.toString()})(document);

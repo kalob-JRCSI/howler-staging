@@ -22,9 +22,33 @@ describe("Task 18 field voice contract", () => {
   it("embeds the shared voice transport and uses no legacy mutation endpoint", () => {
     const html = fieldDashboardHtml();
     expect(html).toContain("SpeechRecognition");
-    expect(html).not.toContain("/v1/projects/");
     expect(html).not.toContain("events/apply-shadow");
     expect(html).not.toContain('sessionStorage.setItem("voice');
+  });
+
+  // Pilot activation: fieldDashboardClientScript's submitConversationalTurn/
+  // submitConversationalConfirm now legitimately reference `/v1/projects/${...}` -- the already
+  // release-gate-allowlisted POST /v1/projects/:id/conversation/turn route (see
+  // ACCEPTED_MUTATION_ROUTES in test/safety/release-gate.test.ts), not the pre-Task-15 legacy
+  // per-project mutation pattern the test above guards against (which always ended in
+  // "events/apply-shadow", still asserted absent above). This test replaces the old blanket
+  // "no /v1/projects/ at all" assertion with a precise one: every /v1/projects/ reference in the
+  // embedded script must be this one approved route, never anything else.
+  it("every /v1/projects/ URL literal in the embedded script is the approved conversation/turn route", () => {
+    const html = fieldDashboardHtml();
+    // Only code occurrences (a template literal starting with a backtick immediately before
+    // "/v1/projects/") count -- explanatory comments elsewhere in this same source (e.g.
+    // referencing the unrelated POST /v1/projects/:id/import route) legitimately mention the
+    // substring too and must not be mistaken for a second endpoint reference.
+    const literalStarts = [
+      ...html.matchAll(
+        /`\/v1\/projects\/\$\{encodeURIComponent\(projectId\)\}([^`]*)`/g,
+      ),
+    ];
+    expect(literalStarts.length).toBeGreaterThan(0);
+    for (const match of literalStarts) {
+      expect(match[1]?.startsWith("/conversation/turn")).toBe(true);
+    }
   });
 });
 

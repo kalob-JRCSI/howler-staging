@@ -73,6 +73,30 @@ export function projectMention(
   return aliasIds.length === 1 ? (aliasIds[0] ?? null) : null;
 }
 
+/**
+ * Pilot activation: derives a plain-language alias ("deboard" for "deboard-v091") for each known
+ * project id, so a naturally-spoken/typed mention resolves without the exact slug -- the same
+ * derivation src/worker/conversation-field-model.ts's `projectAliasFromId` already uses
+ * server-side (that file cannot be imported here: it is worker-only and not `.toString()`-safe),
+ * duplicated here as its own tiny, independently testable, self-contained pure function rather
+ * than shared, matching this file's existing "each embedded function carries only its own logic"
+ * discipline. Task 18's own direct-command resolution (`resolveAndDispatch`'s pre-existing
+ * `context.aliases: []` call below, unchanged) never needed this: its own test corpus always
+ * speaks the literal project id. The new conversational-PM routing below does.
+ */
+export function projectAliasesFromIds(
+  projectIds: string[],
+): { alias: string; projectId: string }[] {
+  return projectIds
+    .map((projectId) => ({
+      alias: projectId.replace(/-v?\d+$/i, ""),
+      projectId,
+    }))
+    .filter(
+      (entry) => entry.alias.length > 0 && entry.alias !== entry.projectId,
+    );
+}
+
 export function resolveVoiceCommand(
   text: string,
   context: VoiceProjectContext,
@@ -479,6 +503,111 @@ export interface FieldVoiceBridge {
     projectId: string,
     kind: string,
   ): Promise<{ workflowState: string }>;
+  /**
+   * Pilot activation: the same conversational PM entry both the manual text panel
+   * (fieldDashboardClientScript's own implementation) and the voice client below call -- one real
+   * POST /v1/projects/:id/conversation/turn per call, never a second business-logic path. `text`
+   * is the raw utterance/typed sentence; the caller supplies no projectId disambiguation beyond
+   * picking which project's card/voice context this turn belongs to (mirrors every other
+   * FieldVoiceBridge method's own per-project scoping).
+   */
+  submitConversationalTurn(
+    projectId: string,
+    text: string,
+  ): Promise<{ result: ConversationalTurnResultSummary }>;
+  /** Responds to a conversational PM confirmation created by `submitConversationalTurn` --
+   * exactly one real POST to the same route with `{ confirm: { confirmation, affirmative } }`,
+   * never a second apply path. */
+  submitConversationalConfirm(
+    projectId: string,
+    confirmation: PendingVoiceConfirmation,
+    affirmative: boolean,
+  ): Promise<{
+    outcome: "APPLIED" | "CANCELLED" | "NOOP";
+    workflowState?: string;
+  }>;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Pilot activation: structural (not imported) mirror of src/operator/conversation-turn.ts's
+// ConversationalTurnResult -- this file cannot import from src/operator (conversation.ts already
+// imports FROM this file; see the long comment at the top of conversation-turn.ts explaining the
+// same constraint). TypeScript's structural typing means a real ConversationalTurnResult value
+// (JSON round-tripped through the HTTP boundary) satisfies this type with no cast needed. Only the
+// fields actually displayed/spoken are declared -- this is a display-safe projection, not a copy
+// of the full server-side type.
+// ---------------------------------------------------------------------------------------------
+
+export interface ConversationalTurnClaimSummary {
+  claimType: string;
+  subjectText: string;
+  effectiveDate?: string;
+  value?: string;
+}
+
+export interface ConversationalTurnPendingItem {
+  claim: ConversationalTurnClaimSummary;
+  confirmation: PendingVoiceConfirmation;
+}
+
+export interface ConversationalClarificationItem {
+  message: string;
+}
+
+export type ConversationalTurnResultSummary =
+  | { kind: "CLARIFICATION"; clarifications: ConversationalClarificationItem[] }
+  | {
+      kind: "AWAITING_CONFIRMATION";
+      pending: ConversationalTurnPendingItem[];
+      clarifications: ConversationalClarificationItem[];
+    }
+  | { kind: "NO_OP"; clarifications: ConversationalClarificationItem[] }
+  | { kind: "DEFERRED"; claimId: string }
+  | {
+      kind: "CORRECTED";
+      pending?: ConversationalTurnPendingItem;
+      clarifications: ConversationalClarificationItem[];
+    };
+
+/**
+ * Pilot activation: the single place both the manual text panel and the voice client turn a real
+ * ConversationalTurnResult into (a) the text shown on screen / spoken aloud and (b) whichever
+ * PendingVoiceConfirmation (if any) a following "yes"/"no" must resolve. Never echoes raw claim
+ * JSON or free-text model output -- only the fixed-shape fields declared above. Deliberately
+ * inlines its one safe-template line rather than calling a separate helper function: this
+ * function is `.toString()`-embedded into the browser <script> tag on its own (see
+ * fieldDashboardHtml), and a call to a sibling function not also embedded would be a
+ * `ReferenceError` in the browser the first time this path ran -- invisible to every test here,
+ * which calls this function directly within the module.
+ */
+export function describeConversationalTurn(
+  result: ConversationalTurnResultSummary,
+): { message: string; pendingConfirmation: PendingVoiceConfirmation | null } {
+  const pendingItem =
+    result.kind === "AWAITING_CONFIRMATION"
+      ? result.pending[0]
+      : result.kind === "CORRECTED"
+        ? result.pending
+        : undefined;
+  if (pendingItem) {
+    const subject = pendingItem.claim.subjectText || "that";
+    const when = pendingItem.claim.effectiveDate
+      ? ` on ${pendingItem.claim.effectiveDate}`
+      : "";
+    const action = pendingItem.claim.claimType.toLowerCase().replace(/_/g, " ");
+    return {
+      message: `Ready to record: ${subject}: ${action}${when}. Say yes to confirm or no to cancel.`,
+      pendingConfirmation: pendingItem.confirmation,
+    };
+  }
+  if (result.kind === "DEFERRED") {
+    return { message: "Left that open for now.", pendingConfirmation: null };
+  }
+  const clarification = result.clarifications[0];
+  if (clarification) {
+    return { message: clarification.message, pendingConfirmation: null };
+  }
+  return { message: "Got it — nothing to record.", pendingConfirmation: null };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -723,6 +852,13 @@ export function voiceBrowserClient(
   const Recognition = detectedRecognition;
 
   let activeConfirmation: PendingVoiceConfirmation | null = null;
+  /** Pilot activation: a pending conversational PM confirmation (distinct from
+   * `activeConfirmation` above, which is EVIDENCE_APPLY_SHADOW-specific) -- set only by a real
+   * AWAITING_CONFIRMATION/CORRECTED turn result, consumed only by a following real yes/no. */
+  let activeConversationalConfirmation: {
+    projectId: string;
+    confirmation: PendingVoiceConfirmation;
+  } | null = null;
 
   function speakOutcome(
     workflowState: string,
@@ -780,6 +916,94 @@ export function voiceBrowserClient(
       // A new, unrelated utterance while a confirmation is pending invalidates it rather than
       // ever being misread as a stale "yes" later.
       activeConfirmation = { ...activeConfirmation, state: "CANCELLED" };
+    }
+
+    if (activeConversationalConfirmation) {
+      const responseKind = classifyConfirmationResponse(transcript);
+      if (responseKind !== "OTHER") {
+        const { projectId, confirmation } = activeConversationalConfirmation;
+        activeConversationalConfirmation = null;
+        status.textContent = "SUBMITTING";
+        bridge
+          .submitConversationalConfirm(
+            projectId,
+            confirmation,
+            responseKind === "AFFIRMATIVE",
+          )
+          .then((outcome) => {
+            if (outcome.outcome === "APPLIED") {
+              status.textContent = "RESULT";
+              speakOutcome(
+                outcome.workflowState ?? "SUCCEEDED",
+                projectId,
+                "CONVERSATION_TURN",
+              );
+            } else if (outcome.outcome === "CANCELLED") {
+              status.textContent = "CANCELLED";
+            } else {
+              status.textContent =
+                "CLARIFICATION: that update is no longer pending.";
+            }
+          })
+          .catch(() => {
+            status.textContent = "ERROR";
+          });
+        return;
+      }
+      // Same discipline as the EVIDENCE_APPLY_SHADOW branch above: an unrelated utterance
+      // invalidates the pending conversational confirmation rather than risking a stale "yes"
+      // being misapplied to it later.
+      activeConversationalConfirmation = null;
+    }
+
+    // Pilot activation routing principle: a recognized Task 18 direct command (forecast/health/
+    // recovery/evidence preview/apply/resume) always takes the existing path below, completely
+    // unchanged. Only an utterance `commandKind` does not recognize at all -- a normal
+    // conversational PM update or question -- falls through to the conversational PM pipeline,
+    // via the exact same bridge method the manual text panel uses (never a second implementation
+    // of it).
+    if (commandKind(transcript) === null) {
+      const knownProjectIds = bridge.listProjectIds();
+      const conversationalProjectId = projectMention(transcript, {
+        projectIds: knownProjectIds,
+        aliases: projectAliasesFromIds(knownProjectIds),
+      });
+      if (!conversationalProjectId) {
+        status.textContent = "CLARIFICATION: Which project do you mean?";
+        return;
+      }
+      status.textContent = "SUBMITTING";
+      bridge
+        .submitConversationalTurn(conversationalProjectId, transcript)
+        .then(({ result }) => {
+          const described = describeConversationalTurn(result);
+          if (described.pendingConfirmation) {
+            activeConversationalConfirmation = {
+              projectId: conversationalProjectId,
+              confirmation: described.pendingConfirmation,
+            };
+            status.textContent = `CONFIRMATION_REQUIRED: ${described.message}`;
+          } else if (result.kind === "CLARIFICATION") {
+            status.textContent = `CLARIFICATION: ${described.message}`;
+          } else {
+            status.textContent = "RESULT";
+          }
+          speakVoicePresentation(
+            {
+              status: "RESULT",
+              projectId: conversationalProjectId,
+              actionKind: "CONVERSATION_TURN",
+              summaryCode: result.kind.toLowerCase(),
+              safeSummary: described.message,
+              requiresConfirmation: Boolean(described.pendingConfirmation),
+            },
+            platform,
+          );
+        })
+        .catch(() => {
+          status.textContent = "ERROR";
+        });
+      return;
     }
 
     const projectIds = bridge.listProjectIds();

@@ -58,6 +58,10 @@ function fakeBridge(): {
       return Promise.resolve({ workflowState: "SUCCEEDED" });
     },
     resumeWorkflow: () => Promise.resolve({ workflowState: "SUCCEEDED" }),
+    submitConversationalTurn: () =>
+      Promise.reject(new Error("not used by this gateway")),
+    submitConversationalConfirm: () =>
+      Promise.reject(new Error("not used by this gateway")),
   };
   return { bridge, previewCalls, applyCalls };
 }
@@ -145,6 +149,10 @@ describe("conversational claim gateway: preview never auto-applies", () => {
         return Promise.resolve({ workflowState: "SUCCEEDED" });
       },
       resumeWorkflow: () => Promise.resolve({ workflowState: "SUCCEEDED" }),
+      submitConversationalTurn: () =>
+        Promise.reject(new Error("not used by this gateway")),
+      submitConversationalConfirm: () =>
+        Promise.reject(new Error("not used by this gateway")),
     };
     const { previewClaim, respondToPendingClaim } =
       createConversationalClaimGateway(
@@ -224,6 +232,10 @@ describe("conversational claim gateway: preview never auto-applies", () => {
       },
       submitApply: () => Promise.resolve({ workflowState: "SUCCEEDED" }),
       resumeWorkflow: () => Promise.resolve({ workflowState: "SUCCEEDED" }),
+      submitConversationalTurn: () =>
+        Promise.reject(new Error("not used by this gateway")),
+      submitConversationalConfirm: () =>
+        Promise.reject(new Error("not used by this gateway")),
     };
     const { previewClaim } = createConversationalClaimGateway(
       bridge,
@@ -300,6 +312,10 @@ describe("conversational claim gateway: preview never auto-applies", () => {
         otherCallCount++;
         return Promise.resolve({ workflowState: "SUCCEEDED" });
       },
+      submitConversationalTurn: () =>
+        Promise.reject(new Error("not used by this gateway")),
+      submitConversationalConfirm: () =>
+        Promise.reject(new Error("not used by this gateway")),
     };
     const { previewClaim, respondToPendingClaim } =
       createConversationalClaimGateway(

@@ -71,6 +71,10 @@ function fakeBridge(): {
       return Promise.resolve({ workflowState: "SUCCEEDED" });
     },
     resumeWorkflow: () => Promise.resolve({ workflowState: "SUCCEEDED" }),
+    submitConversationalTurn: () =>
+      Promise.reject(new Error("not used by this gateway")),
+    submitConversationalConfirm: () =>
+      Promise.reject(new Error("not used by this gateway")),
   };
   return { bridge, previewCalls, applyCalls };
 }
