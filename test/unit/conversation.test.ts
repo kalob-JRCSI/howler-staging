@@ -422,6 +422,38 @@ describe("correction", () => {
     expect(result.pendingClaims[0]?.effectiveDate).toBe("2026-09-10");
   });
 
+  it("field-readiness blocker: 'No, Thursday actually' (a day name, no ISO date literal) clears the claim's stale effectiveDate rather than silently keeping the old, now-contradicted one", () => {
+    let session = createSession("t");
+    session = {
+      ...session,
+      lastReferencedEntity: {
+        type: "activity",
+        id: "masonry",
+        label: "masonry",
+      },
+    };
+    session = addClaim(
+      session,
+      validClaim({
+        claimId: "claim-jason",
+        subjectRef: "masonry",
+        subjectText: "masonry schedule",
+        claimType: "SCHEDULE_CHANGED",
+        value: "Wednesday",
+        effectiveDate: "2026-09-02",
+        userConfirmationState: "AWAITING_CONFIRMATION",
+      }),
+    );
+    const result = resolveCorrection(session, "No, Thursday actually");
+    expect("kind" in result).toBe(false);
+    if ("kind" in result) return;
+    const corrected = result.pendingClaims.find(
+      (c) => c.claimId === "claim-jason",
+    );
+    expect(corrected?.value).toBe("Thursday");
+    expect(corrected?.effectiveDate).toBeUndefined();
+  });
+
   it("correction_no_target_clarifies: correction with zero candidate pending claims clarifies instead of guessing", () => {
     const session = createSession("t");
     const result = resolveCorrection(session, "No, Thursday actually");

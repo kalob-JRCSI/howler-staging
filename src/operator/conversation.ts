@@ -177,19 +177,33 @@ function replaceClaim(
  * no duplicate project event can ever result. Callers (Task 10's `resolveCorrection`) are
  * responsible for first proving exactly one candidate claim exists; this function only performs
  * the in-place patch once a target claimId is already known.
+ *
+ * `patch.effectiveDate` has three distinct states, not two: a real ISO string sets it, `undefined`
+ * leaves it untouched, and `null` explicitly clears it. Field-readiness blocker fix: a correction
+ * whose text carries a new `value` but no ISO date literal (`null`) must clear the claim's
+ * existing `effectiveDate` rather than silently keep the old one — "No, Thursday actually" against
+ * a claim previously dated for Wednesday must not leave that stale Wednesday date in place, since
+ * this deterministic layer has no day-name-to-ISO-date resolution to trust it's still correct.
+ * `compileClaim`'s own `requireDate` then naturally re-asks for a date on the next compile attempt
+ * instead of silently compiling against a now-contradicted one.
  */
 export function applyCorrection(
   session: ConversationSession,
   claimId: string,
-  patch: { value?: string; effectiveDate?: string },
+  patch: { value?: string; effectiveDate?: string | null },
 ): ConversationSession {
-  return replaceClaim(session, claimId, (claim) => ({
-    ...claim,
-    ...(patch.value !== undefined ? { value: patch.value } : {}),
-    ...(patch.effectiveDate !== undefined
-      ? { effectiveDate: patch.effectiveDate }
-      : {}),
-  }));
+  return replaceClaim(session, claimId, (claim) => {
+    const next: ConversationClaim = {
+      ...claim,
+      ...(patch.value !== undefined ? { value: patch.value } : {}),
+    };
+    if (patch.effectiveDate === null) {
+      delete next.effectiveDate;
+    } else if (patch.effectiveDate !== undefined) {
+      next.effectiveDate = patch.effectiveDate;
+    }
+    return next;
+  });
 }
 
 export function deferClaim(
@@ -421,10 +435,14 @@ const ISO_DATE_IN_TEXT = /\d{4}-\d{2}-\d{2}/;
  * (e.g. "No, Thursday actually" / "No, 2026-09-10 actually"). Strips common correction framing
  * ("No,", "actually") and keeps the remainder as the claim's new `value`; an ISO date literally
  * present in the text also becomes the new `effectiveDate`. This function never calls a model —
- * it is deliberately conservative rather than attempting full natural-language date resolution. */
+ * it is deliberately conservative rather than attempting full natural-language date resolution.
+ * Field-readiness blocker fix: when the correction changes `value` but carries no ISO date literal
+ * (e.g. a day name like "Thursday", which this deterministic layer cannot resolve to a real date),
+ * `effectiveDate` is explicitly `null` — a signal to `applyCorrection` to clear the claim's
+ * existing date rather than silently leave a now-contradicted one in place. */
 function extractCorrectionPatch(text: string): {
   value?: string;
-  effectiveDate?: string;
+  effectiveDate?: string | null;
 } {
   const cleaned = text
     .trim()
@@ -432,9 +450,11 @@ function extractCorrectionPatch(text: string): {
     .replace(/\s*,?\s*actually\.?$/i, "")
     .trim();
   const isoMatch = ISO_DATE_IN_TEXT.exec(cleaned);
-  const patch: { value?: string; effectiveDate?: string } = {};
-  if (cleaned.length > 0) patch.value = cleaned;
-  if (isoMatch) patch.effectiveDate = isoMatch[0];
+  const patch: { value?: string; effectiveDate?: string | null } = {};
+  if (cleaned.length > 0) {
+    patch.value = cleaned;
+    patch.effectiveDate = isoMatch ? isoMatch[0] : null;
+  }
   return patch;
 }
 
