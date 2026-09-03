@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
   createConfirmedClaimSubmitter,
+  createDebriefApplyPresentation,
+  createDebriefBlockedPresentation,
+  speakVoicePresentation,
   type ConfirmedClaimMutation,
   type FieldVoiceBridge,
 } from "../../src/worker/voice-transport";
 import type { PendingVoiceConfirmation } from "../../src/worker/voice-transport";
 import type { ProjectEventV094 } from "../../src/domain/types";
+import type { ForecastDeltaV094 } from "../../src/engine/solver";
 
 function fakeEvent(id: string): ProjectEventV094 {
   return {
@@ -157,5 +161,69 @@ describe("submitConfirmedClaim", () => {
     );
     await submitConfirmedClaim(fakeMutation(), "deboard-v091", 1);
     expect(otherCallCount).toBe(0);
+  });
+});
+
+function realDeboardDelta(): ForecastDeltaV094 {
+  return {
+    fromSnapshotId: "deboard-v091-forecast-v1",
+    fromVersion: 1,
+    completionLikely: {
+      from: "2026-11-11",
+      to: "2026-11-13",
+      deltaWorkdays: 2,
+    },
+    shiftedActivityCount: 18,
+    criticalShiftCount: 18,
+    shiftedActivities: [],
+  };
+}
+
+describe("debrief spoken responses", () => {
+  it("a real preview delta produces the expected fixed-template sentence, never raw JSON", () => {
+    const presentation = createDebriefApplyPresentation({
+      projectId: "deboard-v091",
+      delta: realDeboardDelta(),
+    });
+    expect(presentation.status).toBe("RESULT");
+    expect(presentation.safeSummary).toContain("deboard-v091");
+    expect(presentation.safeSummary).toContain("18");
+    expect(presentation.safeSummary).toContain("2026-11-13");
+    expect(presentation.safeSummary).toContain("2026-11-11");
+    expect(presentation.safeSummary).not.toMatch(/[{}[\]]/);
+  });
+
+  it("blocked_result_spoken_not_silent: an OVERSIGHT_BLOCKED result produces a fixed allowlisted 'could not record, unresolved block' template, never silence or a raw error dump", () => {
+    const presentation = createDebriefBlockedPresentation({
+      projectId: "deboard-v091",
+      blockReason: "OVERSIGHT_BLOCKED",
+    });
+    expect(presentation.status).toBe("ERROR");
+    expect(presentation.safeSummary.length).toBeGreaterThan(0);
+    expect(presentation.safeSummary).toContain("deboard-v091");
+    expect(presentation.safeSummary.toLowerCase()).toContain("block");
+    expect(presentation.safeSummary).not.toMatch(/[{}[\]]/);
+  });
+
+  it("the blocked presentation still speaks through the existing, unmodified speakVoicePresentation allowlist", () => {
+    const presentation = createDebriefBlockedPresentation({
+      projectId: "deboard-v091",
+      blockReason: "OVERSIGHT_BLOCKED",
+    });
+    let spoken: string | undefined;
+    const platform = {
+      speechSynthesis: { speak: (utterance: unknown) => {
+        spoken = (utterance as { text?: string }).text;
+      } },
+      SpeechSynthesisUtterance: class {
+        text: string;
+        constructor(text: string) {
+          this.text = text;
+        }
+      } as unknown as new (text: string) => unknown,
+    };
+    const ok = speakVoicePresentation(presentation, platform);
+    expect(ok).toBe(true);
+    expect(spoken).toBe(presentation.safeSummary);
   });
 });

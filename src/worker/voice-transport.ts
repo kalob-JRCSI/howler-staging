@@ -10,6 +10,7 @@
 // reimplementing any of their logic, so there is exactly one tested voice behavior path, not two.
 
 import type { ProjectEventV094 } from "../domain/types";
+import type { ForecastDeltaV094 } from "../engine/solver";
 
 export type VoiceIntentKind =
   | "FORECAST_QUERY"
@@ -358,6 +359,55 @@ export function classifyWorkflowStateForVoice(
   )
     return workflowState;
   return "FAILED";
+}
+
+/**
+ * Task 12 (conversational PM layer): debrief-flavored spoken summaries. These extend the
+ * existing safe-template mapping alongside `createVoicePresentation` above — never bypassing the
+ * Task 18 allowlist. Only `VoicePresentation.safeSummary` ever reaches speech, exactly as today;
+ * this is a new allowlisted template, not an exception to the allowlist. Reads real
+ * `EVIDENCE_PREVIEW`/`EVIDENCE_APPLY_SHADOW` `delta` output into a fixed-shape sentence — no raw
+ * JSON, no free-text echo of the model's own words.
+ */
+export function createDebriefApplyPresentation(input: {
+  projectId: string;
+  delta: ForecastDeltaV094 | null;
+}): VoiceSpeechPresentation {
+  const safeSummary = input.delta
+    ? `${input.projectId} updated: ${String(input.delta.shiftedActivityCount)} activities shifted, completion now ${input.delta.completionLikely.to} instead of ${input.delta.completionLikely.from}.`
+    : `${input.projectId} updated. No schedule shift.`;
+  return {
+    status: "RESULT",
+    projectId: input.projectId,
+    actionKind: "EVIDENCE_APPLY_SHADOW",
+    summaryCode: "debrief_apply_succeeded",
+    safeSummary,
+    requiresConfirmation: false,
+  };
+}
+
+/**
+ * When a confirmed claim's apply is refused (most commonly `OVERSIGHT_BLOCKED`), the spoken
+ * response names that the item could not be recorded and a safe block category — never silence,
+ * never a raw problem/error dump. `blockReason` is an already-classified server code (e.g. the
+ * workflow's `problem.code`), never free text derived from the claim's own content.
+ */
+export function createDebriefBlockedPresentation(input: {
+  projectId: string;
+  blockReason?: string;
+}): VoiceSpeechPresentation {
+  const category =
+    input.blockReason === "OVERSIGHT_BLOCKED"
+      ? "an unresolved block"
+      : "a problem I can't clear yet";
+  return {
+    status: "ERROR",
+    projectId: input.projectId,
+    actionKind: "EVIDENCE_APPLY_SHADOW",
+    summaryCode: "debrief_blocked",
+    safeSummary: `I can't record that yet for ${input.projectId} — it touches ${category}.`,
+    requiresConfirmation: false,
+  };
 }
 
 export function speakVoicePresentation(
