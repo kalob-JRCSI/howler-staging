@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   resolveConversationalTurn,
   respondToConversationalConfirmation,
+  routeConversationalTurn,
 } from "../../src/operator/conversation-turn";
 import { createSession } from "../../src/operator/conversation";
 import { createConversationalClaimGateway } from "../../src/worker/voice-transport";
@@ -383,5 +384,176 @@ describe("respondToConversationalConfirmation", () => {
     );
     expect(outcome.outcome).toBe("APPLIED");
     expect(applyCalls).toHaveLength(1);
+  });
+});
+
+describe("routeConversationalTurn: field-test entry (correction / defer / uncertainty)", () => {
+  async function stateAMasonryClaim(deps: {
+    callModel: (prompt: string) => Promise<string>;
+    loadProjectModel: (projectId: string) => Promise<ProjectModelV094 | null>;
+    vocabulary: {
+      projectIds: string[];
+      aliases: { alias: string; projectId: string }[];
+    };
+    gateway: ReturnType<typeof createConversationalClaimGateway>;
+    captureSessionId: string;
+  }) {
+    const session = createSession("t");
+    return routeConversationalTurn("masonry started Friday", session, deps);
+  }
+
+  function statedClaimModel(): (prompt: string) => Promise<string> {
+    return () =>
+      Promise.resolve(
+        JSON.stringify({
+          spans: [
+            {
+              type: "CLAIM",
+              projectRef: "deboard-v091",
+              subjectRef: "masonry",
+              subjectText: "masonry",
+              claimType: "ACTIVITY_STARTED",
+              effectiveDate: "2026-08-28",
+              certainty: "STATED",
+            },
+          ],
+        }),
+      );
+  }
+
+  it("'Actually Tuesday' modifies the pending conversational claim rather than creating unrelated project truth", async () => {
+    const { bridge, previewCalls, applyCalls } = fakeBridge();
+    const gateway = createConversationalClaimGateway(
+      bridge,
+      () => "confirmation-1",
+      () => 1_000,
+    );
+    const deps = {
+      callModel: statedClaimModel(),
+      loadProjectModel: () => Promise.resolve(projectModel()),
+      vocabulary: { projectIds: ["deboard-v091"], aliases: [] },
+      gateway,
+      captureSessionId: "capture-1",
+    };
+    const first = await stateAMasonryClaim(deps);
+    expect(first.result.kind).toBe("AWAITING_CONFIRMATION");
+    expect(previewCalls).toHaveLength(1);
+
+    const second = await routeConversationalTurn(
+      "Actually Tuesday",
+      first.session,
+      deps,
+    );
+    // No ISO date in "Actually Tuesday" -- this deterministic layer cannot resolve a day name to
+    // a real date, so the correction clears the stale effectiveDate and the re-preview attempt
+    // correctly clarifies asking for one, rather than either keeping the stale date or fabricating
+    // a new one. Either way, no second, unrelated project mutation was ever submitted.
+    expect(second.result.kind).toBe("CORRECTED");
+    const correctedClaim = second.session.pendingClaims.find(
+      (c) => c.claimId === first.session.pendingClaims[0]?.claimId,
+    );
+    expect(correctedClaim?.value).toBe("Tuesday");
+    expect(correctedClaim?.effectiveDate).toBeUndefined();
+    expect(second.session.pendingClaims).toHaveLength(1); // same claim, not a duplicate
+    expect(applyCalls).toHaveLength(0);
+  });
+
+  it("'I'm not sure yet' defers the pending claim and applies nothing", async () => {
+    const { bridge, applyCalls } = fakeBridge();
+    const gateway = createConversationalClaimGateway(
+      bridge,
+      () => "confirmation-1",
+      () => 1_000,
+    );
+    const deps = {
+      callModel: statedClaimModel(),
+      loadProjectModel: () => Promise.resolve(projectModel()),
+      vocabulary: { projectIds: ["deboard-v091"], aliases: [] },
+      gateway,
+      captureSessionId: "capture-1",
+    };
+    const first = await stateAMasonryClaim(deps);
+    expect(first.result.kind).toBe("AWAITING_CONFIRMATION");
+
+    const second = await routeConversationalTurn(
+      "I'm not sure yet",
+      first.session,
+      deps,
+    );
+    expect(second.result.kind).toBe("DEFERRED");
+    const claimId = first.session.pendingClaims[0]?.claimId;
+    const deferredClaim = second.session.pendingClaims.find(
+      (c) => c.claimId === claimId,
+    );
+    expect(deferredClaim?.userConfirmationState).toBe("DEFERRED");
+    expect(applyCalls).toHaveLength(0);
+  });
+
+  it("a correction invalidates the stale preview so a duplicate-id re-preview call is not silently served the old confirmation", async () => {
+    const { bridge, previewCalls } = fakeBridge();
+    let confirmationSequence = 0;
+    const gateway = createConversationalClaimGateway(
+      bridge,
+      () => `confirmation-${String((confirmationSequence += 1))}`,
+      () => 1_000,
+    );
+    const deps = {
+      callModel: statedClaimModel(),
+      loadProjectModel: () => Promise.resolve(projectModel()),
+      vocabulary: { projectIds: ["deboard-v091"], aliases: [] },
+      gateway,
+      captureSessionId: "capture-1",
+    };
+    const first = await stateAMasonryClaim(deps);
+    expect(first.result.kind).toBe("AWAITING_CONFIRMATION");
+    const firstConfirmationId =
+      first.result.kind === "AWAITING_CONFIRMATION"
+        ? first.result.pending[0]?.confirmation.confirmationId
+        : undefined;
+
+    // A correction that DOES carry an ISO date should produce a fresh, distinct preview call.
+    const second = await routeConversationalTurn(
+      "No, 2026-09-01 actually",
+      first.session,
+      deps,
+    );
+    expect(second.result.kind).toBe("CORRECTED");
+    expect(previewCalls).toHaveLength(2); // original + corrected, never served from stale cache
+    if (second.result.kind === "CORRECTED" && second.result.pending) {
+      expect(second.result.pending.confirmation.confirmationId).not.toBe(
+        firstConfirmationId,
+      );
+    }
+  });
+
+  it("Task18 direct commands are untouched: routeConversationalTurn only recognizes correction/defer text patterns, never the commandKind vocabulary", async () => {
+    const { bridge } = fakeBridge();
+    const gateway = createConversationalClaimGateway(
+      bridge,
+      () => "confirmation-1",
+      () => 1_000,
+    );
+    // "forecast" is a real Task 18 commandKind trigger word -- routeConversationalTurn must not
+    // intercept it as a correction/defer; it should fall through to full interpretation (which,
+    // with no matching span from this fake model, clarifies rather than guessing).
+    const deps = {
+      callModel: () =>
+        Promise.resolve(
+          JSON.stringify({
+            spans: [{ type: "CLARIFICATION", message: "n/a" }],
+          }),
+        ),
+      loadProjectModel: () => Promise.resolve(projectModel()),
+      vocabulary: { projectIds: ["deboard-v091"], aliases: [] },
+      gateway,
+      captureSessionId: "capture-1",
+    };
+    const session = createSession("t");
+    const { result } = await routeConversationalTurn(
+      "forecast for deboard",
+      session,
+      deps,
+    );
+    expect(result.kind).toBe("CLARIFICATION");
   });
 });

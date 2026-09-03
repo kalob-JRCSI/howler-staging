@@ -417,7 +417,7 @@ export function resolveClaimEntity(
 // Correction, defer, and uncertainty behavior (Task 10).
 // ---------------------------------------------------------------------------------------------
 
-function claimMatchesLastReferencedEntity(
+export function claimMatchesLastReferencedEntity(
   claim: ConversationClaim,
   entity: ConversationSession["lastReferencedEntity"],
 ): boolean {
@@ -447,6 +447,10 @@ function extractCorrectionPatch(text: string): {
   const cleaned = text
     .trim()
     .replace(/^no[,]?\s*/i, "")
+    // Field-readiness blocker fix: "Actually Tuesday" (leading "Actually", no "No,") is a real
+    // correction phrasing the field test uses, distinct from the trailing "...actually." form
+    // already handled below -- both strip to the same bare value.
+    .replace(/^actually[,]?\s*/i, "")
     .replace(/\s*,?\s*actually\.?$/i, "")
     .trim();
   const isoMatch = ISO_DATE_IN_TEXT.exec(cleaned);

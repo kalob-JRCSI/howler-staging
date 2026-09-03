@@ -562,6 +562,7 @@ export function createConversationalClaimGateway(
     response: { affirmative: boolean },
     respondAt?: number,
   ) => Promise<ClaimApplyOutcome>;
+  invalidateClaim: (eventId: string) => void;
 } {
   const pendingByConfirmationId = new Map<string, PendingVoiceConfirmation>();
   const previewCache = new Map<string, Promise<ClaimPreviewOutcome>>();
@@ -640,7 +641,37 @@ export function createConversationalClaimGateway(
     return Promise.resolve({ outcome: "NOOP", reason: outcome.reason });
   }
 
-  return { previewClaim, respondToPendingClaim };
+  /**
+   * Field-readiness blocker fix: a natural-language correction to an already-previewed claim
+   * (Task 10's applyCorrection) patches the claim's `value`/`effectiveDate` in place — it never
+   * changes `claimId`, so a recompiled event keeps the same deterministic `voice-conversation-
+   * ${claimId}` id compileClaim always assigns. Without this, re-previewing the corrected claim
+   * would hit previewCache's existing entry for that same id and silently return the stale,
+   * pre-correction preview/confirmation instead of a fresh one. Also cancels any still-PENDING
+   * confirmation built from that stale preview, so a stray affirmative response for it correctly
+   * NOOPs instead of applying now-superseded content.
+   */
+  function invalidateClaim(eventId: string): void {
+    previewCache.delete(eventId);
+    for (const [confirmationId, confirmation] of pendingByConfirmationId) {
+      const snapshot = confirmation.canonicalEvidence as {
+        id?: unknown;
+      } | null;
+      if (
+        confirmation.state === "PENDING" &&
+        snapshot &&
+        typeof snapshot === "object" &&
+        snapshot.id === eventId
+      ) {
+        pendingByConfirmationId.set(confirmationId, {
+          ...confirmation,
+          state: "CANCELLED",
+        });
+      }
+    }
+  }
+
+  return { previewClaim, respondToPendingClaim, invalidateClaim };
 }
 
 export function voiceBrowserClient(
