@@ -8,6 +8,9 @@
 // VerificationState, or a mutationClass — those five decisions belong exclusively to the
 // deterministic compiler (src/operator/claim-compiler.ts), never to this type or its producer.
 
+import { normalizeProjectId, projectMention } from "../worker/voice-transport";
+import type { ProjectModelV094 } from "../domain/types";
+
 export type ConversationClaimType =
   // OBSERVED (past/already-occurred) — the compiler classifies every one of these FACT.
   | "ACTIVITY_STARTED"
@@ -216,4 +219,159 @@ export function confirmClaim(
  */
 export function endSession(_session: ConversationSession): void {
   return;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Deterministic project/entity resolution (Task 3).
+//
+// String/label matching against real, already-loaded model data — never a second LLM call, never
+// a guess. Zero or multiple candidate matches always fail closed to a `Clarification`; a resolved
+// id is structurally guaranteed to be a real key of `projectModel.activities`/`.constraints`
+// since it is only ever read out of those two records, never constructed.
+// ---------------------------------------------------------------------------------------------
+
+const ENTITY_STOPWORDS = new Set([
+  "the",
+  "a",
+  "an",
+  "and",
+  "or",
+  "of",
+  "in",
+  "on",
+  "at",
+  "to",
+  "is",
+  "are",
+  "was",
+  "were",
+  "that",
+  "this",
+  "it",
+  "its",
+  "for",
+  "with",
+  "has",
+  "have",
+  "had",
+]);
+
+function tokenize(text: string): string[] {
+  return normalizeProjectId(text)
+    .split(/\s+/)
+    .map((token) => token.replace(/[^a-z0-9]/g, ""))
+    .filter((token) => token.length >= 3 && !ENTITY_STOPWORDS.has(token));
+}
+
+/**
+ * Reuses `projectMention()` (`src/worker/voice-transport.ts`, unchanged) for the actual
+ * resolution decision. An explicit, non-empty `claim.projectRef` is never overridden by
+ * `session.activeProjectId` — the active project only ever fills in for a claim that names no
+ * project at all.
+ */
+export function resolveClaimProject(
+  claim: ConversationClaim,
+  session: ConversationSession,
+  knownProjectIds: string[],
+  aliases: { alias: string; projectId: string }[],
+): string | Clarification {
+  const explicit = claim.projectRef.trim();
+  if (explicit.length === 0) {
+    if (session.activeProjectId) return session.activeProjectId;
+    return { kind: "CLARIFICATION", message: "Which project do you mean?" };
+  }
+  const match = projectMention(explicit, {
+    projectIds: knownProjectIds,
+    aliases,
+  });
+  if (match) return match;
+
+  // Candidate list purely for the clarification message — the resolve/no-resolve decision
+  // itself belongs entirely to projectMention above, unchanged.
+  const normalized = normalizeProjectId(explicit);
+  const idCandidates = knownProjectIds.filter((id) =>
+    normalized.includes(normalizeProjectId(id)),
+  );
+  const aliasCandidates = aliases
+    .filter((alias) => normalized.includes(normalizeProjectId(alias.alias)))
+    .map((alias) => alias.projectId);
+  const candidates = Array.from(new Set([...idCandidates, ...aliasCandidates]));
+  return {
+    kind: "CLARIFICATION",
+    message:
+      candidates.length > 1
+        ? `Which project do you mean — ${candidates.join(" or ")}?`
+        : "Which project do you mean?",
+    ...(candidates.length > 0 ? { candidates } : {}),
+  };
+}
+
+/**
+ * Matches `claim.subjectText`/`subjectRef` case-insensitively against each activity's/
+ * constraint's `name`/`label`/`tags`. It is structurally impossible for this function to return
+ * an id absent from `projectModel.activities`/`.constraints`, since every candidate id is read
+ * directly from those two records, never synthesized.
+ */
+export function resolveClaimEntity(
+  claim: ConversationClaim,
+  projectModel: ProjectModelV094,
+): { type: "activity" | "constraint"; id: string } | Clarification {
+  const subjectTokens = new Set(
+    tokenize(`${claim.subjectText} ${claim.subjectRef}`),
+  );
+  if (subjectTokens.size === 0) {
+    return {
+      kind: "CLARIFICATION",
+      message: `I could not identify what "${claim.subjectText}" refers to.`,
+    };
+  }
+
+  const candidates: {
+    type: "activity" | "constraint";
+    id: string;
+    label: string;
+  }[] = [];
+
+  for (const activity of Object.values(projectModel.activities)) {
+    const candidateTokens = tokenize(
+      [activity.name, ...(activity.tags ?? [])].join(" "),
+    );
+    if (candidateTokens.some((token) => subjectTokens.has(token))) {
+      candidates.push({ type: "activity", id: activity.id, label: activity.name });
+    }
+  }
+  for (const constraint of Object.values(projectModel.constraints)) {
+    const candidateTokens = tokenize(constraint.label);
+    if (candidateTokens.some((token) => subjectTokens.has(token))) {
+      candidates.push({
+        type: "constraint",
+        id: constraint.id,
+        label: constraint.label,
+      });
+    }
+  }
+
+  if (candidates.length === 0) {
+    return {
+      kind: "CLARIFICATION",
+      message: `I could not find "${claim.subjectText}" in this project.`,
+    };
+  }
+  if (candidates.length > 1) {
+    return {
+      kind: "CLARIFICATION",
+      message: `That could mean more than one thing: ${candidates
+        .map((candidate) => candidate.label)
+        .join(", ")}.`,
+      candidates: candidates.map((candidate) => candidate.label),
+    };
+  }
+  const only = candidates[0];
+  if (!only) {
+    return {
+      kind: "CLARIFICATION",
+      message: `I could not find "${claim.subjectText}" in this project.`,
+    };
+  }
+  return { type: only.type, id: only.id };
 }

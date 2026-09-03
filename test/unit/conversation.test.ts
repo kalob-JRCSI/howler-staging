@@ -7,9 +7,74 @@ import {
   createSession,
   deferClaim,
   endSession,
+  resolveClaimEntity,
+  resolveClaimProject,
   type ConversationClaim,
   type ConversationSession,
 } from "../../src/operator/conversation";
+import type { ProjectModelV094 } from "../../src/domain/types";
+
+function testProjectModel(
+  overrides: Partial<ProjectModelV094> = {},
+): ProjectModelV094 {
+  return {
+    projectId: "deboard-v091",
+    revision: 1,
+    name: "DeBoard",
+    projectType: "RESIDENTIAL",
+    timezone: "UTC",
+    forecastAnchorDate: "2026-08-26",
+    calendar: { workingWeekdays: [1, 2, 3, 4, 5], holidays: [] },
+    sources: {},
+    activities: {
+      masonry: {
+        id: "masonry",
+        name: "CMU foundation walls",
+        phase: "Foundation",
+        state: "NOT_STARTED",
+        duration: { optimistic: 1, likely: 2, conservative: 3, sourceIds: [] },
+        constraintIds: ["masonry-material", "masonry-trade"],
+        sourceIds: [],
+        tags: ["masonry", "wall", "cmu"],
+      },
+      framing: {
+        id: "framing",
+        name: "Structural framing",
+        phase: "Framing",
+        state: "NOT_STARTED",
+        duration: { optimistic: 1, likely: 2, conservative: 3, sourceIds: [] },
+        constraintIds: [],
+        sourceIds: [],
+        tags: ["framing", "wall", "lumber"],
+      },
+    },
+    constraints: {
+      "masonry-material": {
+        id: "masonry-material",
+        activityId: "masonry",
+        type: "MATERIAL",
+        label: "CMU block package on site",
+        state: "UNVERIFIED",
+        hard: true,
+        sourceIds: [],
+        verification: "UNVERIFIED",
+      },
+      "carpet-decision": {
+        id: "carpet-decision",
+        activityId: "flooring",
+        type: "DECISION",
+        label: "Client carpet selection decision",
+        state: "UNVERIFIED",
+        hard: false,
+        sourceIds: [],
+        verification: "UNVERIFIED",
+      },
+    },
+    dependencies: {},
+    eventLedger: [],
+    ...overrides,
+  };
+}
 
 function validClaim(
   overrides: Partial<ConversationClaim> = {},
@@ -18,7 +83,7 @@ function validClaim(
     claimId: "claim-1",
     sessionId: "session-1",
     projectRef: "deboard",
-    subjectRef: "masonry",
+    subjectRef: "",
     subjectText: "the masonry crew",
     claimType: "ACTIVITY_STARTED",
     value: "Friday",
@@ -190,5 +255,123 @@ describe("ConversationSession session", () => {
     const session = createSession("2026-09-03T08:00:00.000Z");
     const result = endSession(session) as unknown;
     expect(result).toBeUndefined();
+  });
+});
+
+describe("resolve project", () => {
+  const knownProjectIds = ["deboard-v091", "carver-001"];
+  const aliases = [{ alias: "the boards project", projectId: "deboard-v091" }];
+
+  it("resolve_project_explicit: an explicit project mention resolves regardless of activeProjectId", () => {
+    const session = { ...createSession("t"), activeProjectId: "carver-001" };
+    const claim = validClaim({ projectRef: "the deboard-v091 project" });
+    const result = resolveClaimProject(
+      claim,
+      session,
+      knownProjectIds,
+      aliases,
+    );
+    expect(result).toBe("deboard-v091");
+  });
+
+  it("resolve_project_inherited: an empty projectRef inherits session.activeProjectId", () => {
+    const session = { ...createSession("t"), activeProjectId: "carver-001" };
+    const claim = validClaim({ projectRef: "" });
+    const result = resolveClaimProject(
+      claim,
+      session,
+      knownProjectIds,
+      aliases,
+    );
+    expect(result).toBe("carver-001");
+  });
+
+  it("an empty projectRef with no active project clarifies", () => {
+    const session = createSession("t");
+    const claim = validClaim({ projectRef: "" });
+    const result = resolveClaimProject(
+      claim,
+      session,
+      knownProjectIds,
+      aliases,
+    );
+    expect(
+      typeof result === "object" && result.kind === "CLARIFICATION",
+    ).toBe(true);
+  });
+
+  it("resolve_project_ambiguous: two plausible project matches with no active context clarifies", () => {
+    const session = createSession("t");
+    const claim = validClaim({ projectRef: "the project" });
+    const result = resolveClaimProject(claim, session, knownProjectIds, [
+      { alias: "the project", projectId: "deboard-v091" },
+      { alias: "the project", projectId: "carver-001" },
+    ]);
+    expect(
+      typeof result === "object" && result.kind === "CLARIFICATION",
+    ).toBe(true);
+  });
+
+  it("never overrides an explicit non-matching project mention with the active one", () => {
+    const session = { ...createSession("t"), activeProjectId: "carver-001" };
+    const claim = validClaim({ projectRef: "some unknown project" });
+    const result = resolveClaimProject(
+      claim,
+      session,
+      knownProjectIds,
+      aliases,
+    );
+    expect(
+      typeof result === "object" && result.kind === "CLARIFICATION",
+    ).toBe(true);
+  });
+});
+
+describe("resolve entity", () => {
+  it("resolves an entity phrase matching one activity via tags", () => {
+    const model = testProjectModel();
+    const claim = validClaim({ subjectText: "the masonry crew" });
+    const result = resolveClaimEntity(claim, model);
+    expect(result).toEqual({ type: "activity", id: "masonry" });
+  });
+
+  it("resolves an entity phrase matching one constraint via its label", () => {
+    const model = testProjectModel();
+    const claim = validClaim({ subjectText: "the block package" });
+    const result = resolveClaimEntity(claim, model);
+    expect(result).toEqual({ type: "constraint", id: "masonry-material" });
+  });
+
+  it("resolve_entity_unknown_rejected: a phrase matching nothing real never yields a fabricated ID", () => {
+    const model = testProjectModel();
+    const claim = validClaim({ subjectText: "the flying saucer astronomy club" });
+    const result = resolveClaimEntity(claim, model);
+    expect(
+      typeof result === "object" &&
+        "kind" in result &&
+        result.kind === "CLARIFICATION",
+    ).toBe(true);
+  });
+
+  it("resolve_entity_ambiguous_rejected: a phrase matching two activities clarifies and names both", () => {
+    const model = testProjectModel();
+    const claim = validClaim({ subjectText: "the wall crew" });
+    const result = resolveClaimEntity(claim, model);
+    expect(
+      typeof result === "object" &&
+        "kind" in result &&
+        result.kind === "CLARIFICATION",
+    ).toBe(true);
+    if (typeof result === "object" && "kind" in result) {
+      expect(result.candidates?.join(" ")).toMatch(/CMU foundation walls/);
+      expect(result.candidates?.join(" ")).toMatch(/Structural framing/);
+    }
+  });
+
+  it("resolves a constraint by label", () => {
+    const model = testProjectModel();
+    const claim = validClaim({ subjectText: "the carpet decision" });
+    const result = resolveClaimEntity(claim, model);
+    expect(result).toEqual({ type: "constraint", id: "carpet-decision" });
   });
 });
