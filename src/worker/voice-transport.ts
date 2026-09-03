@@ -9,6 +9,8 @@
 // thing actually served to the browser; it calls these functions directly rather than
 // reimplementing any of their logic, so there is exactly one tested voice behavior path, not two.
 
+import type { ProjectEventV094 } from "../domain/types";
+
 export type VoiceIntentKind =
   | "FORECAST_QUERY"
   | "FORECAST_HEALTH_QUERY"
@@ -415,6 +417,96 @@ export interface FieldVoiceBridge {
     projectId: string,
     kind: string,
   ): Promise<{ workflowState: string }>;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Task 11 (conversational PM layer): canonical evidence preview/apply integration.
+//
+// `ConfirmedClaimMutation` is structurally identical to `src/operator/claim-compiler.ts`'s
+// `ProposedMutation` ({ event: ProjectEventV094; mutationClass: "FACT" | "COMMITMENT" }) but is
+// declared locally rather than imported from there: claim-compiler.ts imports from
+// conversation.ts, which imports `projectMention`/`normalizeProjectId` from *this* file, so an
+// import of claim-compiler.ts here would be circular. TypeScript's structural typing means a
+// real `ProposedMutation` value is assignable to this type without any import at all.
+// ---------------------------------------------------------------------------------------------
+
+export interface ConfirmedClaimMutation {
+  event: ProjectEventV094;
+  mutationClass: "FACT" | "COMMITMENT";
+}
+
+/**
+ * `submitConfirmedClaim` constructs and submits exactly the same `IntentV1` shape a hand-typed
+ * evidence-textarea submission would, through the exact same canonical path: it never builds its
+ * own HTTP request or reimplements `buildIntentPayload`/the idempotency kernel — every request is
+ * made via the caller-supplied `FieldVoiceBridge`'s `submitPreview`/`submitApply`, the same
+ * functions the manual evidence UI buttons and Task 18's voice transport already call, so the
+ * conversational path can never diverge from the canonical one. `submitPreview` always runs
+ * first; `submitApply` only runs after building and immediately affirmatively answering a
+ * `PendingVoiceConfirmation` via the existing `createPendingVoiceConfirmation`/
+ * `respondToVoiceConfirmation` machinery (Task 18) — this mirrors the existing
+ * `EVIDENCE_PREVIEW`/`EVIDENCE_APPLY_SHADOW` two-step already used by the manual UI. The claim
+ * reaching this function is only ever `CONFIRMED` (compileClaim refuses to compile any other
+ * state), so the "explicit second confirmation" the two-step design calls for already happened at
+ * the conversation layer before a `ProposedMutation` could exist at all.
+ *
+ * Duplicate-confirmation protection: this factory keeps a small in-closure cache keyed by the
+ * mutation's own `event.id`, so calling `submitConfirmedClaim` a second time for the identical
+ * confirmed claim reuses the first call's in-flight/completed promise verbatim — zero additional
+ * `submitPreview`/`submitApply` calls, not a new idempotency mechanism, just deterministic reuse
+ * scoped to one already-fully-compiled claim (which, unlike a manual form edit, never changes
+ * content between submissions).
+ */
+export function createConfirmedClaimSubmitter(
+  bridge: FieldVoiceBridge,
+  makeId: () => string,
+  now: () => number = Date.now,
+): {
+  submitConfirmedClaim(
+    mutation: ConfirmedClaimMutation,
+    projectId: string,
+    expectedProjectRevision: number,
+  ): Promise<{ workflowState: string }>;
+} {
+  const dedupe = new Map<string, Promise<{ workflowState: string }>>();
+
+  function submitConfirmedClaim(
+    mutation: ConfirmedClaimMutation,
+    projectId: string,
+    expectedProjectRevision: number,
+  ): Promise<{ workflowState: string }> {
+    const key = mutation.event.id;
+    const existing = dedupe.get(key);
+    if (existing) return existing;
+
+    const promise = bridge
+      .submitPreview(projectId, mutation.event, expectedProjectRevision)
+      .then(() => {
+        const confirmation = createPendingVoiceConfirmation({
+          confirmationId: makeId(),
+          projectId,
+          evidenceSnapshot: mutation.event,
+          captureSessionId: `conversation-${key}`,
+          createdAt: now(),
+          expectedProjectRevision,
+        });
+        const outcome = respondToVoiceConfirmation(
+          confirmation,
+          { affirmative: true },
+          now(),
+        );
+        if (outcome.outcome !== "CONSUMED") {
+          throw new Error(
+            `submitConfirmedClaim: confirmation could not be consumed (${outcome.outcome})`,
+          );
+        }
+        return bridge.submitApply(outcome.confirmation);
+      });
+    dedupe.set(key, promise);
+    return promise;
+  }
+
+  return { submitConfirmedClaim };
 }
 
 export function voiceBrowserClient(
