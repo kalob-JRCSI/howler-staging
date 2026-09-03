@@ -346,6 +346,22 @@ describe("compileClaim", () => {
     expect(result.event.impactSeedActivityIds).toEqual(["masonry"]);
   });
 
+  it("field-readiness blocker: the compiled event itself carries mutationClass, not only the sibling ProposedMutation field — the scoped oversight gate reads event.mutationClass, and would silently see undefined without this", () => {
+    const model = projectModel();
+    const result = compileClaim(
+      confirmedClaim({
+        claimType: "ACTIVITY_STARTED",
+        subjectText: "masonry",
+        effectiveDate: "2026-08-28",
+      }),
+      model,
+      session,
+    );
+    expect("event" in result).toBe(true);
+    if (!("event" in result)) return;
+    expect(result.event.mutationClass).toBe("FACT");
+  });
+
   it("compiles ACTIVITY_COMPLETED against an activity into SET_ACTUAL_FINISH + SET_ACTIVITY_STATE", () => {
     const model = decisionProjectModel();
     const result = compileClaim(

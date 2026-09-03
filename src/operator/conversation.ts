@@ -202,10 +202,28 @@ export function deferClaim(
   }));
 }
 
+/**
+ * Field-readiness blocker fix: a `TENTATIVE` claim ("I think Friday but don't mark it yet") must
+ * never reach `CONFIRMED` through this function, even if a caller mistakenly invokes it directly
+ * — the design's own invariant is that a `TENTATIVE` claim is structurally incapable of reaching
+ * `compileClaim`'s provenance step. Refuses with a `Clarification` instead of silently no-op'ing,
+ * so a caller that expected a confirmation to happen finds out it didn't.
+ */
 export function confirmClaim(
   session: ConversationSession,
   claimId: string,
-): ConversationSession {
+): ConversationSession | Clarification {
+  const target = session.pendingClaims.find(
+    (claim) => claim.claimId === claimId,
+  );
+  if (target && target.certainty === "TENTATIVE") {
+    return {
+      kind: "CLARIFICATION",
+      message:
+        "That was only a tentative note — say it again more definitely to record it.",
+      relatedClaimId: claimId,
+    };
+  }
   return replaceClaim(session, claimId, (claim) => ({
     ...claim,
     userConfirmationState: "CONFIRMED",

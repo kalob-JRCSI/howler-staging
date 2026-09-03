@@ -448,6 +448,13 @@ function compileClaimBody(
     mutations: [sourceMutation, ...mutations],
     payload: { claimType: claim.claimType, subjectText: claim.subjectText },
     note: `Voice conversation claim ${claim.claimId}`,
+    // Field-readiness blocker fix: this must also live on the event itself, not only on the
+    // sibling ProposedMutation.mutationClass field below -- the scoped oversight gate
+    // (src/operator/workflow.ts's isScopedFactBypass) reads event.mutationClass once this event
+    // reaches the canonical evidence-apply path, and would otherwise always see it as absent
+    // (defaulting to COMMITMENT semantics), so no conversational FACT claim would ever actually
+    // get the FACT bypass in production.
+    mutationClass,
   };
 
   return { event, mutationClass };

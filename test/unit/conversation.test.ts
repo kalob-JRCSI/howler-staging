@@ -253,7 +253,11 @@ describe("ConversationSession session", () => {
       }),
     );
     const confirmed = confirmClaim(session, "claim-z");
-    expect(confirmed.pendingClaims[0]?.userConfirmationState).toBe("CONFIRMED");
+    expect("kind" in confirmed).toBe(false);
+    if ("kind" in confirmed) return;
+    expect(confirmed.pendingClaims[0]?.userConfirmationState).toBe(
+      "CONFIRMED",
+    );
   });
 
   it("endSession is a no-op that returns nothing — there is no module-level state to survive it", () => {
@@ -474,6 +478,44 @@ describe("uncertainty", () => {
     // AWAITING_CONFIRMATION/CONFIRMED, so it can never reach compileClaim's provenance step.
     expect(session.pendingClaims[0]?.certainty).toBe("TENTATIVE");
     expect(session.pendingClaims[0]?.userConfirmationState).toBe("UNCONFIRMED");
+  });
+
+  it("field-readiness blocker: confirmClaim refuses to directly confirm a TENTATIVE claim, even if a caller mistakenly calls it — the claim stays UNCONFIRMED, not flipped to CONFIRMED", () => {
+    let session = createSession("t");
+    session = addClaim(
+      session,
+      validClaim({
+        claimId: "claim-tentative",
+        certainty: "TENTATIVE",
+        userConfirmationState: "UNCONFIRMED",
+      }),
+    );
+    const result = confirmClaim(session, "claim-tentative");
+    expect("kind" in result).toBe(true);
+    if ("kind" in result) return;
+    expect(
+      result.pendingClaims.find((c) => c.claimId === "claim-tentative")
+        ?.userConfirmationState,
+    ).toBe("UNCONFIRMED");
+  });
+
+  it("confirmClaim still confirms a STATED claim normally", () => {
+    let session = createSession("t");
+    session = addClaim(
+      session,
+      validClaim({
+        claimId: "claim-stated",
+        certainty: "STATED",
+        userConfirmationState: "AWAITING_CONFIRMATION",
+      }),
+    );
+    const result = confirmClaim(session, "claim-stated");
+    expect("kind" in result).toBe(false);
+    if ("kind" in result) return;
+    expect(
+      result.pendingClaims.find((c) => c.claimId === "claim-stated")
+        ?.userConfirmationState,
+    ).toBe("CONFIRMED");
   });
 });
 
