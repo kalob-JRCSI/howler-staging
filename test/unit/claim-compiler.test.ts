@@ -435,6 +435,55 @@ describe("compileClaim", () => {
     expect(result.mutationClass).toBe("FACT");
   });
 
+  it("field-readiness blocker: a negative-polarity CONDITION_OBSERVED ('the crew never showed up') clarifies instead of asserting SATISFIED", () => {
+    const model = projectModel();
+    const result = compileClaim(
+      confirmedClaim({
+        claimType: "CONDITION_OBSERVED",
+        subjectText: "block package",
+        value: "the crew never showed up",
+      }),
+      model,
+      session,
+    );
+    expect("kind" in result).toBe(true);
+  });
+
+  it("field-readiness blocker: 'not delivered yet' as a CONDITION_OBSERVED value clarifies rather than marking the constraint SATISFIED", () => {
+    const model = projectModel();
+    const result = compileClaim(
+      confirmedClaim({
+        claimType: "CONDITION_OBSERVED",
+        subjectText: "block package",
+        value: "not delivered yet",
+      }),
+      model,
+      session,
+    );
+    expect("kind" in result).toBe(true);
+  });
+
+  it("a plain positive CONDITION_OBSERVED value still compiles to SATISFIED normally", () => {
+    const model = projectModel();
+    const result = compileClaim(
+      confirmedClaim({
+        claimType: "CONDITION_OBSERVED",
+        subjectText: "block package",
+        value: "the crew is on site",
+      }),
+      model,
+      session,
+    );
+    expect("event" in result).toBe(true);
+    if (!("event" in result)) return;
+    const constraintOp = result.event.mutations.find(
+      (m) => m.op === "SET_CONSTRAINT_STATE",
+    );
+    expect(constraintOp && "state" in constraintOp ? constraintOp.state : undefined).toBe(
+      "SATISFIED",
+    );
+  });
+
   it("compiles SCHEDULE_CHANGED into a COMMITMENT-class SET_SCHEDULE_LOCK mutation", () => {
     const model = projectModel();
     const result = compileClaim(

@@ -488,6 +488,9 @@ async function handle(request: Request, env: Env): Promise<Response> {
     if (!raw || typeof raw !== "object" || !raw.project) {
       throw new HttpError(400, "import requires a project body");
     }
+    if (raw.dryRun !== undefined && typeof raw.dryRun !== "boolean") {
+      throw new HttpError(400, "import dryRun must be a boolean when present");
+    }
     const model = raw.project as ProjectModelV094;
     if (model.projectId !== targetProjectId) {
       throw new HttpError(

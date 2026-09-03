@@ -156,6 +156,25 @@ describe("POST /v1/projects/:id/import", () => {
     expect(row).toBeNull();
   });
 
+  it("field-readiness blocker: a malformed (non-boolean) dryRun value is rejected with 400 and creates nothing, never silently treated as a real create", async () => {
+    const fixture = stewartFixture("malformed-dryrun-v01");
+    const response = await worker.fetch(
+      jsonRequest("POST", "/v1/projects/malformed-dryrun-v01/import", {
+        ...fixture,
+        dryRun: "true", // a string, not a boolean -- must not be silently coerced either way
+      }),
+      adminEnv(),
+    );
+    expect(response.status).toBe(400);
+
+    const row = await env.HOWLER_DB.prepare(
+      "SELECT project_id FROM projects WHERE project_id = ?",
+    )
+      .bind("malformed-dryrun-v01")
+      .first();
+    expect(row).toBeNull();
+  });
+
   it("import_failure_no_partial_write: a payload that fails validateProjectModel leaves zero rows for that ID", async () => {
     const fixture = stewartFixture("broken-v01");
     const invalidProject = { ...(fixture.project as Record<string, unknown>) };

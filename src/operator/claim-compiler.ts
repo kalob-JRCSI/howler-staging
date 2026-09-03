@@ -230,6 +230,21 @@ function resolveImpactSeedActivityIds(
   return constraint ? [constraint.activityId] : [];
 }
 
+/** Field-readiness blocker fix: CONDITION_OBSERVED must not always mean SATISFIED. "The crew is
+ * on site" and "the crew never showed up" are both observations, but only the first satisfies the
+ * constraint -- a negative/unresolved observation must fail closed to a Clarification, never
+ * silently assert the opposite of what was said. Deliberately conservative (a fixed negation-word
+ * list on the claim's own free text), matching this file's own "never guess, fail closed" policy
+ * elsewhere: a false negative here (missing an unusual negation phrasing) just asks a clarifying
+ * question, which is always safe; the alternative -- wrongly marking something SATISFIED -- is not. */
+const NEGATION_PATTERN =
+  /\b(not|isn'?t|didn'?t|hasn'?t|haven'?t|never|no|nobody|none|missing|absent|failed|fail|cancell?ed|delayed|late)\b/i;
+
+function isNegativePolarityObservation(claim: ConversationClaim): boolean {
+  const text = `${claim.value ?? ""} ${claim.subjectText}`.trim();
+  return NEGATION_PATTERN.test(text);
+}
+
 function buildMutations(
   claim: ConversationClaim,
   entity: ResolvedClaimEntity,
@@ -296,6 +311,13 @@ function buildMutations(
     }
     case "CONDITION_OBSERVED": {
       if (entity.type !== "constraint") return wrongEntityType("a constraint");
+      if (isNegativePolarityObservation(claim)) {
+        return {
+          kind: "CLARIFICATION",
+          message:
+            "That sounds like the condition was NOT met — what should I record?",
+        };
+      }
       return [
         {
           op: "SET_CONSTRAINT_STATE",
