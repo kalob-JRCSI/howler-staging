@@ -366,8 +366,12 @@ export function resolveClaimEntity(
   }[] = [];
 
   for (const activity of Object.values(projectModel.activities)) {
+    // Field-readiness blocker fix: also match the activity's own id, not just its display name/
+    // tags -- a real activity like DeBoard's "masonry" (display name "CMU foundation walls", no
+    // tags at all) is exactly what a PM says out loud, and previously had no way to resolve at
+    // all short of literally saying "CMU foundation walls".
     const candidateTokens = tokenize(
-      [activity.name, ...(activity.tags ?? [])].join(" "),
+      [activity.id, activity.name, ...(activity.tags ?? [])].join(" "),
     );
     if (candidateTokens.some((token) => subjectTokens.has(token))) {
       candidates.push({
@@ -378,7 +382,7 @@ export function resolveClaimEntity(
     }
   }
   for (const constraint of Object.values(projectModel.constraints)) {
-    const candidateTokens = tokenize(constraint.label);
+    const candidateTokens = tokenize(`${constraint.id} ${constraint.label}`);
     if (candidateTokens.some((token) => subjectTokens.has(token))) {
       candidates.push({
         type: "constraint",
@@ -417,16 +421,27 @@ export function resolveClaimEntity(
 // Correction, defer, and uncertainty behavior (Task 10).
 // ---------------------------------------------------------------------------------------------
 
+/**
+ * Field-readiness blocker fix: this previously required the entity's whole `id`/`label` to appear
+ * as a literal substring of the claim's subject text -- which holds for a hand-typed fixture like
+ * subjectText "masonry schedule" against id "masonry", but not for a naturally-phrased utterance
+ * like subjectText "DeBoard foundation" (the claim that started the real DeBoard "masonry"
+ * activity, display name "CMU foundation walls") -- neither the id nor the full label is a
+ * substring of that subject, even though "foundation" plainly refers to the same activity. Now
+ * uses the same token-overlap matching `resolveClaimEntity` already uses to resolve entities in
+ * the first place, so the two stay consistent: whatever `resolveClaimEntity` was willing to match
+ * a claim to, this can recognize a later correction/defer utterance referring back to.
+ */
 export function claimMatchesLastReferencedEntity(
   claim: ConversationClaim,
   entity: ConversationSession["lastReferencedEntity"],
 ): boolean {
   if (!entity) return false;
-  const subject = `${claim.subjectText} ${claim.subjectRef}`.toLowerCase();
-  return (
-    subject.includes(entity.id.toLowerCase()) ||
-    subject.includes(entity.label.toLowerCase())
+  const subjectTokens = new Set(
+    tokenize(`${claim.subjectText} ${claim.subjectRef}`),
   );
+  const entityTokens = tokenize(`${entity.id} ${entity.label}`);
+  return entityTokens.some((token) => subjectTokens.has(token));
 }
 
 const ISO_DATE_IN_TEXT = /\d{4}-\d{2}-\d{2}/;

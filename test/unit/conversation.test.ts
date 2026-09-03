@@ -339,6 +339,30 @@ describe("resolve entity", () => {
     expect(result).toEqual({ type: "activity", id: "masonry" });
   });
 
+  it("field-readiness blocker: resolves an entity phrase matching an activity's own id, even when its name/tags don't literally contain that word — the real DeBoard 'masonry' activity is named 'CMU foundation walls' with no tags at all", () => {
+    const model = testProjectModel({
+      activities: {
+        masonry: {
+          id: "masonry",
+          name: "CMU foundation walls",
+          phase: "Foundation",
+          state: "NOT_STARTED",
+          duration: {
+            optimistic: 1,
+            likely: 2,
+            conservative: 3,
+            sourceIds: [],
+          },
+          constraintIds: [],
+          sourceIds: [],
+        },
+      },
+    });
+    const claim = validClaim({ subjectText: "masonry" });
+    const result = resolveClaimEntity(claim, model);
+    expect(result).toEqual({ type: "activity", id: "masonry" });
+  });
+
   it("resolves an entity phrase matching one constraint via its label", () => {
     const model = testProjectModel();
     const claim = validClaim({ subjectText: "the block package" });

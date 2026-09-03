@@ -523,7 +523,11 @@ describe("transport adapters do not duplicate operator mutation logic", () => {
     expect(countOccurrences(source, "commitShadowTransition(")).toBe(1);
     expect(countOccurrences(source, "commitForecastTransition(")).toBe(1);
     expect(countOccurrences(source, "runOversightReview(")).toBe(0);
-    // The new routes call the operator executor directly, exactly once each.
-    expect(countOccurrences(source, "executeWorkflow(")).toBe(2);
+    // The new routes call the operator executor directly, exactly once each. Field-readiness
+    // blocker fix: buildServerFieldVoiceBridge (the conversational path's server-side
+    // FieldVoiceBridge, used only by POST /v1/projects/:id/conversation/turn) adds the third --
+    // it constructs the same IntentV1 shape every other route validates and executes it through
+    // this exact same canonical executor, never a second execution path.
+    expect(countOccurrences(source, "executeWorkflow(")).toBe(3);
   });
 });

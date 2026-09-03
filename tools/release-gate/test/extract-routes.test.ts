@@ -28,6 +28,11 @@ const ACCEPTED_MUTATION_ROUTES = [
   "SEGMENTS(len=5){3=events,4=preview}",
   "SEGMENTS(len=5){3=events,4=apply-shadow}",
   "SEGMENTS(len=5){3=events,4=publish}",
+  // Field-readiness blocker fix: POST /v1/projects/:id/conversation/turn — the first real
+  // production entry point into the conversational PM path. Not a new mutation mechanism: it
+  // constructs the same IntentV1 shape POST /v1/intents validates and executes it through the
+  // exact same canonical executeWorkflow, via buildServerFieldVoiceBridge in src/worker/index.ts.
+  "SEGMENTS(len=5){3=conversation,4=turn}",
 ];
 
 describe("extractMutationRoutes: fixture behavior", () => {

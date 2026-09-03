@@ -25,6 +25,24 @@ import type {
   WorkflowExecutorDeps,
 } from "../operator/workflow";
 import { buildIntentSubmissionResponse } from "../operator/result";
+import {
+  routeConversationalTurn,
+  type ConversationalTurnDeps,
+} from "../operator/conversation-turn";
+import { createSession } from "../operator/conversation";
+import type { ConversationSession } from "../operator/conversation";
+import {
+  createConversationalClaimGateway,
+  respondToVoiceConfirmation,
+} from "./voice-transport";
+import type {
+  FieldVoiceBridge,
+  PendingVoiceConfirmation,
+} from "./voice-transport";
+import {
+  buildFieldTestCallModel,
+  fieldTestAliasesFor,
+} from "./conversation-field-model";
 
 // Engine/admin-page compatibility version. Distinct from GET /health's own `version` field, which
 // buildHealthReport (src/worker/health.ts) now owns and reports as "0.9.5" with an additive
@@ -339,6 +357,217 @@ function buildWorkflowExecutorDeps(
     resultIds: { next: () => crypto.randomUUID() },
     authorization,
   };
+}
+
+/** Maps an `ExecuteWorkflowResult` to the `{workflowState}` shape `FieldVoiceBridge.submitPreview`/
+ * `.submitApply` return -- the same convention `classifyWorkflowStateForVoice` already reads
+ * elsewhere. The three structured-conflict outcomes carry no `run` of their own; they cannot occur
+ * here in practice (this bridge always mints a fresh UUID intentId/idempotencyKey per call, never
+ * client-supplied), but are mapped to "FAILED" rather than left unhandled, matching this whole
+ * codebase's fail-closed convention. */
+function workflowStateFromOutcome(outcome: ExecuteWorkflowResult): {
+  workflowState: string;
+} {
+  switch (outcome.outcome) {
+    case "COMPLETED":
+      return { workflowState: outcome.run.state };
+    case "INTERRUPTED":
+      return { workflowState: outcome.run.state };
+    case "IDEMPOTENCY_KEY_REUSE":
+    case "INTENT_ID_REUSE":
+    case "CONCURRENT_RESUME_LOST":
+      return { workflowState: "FAILED" };
+  }
+}
+
+/**
+ * Field-readiness blocker fix: a real, server-side `FieldVoiceBridge` for
+ * `createConversationalClaimGateway` to submit through -- `submitPreview`/`submitApply` construct
+ * exactly the same `IntentV1` shape `POST /v1/intents` validates and execute it through the exact
+ * same canonical `executeWorkflow` this worker already uses for every other mutating route: no
+ * second execution path, no reimplemented oversight/revision/idempotency logic. Every intentId/
+ * idempotencyKey is minted fresh server-side per call, never accepted from the request -- nothing
+ * about intent identity is client-controlled. `listProjectIds`/`listResumableWorkflows`/
+ * `getEvidenceFields`/`submitQuery`/`resumeWorkflow` are never called by
+ * `createConversationalClaimGateway` (confirmed: it only ever calls `submitPreview`/
+ * `submitApply`), so they reject rather than silently returning a placeholder if anything ever
+ * calls them unexpectedly.
+ */
+/** Reformats a sha256 digest's first 32 hex chars into UUID shape (8-4-4-4-12) -- intentId only
+ * has to match `UUID_PATTERN`, never has to be random, so a deterministic value derived from a
+ * stable seed is exactly as valid as `crypto.randomUUID()` and lets a genuine retry be recognized
+ * as the same logical intent instead of minting a new one every time. */
+async function deterministicUuid(seed: string): Promise<string> {
+  const hex = await sha256Hex(seed);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
+/**
+ * Field-readiness blocker fix: a real, server-side `FieldVoiceBridge` for
+ * `createConversationalClaimGateway` to submit through -- `submitPreview`/`submitApply` construct
+ * exactly the same `IntentV1` shape `POST /v1/intents` validates and execute it through the exact
+ * same canonical `executeWorkflow` this worker already uses for every other mutating route: no
+ * second execution path, no reimplemented oversight/revision logic. `listProjectIds`/
+ * `listResumableWorkflows`/`getEvidenceFields`/`submitQuery`/`resumeWorkflow` are never called by
+ * `createConversationalClaimGateway` (confirmed: it only ever calls `submitPreview`/
+ * `submitApply`), so they reject rather than silently returning a placeholder if anything ever
+ * calls them unexpectedly.
+ *
+ * `idSeed`, when given, derives both `intentId` and `idempotencyKey` deterministically instead of
+ * minting fresh random ones -- required for `submitApply`, whose caller (the conversation/turn
+ * route's confirm handling, below) reconstructs a `PendingVoiceConfirmation` fresh on every
+ * request (Cloudflare Workers are stateless between requests; nothing here persists a confirmation
+ * in server memory across the request boundary). Without a deterministic id, a genuine duplicate
+ * confirmation request would mint a brand new intentId/idempotencyKey and apply a second time;
+ * with one derived from the confirmation's own stable `confirmationId`, `executeWorkflow`'s own
+ * existing idempotency-key mechanism (`repo.claimIntent`, used by every other mutating route
+ * already) recognizes the replay and returns the cached result instead of re-executing -- reusing
+ * the canonical mechanism rather than adding a second one.
+ */
+function buildServerFieldVoiceBridge(
+  repo: D1HowlerRepository,
+  mode: string,
+): FieldVoiceBridge {
+  const deps = buildWorkflowExecutorDeps(repo, mode);
+
+  async function submitEvidence(
+    kind: "EVIDENCE_PREVIEW" | "EVIDENCE_APPLY_SHADOW",
+    requestedEffect: "PREVIEW" | "APPLY_SHADOW",
+    projectId: string,
+    event: unknown,
+    expectedProjectRevision: number | undefined,
+    idSeed?: string,
+  ): Promise<{ workflowState: string }> {
+    const intentId = idSeed
+      ? await deterministicUuid(`conversation-intent:${idSeed}`)
+      : crypto.randomUUID();
+    const idempotencyKey = idSeed
+      ? await deterministicUuid(`conversation-idempotency:${idSeed}`)
+      : crypto.randomUUID();
+    const candidate = {
+      schemaVersion: "1",
+      intentId,
+      idempotencyKey,
+      projectId,
+      kind,
+      requestedEffect,
+      expectedProjectRevision: expectedProjectRevision ?? null,
+      submittedAt: new Date().toISOString(),
+      source: { channel: "API" },
+      payload: { type: "EVIDENCE", event },
+    };
+    const validated = validateIntent(candidate);
+    if (!validated.valid) {
+      throw new HttpError(
+        400,
+        "Conversational evidence intent failed validation",
+        {
+          problems: validated.problems,
+        },
+      );
+    }
+    const outcome = await executeWorkflow(deps, validated.intent);
+    return workflowStateFromOutcome(outcome);
+  }
+
+  return {
+    listProjectIds: () => [],
+    listResumableWorkflows: () => [],
+    getEvidenceFields: () => null,
+    submitQuery: () =>
+      Promise.reject(
+        new Error(
+          "submitQuery is not used by the conversational claim gateway",
+        ),
+      ),
+    submitPreview: (projectId, evidenceSnapshot, expectedProjectRevision) =>
+      submitEvidence(
+        "EVIDENCE_PREVIEW",
+        "PREVIEW",
+        projectId,
+        evidenceSnapshot,
+        expectedProjectRevision,
+      ),
+    submitApply: (confirmation) =>
+      submitEvidence(
+        "EVIDENCE_APPLY_SHADOW",
+        "APPLY_SHADOW",
+        confirmation.projectId,
+        confirmation.canonicalEvidence,
+        confirmation.expectedProjectRevision,
+        confirmation.confirmationId,
+      ),
+    resumeWorkflow: () =>
+      Promise.reject(
+        new Error(
+          "resumeWorkflow is not used by the conversational claim gateway -- Task 18 direct commands call the canonical /v1/workflows/:id/resume route instead",
+        ),
+      ),
+  };
+}
+
+/**
+ * Field-readiness blocker fix: the session round-tripped through the client between HTTP turns
+ * carries no security authority -- it is pure conversation-continuity bookkeeping (which claims
+ * are pending, what was last discussed). Every request still requires the same admin-key auth as
+ * every other /v1 route, and every project reference is freshly resolved and loaded from D1
+ * regardless of what a session claims. This only checks that a client-supplied session is
+ * structurally well-formed; a malformed one fails closed to a fresh session being refused (400),
+ * never silently accepted as if it were empty.
+ */
+function parseConversationSession(raw: unknown): ConversationSession | null {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw !== "object") {
+    throw new HttpError(400, "session must be an object when present");
+  }
+  const record = raw as Record<string, unknown>;
+  if (
+    typeof record.sessionId !== "string" ||
+    typeof record.startedAt !== "string" ||
+    !("activeProjectId" in record) ||
+    !Array.isArray(record.pendingClaims) ||
+    !Array.isArray(record.turnLog) ||
+    !Array.isArray(record.activeDebriefItems) ||
+    !Array.isArray(record.unresolvedClarifications) ||
+    !("lastReferencedEntity" in record) ||
+    !("currentQuestionRef" in record) ||
+    (record.confirmationState !== "IDLE" &&
+      record.confirmationState !== "AWAITING_CONFIRMATION")
+  ) {
+    throw new HttpError(400, "session is malformed");
+  }
+  return record as unknown as ConversationSession;
+}
+
+/** Structural validation only, matching `parseConversationSession`'s own fail-closed convention --
+ * this confirmation carries no security authority (see the confirm-handling block above), but a
+ * malformed one is still refused outright rather than silently coerced. */
+function parsePendingConfirmation(raw: unknown): PendingVoiceConfirmation {
+  if (!raw || typeof raw !== "object") {
+    throw new HttpError(
+      400,
+      "confirm.confirmation is required and must be an object",
+    );
+  }
+  const record = raw as Record<string, unknown>;
+  if (
+    typeof record.confirmationId !== "string" ||
+    typeof record.createdAt !== "number" ||
+    typeof record.expiresAt !== "number" ||
+    typeof record.projectId !== "string" ||
+    record.intentKind !== "EVIDENCE_APPLY_SHADOW" ||
+    !("canonicalEvidence" in record) ||
+    !("immutableSnapshot" in record) ||
+    typeof record.snapshotFingerprint !== "string" ||
+    typeof record.captureSessionId !== "string" ||
+    (record.state !== "PENDING" &&
+      record.state !== "CONSUMED" &&
+      record.state !== "CANCELLED" &&
+      record.state !== "EXPIRED")
+  ) {
+    throw new HttpError(400, "confirm.confirmation is malformed");
+  }
+  return record as unknown as PendingVoiceConfirmation;
 }
 
 /**
@@ -739,6 +968,139 @@ async function handle(request: Request, env: Env): Promise<Response> {
         "Understanding proposal projectId does not match URL project ID",
       );
     return json(validateUnderstandingProposal(input));
+  }
+
+  // Field-readiness blocker fix: the first real HTTP/browser/phone entry point into the
+  // conversational PM path (authenticated existing Howler transport -- the same requireAdmin
+  // check as every other /v1 route above -- -> project/session resolution -> routeConversationalTurn
+  // -> existing interpreter -> existing compiler -> Preview -> explicit human confirmation ->
+  // existing canonical Apply via buildServerFieldVoiceBridge -> executeWorkflow). Task 18's own
+  // routes (/v1/intents, /v1/workflows/:id/resume, etc.) are completely untouched above and below
+  // this block -- this is a new, additive route, never a replacement.
+  if (
+    request.method === "POST" &&
+    parts.length === 5 &&
+    parts[3] === "conversation" &&
+    parts[4] === "turn"
+  ) {
+    const body = (await readJson(request)) as {
+      text?: unknown;
+      session?: unknown;
+      confirm?: { confirmation?: unknown; affirmative?: unknown };
+    } | null;
+    if (!body || typeof body !== "object") {
+      throw new HttpError(400, "conversation turn requires a JSON body");
+    }
+
+    const clientSession = parseConversationSession(body.session);
+    if (
+      clientSession &&
+      clientSession.activeProjectId &&
+      clientSession.activeProjectId !== projectId
+    ) {
+      // Field-readiness blocker fix: project identity is revalidated server-side on every
+      // request. The session is client-held bookkeeping, never security authority -- a session
+      // claiming a different active project than this URL's own :id is refused outright rather
+      // than silently redirected or silently trusted.
+      throw new HttpError(
+        400,
+        `session's active project "${clientSession.activeProjectId}" does not match this endpoint's project "${projectId}"`,
+      );
+    }
+    const session: ConversationSession =
+      clientSession ?? createSession(new Date().toISOString());
+
+    // Performance instrumentation: collects every named stage
+    // (input_transport/interpretTurn/project_resolution/compileClaim/preview/
+    // EVIDENCE_PREVIEW/confirmation_wait/EVIDENCE_APPLY_SHADOW/verification/total) the existing
+    // timing plumbing already reports, and returns them in the response so a real local request
+    // through this HTTP path can report real measured numbers -- no external telemetry, nothing
+    // sent anywhere; this is purely the response body.
+    const timing: { stage: string; durationMs: number }[] = [];
+    const recordTiming = (sample: {
+      stage: string;
+      durationMs: number;
+    }): void => {
+      timing.push(sample);
+    };
+
+    const bridge = buildServerFieldVoiceBridge(repo, mode);
+    const gateway = createConversationalClaimGateway(
+      bridge,
+      () => crypto.randomUUID(),
+      Date.now,
+      recordTiming,
+    );
+    const vocabulary = {
+      projectIds: [projectId],
+      aliases: fieldTestAliasesFor([projectId]),
+    };
+    const deps: ConversationalTurnDeps = {
+      callModel: buildFieldTestCallModel(),
+      loadProjectModel: (id) => repo.loadProject(id).then((m) => m ?? null),
+      vocabulary,
+      gateway,
+      captureSessionId: `http-${crypto.randomUUID()}`,
+      recordTiming,
+    };
+
+    if (body.confirm) {
+      // Field-readiness blocker fix: Cloudflare Workers are stateless between requests, so the
+      // gateway created above (and its in-memory pending-confirmation map) cannot possibly still
+      // hold the confirmation a previous, separate HTTP request created -- this reconstructs it
+      // from what the client round-tripped instead (the exact confirmation object the turn
+      // response returned), and calls the real, unmodified respondToVoiceConfirmation state
+      // machine directly. That confirmation carries no security authority of its own: applying it
+      // still goes through buildServerFieldVoiceBridge's submitApply -> the same canonical
+      // executeWorkflow every other route uses, with its own revision-check/oversight-gate/
+      // idempotency-key protections independently re-validating everything. A deterministic
+      // idempotencyKey derived from confirmationId (see buildServerFieldVoiceBridge) is what
+      // actually makes a genuine duplicate confirmation replay instead of re-applying -- not
+      // memory of having seen this confirmationId before.
+      const confirmation = parsePendingConfirmation(body.confirm.confirmation);
+      const affirmative = body.confirm.affirmative;
+      if (typeof affirmative !== "boolean") {
+        throw new HttpError(400, "confirm.affirmative must be a boolean");
+      }
+      const waitStartedAt = Date.now();
+      const respondOutcome = respondToVoiceConfirmation(
+        confirmation,
+        { affirmative },
+        Date.now(),
+      );
+      recordTiming({
+        stage: "confirmation_wait",
+        durationMs: Date.now() - waitStartedAt,
+      });
+      if (respondOutcome.outcome !== "CONSUMED") {
+        return json({
+          session,
+          confirm: { outcome: respondOutcome.outcome },
+          timing,
+        });
+      }
+      const applyStartedAt = Date.now();
+      const result = await bridge.submitApply(respondOutcome.confirmation);
+      recordTiming({
+        stage: "EVIDENCE_APPLY_SHADOW",
+        durationMs: Date.now() - applyStartedAt,
+      });
+      return json({
+        session,
+        confirm: { outcome: "APPLIED", result },
+        timing,
+      });
+    }
+
+    if (typeof body.text !== "string" || body.text.trim().length === 0) {
+      throw new HttpError(400, "conversation turn requires non-empty text");
+    }
+    const { session: nextSession, result } = await routeConversationalTurn(
+      body.text,
+      session,
+      deps,
+    );
+    return json({ session: nextSession, turn: result, timing });
   }
 
   if (
