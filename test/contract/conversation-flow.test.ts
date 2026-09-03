@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  createConfirmedClaimSubmitter,
+  createConversationalClaimGateway,
   createDebriefApplyPresentation,
   createDebriefBlockedPresentation,
   speakVoicePresentation,
@@ -62,25 +62,74 @@ function fakeBridge(): {
   return { bridge, previewCalls, applyCalls };
 }
 
-describe("submitConfirmedClaim", () => {
-  it("submits exactly one EVIDENCE_PREVIEW then exactly one EVIDENCE_APPLY_SHADOW for one confirmed claim", async () => {
+describe("conversational claim gateway: preview never auto-applies", () => {
+  it("previewClaim runs exactly one EVIDENCE_PREVIEW and returns a PENDING confirmation — it never calls submitApply on its own", async () => {
     const { bridge, previewCalls, applyCalls } = fakeBridge();
-    const { submitConfirmedClaim } = createConfirmedClaimSubmitter(
+    const { previewClaim } = createConversationalClaimGateway(
       bridge,
       () => "confirmation-1",
       () => 1_000,
     );
-    const result = await submitConfirmedClaim(
+    const outcome = await previewClaim(
       fakeMutation(),
       "deboard-v091",
       1,
+      "capture-1",
     );
-    expect(result.workflowState).toBe("SUCCEEDED");
+    expect(outcome.previewResult.workflowState).toBe("SUCCEEDED");
+    expect(outcome.confirmation.state).toBe("PENDING");
+    expect(previewCalls).toHaveLength(1);
+    expect(applyCalls).toHaveLength(0);
+  });
+
+  it("apply only happens after respondToPendingClaim receives a real affirmative response — never synthesized by previewClaim itself", async () => {
+    const { bridge, previewCalls, applyCalls } = fakeBridge();
+    const { previewClaim, respondToPendingClaim } =
+      createConversationalClaimGateway(
+        bridge,
+        () => "confirmation-1",
+        () => 1_000,
+      );
+    const preview = await previewClaim(
+      fakeMutation(),
+      "deboard-v091",
+      1,
+      "capture-1",
+    );
+    expect(applyCalls).toHaveLength(0);
+
+    const outcome = await respondToPendingClaim(
+      preview.confirmation.confirmationId,
+      { affirmative: true },
+    );
+    expect(outcome.outcome).toBe("APPLIED");
     expect(previewCalls).toHaveLength(1);
     expect(applyCalls).toHaveLength(1);
   });
 
-  it("preview happens strictly before apply", async () => {
+  it("a negative response cancels the confirmation and never calls submitApply", async () => {
+    const { bridge, applyCalls } = fakeBridge();
+    const { previewClaim, respondToPendingClaim } =
+      createConversationalClaimGateway(
+        bridge,
+        () => "confirmation-1",
+        () => 1_000,
+      );
+    const preview = await previewClaim(
+      fakeMutation(),
+      "deboard-v091",
+      1,
+      "capture-1",
+    );
+    const outcome = await respondToPendingClaim(
+      preview.confirmation.confirmationId,
+      { affirmative: false },
+    );
+    expect(outcome.outcome).toBe("CANCELLED");
+    expect(applyCalls).toHaveLength(0);
+  });
+
+  it("preview happens strictly before apply, and apply only happens after an explicit confirm call", async () => {
     const order: string[] = [];
     const bridge: FieldVoiceBridge = {
       listProjectIds: () => [],
@@ -97,44 +146,141 @@ describe("submitConfirmedClaim", () => {
       },
       resumeWorkflow: () => Promise.resolve({ workflowState: "SUCCEEDED" }),
     };
-    const { submitConfirmedClaim } = createConfirmedClaimSubmitter(
-      bridge,
-      () => "confirmation-1",
-      () => 1_000,
+    const { previewClaim, respondToPendingClaim } =
+      createConversationalClaimGateway(
+        bridge,
+        () => "confirmation-1",
+        () => 1_000,
+      );
+    const preview = await previewClaim(
+      fakeMutation(),
+      "deboard-v091",
+      1,
+      "capture-1",
     );
-    await submitConfirmedClaim(fakeMutation(), "deboard-v091", 1);
+    expect(order).toEqual(["PREVIEW"]);
+    await respondToPendingClaim(preview.confirmation.confirmationId, {
+      affirmative: true,
+    });
     expect(order).toEqual(["PREVIEW", "APPLY"]);
   });
 
-  it("duplicate_confirmation_single_apply: a second, duplicate confirmation call for the identical claim produces zero additional POSTs", async () => {
+  it("duplicate_confirmation_single_apply: a second, duplicate affirmative response for the same confirmation produces zero additional POSTs", async () => {
     const { bridge, previewCalls, applyCalls } = fakeBridge();
-    const { submitConfirmedClaim } = createConfirmedClaimSubmitter(
+    const { previewClaim, respondToPendingClaim } =
+      createConversationalClaimGateway(
+        bridge,
+        () => "confirmation-1",
+        () => 1_000,
+      );
+    const preview = await previewClaim(
+      fakeMutation(),
+      "deboard-v091",
+      1,
+      "capture-1",
+    );
+    const first = await respondToPendingClaim(
+      preview.confirmation.confirmationId,
+      { affirmative: true },
+    );
+    const second = await respondToPendingClaim(
+      preview.confirmation.confirmationId,
+      { affirmative: true },
+    );
+    expect(first.outcome).toBe("APPLIED");
+    expect(second.outcome).toBe("NOOP");
+    expect(previewCalls).toHaveLength(1);
+    expect(applyCalls).toHaveLength(1);
+  });
+
+  it("duplicate preview calls for the identical claim before any response reuse the same in-flight/settled preview — never a second submitPreview", async () => {
+    const { bridge, previewCalls } = fakeBridge();
+    const { previewClaim } = createConversationalClaimGateway(
       bridge,
       () => "confirmation-1",
       () => 1_000,
     );
     const mutation = fakeMutation();
-    const first = await submitConfirmedClaim(mutation, "deboard-v091", 1);
-    const second = await submitConfirmedClaim(mutation, "deboard-v091", 1);
-    expect(first).toEqual(second);
+    const first = await previewClaim(mutation, "deboard-v091", 1, "capture-1");
+    const second = await previewClaim(
+      mutation,
+      "deboard-v091",
+      1,
+      "capture-1",
+    );
+    expect(first.confirmation.confirmationId).toBe(
+      second.confirmation.confirmationId,
+    );
     expect(previewCalls).toHaveLength(1);
-    expect(applyCalls).toHaveLength(1);
   });
 
-  it("two different confirmed claims each get their own preview/apply pair", async () => {
-    const { bridge, previewCalls, applyCalls } = fakeBridge();
-    const { submitConfirmedClaim } = createConfirmedClaimSubmitter(
+  it("a rejected preview is not cached forever — a later retry for the same claim gets a fresh attempt, not the same rejection replayed", async () => {
+    let attempt = 0;
+    const bridge: FieldVoiceBridge = {
+      listProjectIds: () => [],
+      listResumableWorkflows: () => [],
+      getEvidenceFields: () => null,
+      submitQuery: () => Promise.resolve({ workflowState: "SUCCEEDED" }),
+      submitPreview: () => {
+        attempt += 1;
+        return attempt === 1
+          ? Promise.reject(new Error("transient network failure"))
+          : Promise.resolve({ workflowState: "SUCCEEDED" });
+      },
+      submitApply: () => Promise.resolve({ workflowState: "SUCCEEDED" }),
+      resumeWorkflow: () => Promise.resolve({ workflowState: "SUCCEEDED" }),
+    };
+    const { previewClaim } = createConversationalClaimGateway(
       bridge,
       () => "confirmation-1",
       () => 1_000,
     );
-    await submitConfirmedClaim(fakeMutation("event-a"), "deboard-v091", 1);
-    await submitConfirmedClaim(fakeMutation("event-b"), "deboard-v091", 2);
+    const mutation = fakeMutation();
+    await expect(
+      previewClaim(mutation, "deboard-v091", 1, "capture-1"),
+    ).rejects.toThrow("transient network failure");
+    const retried = await previewClaim(
+      mutation,
+      "deboard-v091",
+      1,
+      "capture-1",
+    );
+    expect(retried.previewResult.workflowState).toBe("SUCCEEDED");
+    expect(attempt).toBe(2);
+  });
+
+  it("two different confirmed claims each get their own preview/apply pair", async () => {
+    const { bridge, previewCalls, applyCalls } = fakeBridge();
+    let confirmationSequence = 0;
+    const { previewClaim, respondToPendingClaim } =
+      createConversationalClaimGateway(
+        bridge,
+        () => `confirmation-${String((confirmationSequence += 1))}`,
+        () => 1_000,
+      );
+    const previewA = await previewClaim(
+      fakeMutation("event-a"),
+      "deboard-v091",
+      1,
+      "capture-a",
+    );
+    const previewB = await previewClaim(
+      fakeMutation("event-b"),
+      "deboard-v091",
+      2,
+      "capture-b",
+    );
+    await respondToPendingClaim(previewA.confirmation.confirmationId, {
+      affirmative: true,
+    });
+    await respondToPendingClaim(previewB.confirmation.confirmationId, {
+      affirmative: true,
+    });
     expect(previewCalls).toHaveLength(2);
     expect(applyCalls).toHaveLength(2);
   });
 
-  it("no other endpoint is ever called by this function — only bridge.submitPreview/submitApply", async () => {
+  it("no other endpoint is ever called by this gateway — only bridge.submitPreview/submitApply", async () => {
     let otherCallCount = 0;
     const bridge: FieldVoiceBridge = {
       listProjectIds: () => {
@@ -160,12 +306,21 @@ describe("submitConfirmedClaim", () => {
         return Promise.resolve({ workflowState: "SUCCEEDED" });
       },
     };
-    const { submitConfirmedClaim } = createConfirmedClaimSubmitter(
-      bridge,
-      () => "confirmation-1",
-      () => 1_000,
+    const { previewClaim, respondToPendingClaim } =
+      createConversationalClaimGateway(
+        bridge,
+        () => "confirmation-1",
+        () => 1_000,
+      );
+    const preview = await previewClaim(
+      fakeMutation(),
+      "deboard-v091",
+      1,
+      "capture-1",
     );
-    await submitConfirmedClaim(fakeMutation(), "deboard-v091", 1);
+    await respondToPendingClaim(preview.confirmation.confirmationId, {
+      affirmative: true,
+    });
     expect(otherCallCount).toBe(0);
   });
 });
@@ -237,17 +392,26 @@ describe("debrief spoken responses", () => {
 });
 
 describe("timing", () => {
-  it("submitConfirmedClaim reports one timing sample for the preview leg and one for the apply leg", async () => {
+  it("the gateway reports one timing sample for the preview leg and one for the apply leg", async () => {
     const { bridge } = fakeBridge();
     const samples: { stage: string; durationMs: number }[] = [];
     let tick = 1000;
-    const { submitConfirmedClaim } = createConfirmedClaimSubmitter(
-      bridge,
-      () => "confirmation-1",
-      () => (tick += 15),
-      (sample) => samples.push(sample),
+    const { previewClaim, respondToPendingClaim } =
+      createConversationalClaimGateway(
+        bridge,
+        () => "confirmation-1",
+        () => (tick += 15),
+        (sample) => samples.push(sample),
+      );
+    const preview = await previewClaim(
+      fakeMutation(),
+      "deboard-v091",
+      1,
+      "capture-1",
     );
-    await submitConfirmedClaim(fakeMutation(), "deboard-v091", 1);
+    await respondToPendingClaim(preview.confirmation.confirmationId, {
+      affirmative: true,
+    });
     const stages = samples.map((s) => s.stage).sort();
     expect(stages).toEqual(["EVIDENCE_APPLY_SHADOW", "EVIDENCE_PREVIEW"]);
     for (const sample of samples) {
@@ -255,19 +419,25 @@ describe("timing", () => {
     }
   });
 
-  it("submitConfirmedClaim reports no samples when recordTiming is omitted", async () => {
+  it("the gateway reports no samples when recordTiming is omitted", async () => {
     const { bridge } = fakeBridge();
-    const { submitConfirmedClaim } = createConfirmedClaimSubmitter(
-      bridge,
-      () => "confirmation-1",
-      () => 1_000,
-    );
-    const result = await submitConfirmedClaim(
+    const { previewClaim, respondToPendingClaim } =
+      createConversationalClaimGateway(
+        bridge,
+        () => "confirmation-1",
+        () => 1_000,
+      );
+    const preview = await previewClaim(
       fakeMutation(),
       "deboard-v091",
       1,
+      "capture-1",
     );
-    expect(result.workflowState).toBe("SUCCEEDED");
+    const outcome = await respondToPendingClaim(
+      preview.confirmation.confirmationId,
+      { affirmative: true },
+    );
+    expect(outcome.outcome).toBe("APPLIED");
   });
 
   it("speakVoicePresentation reports one timing sample when recordTiming is provided", () => {

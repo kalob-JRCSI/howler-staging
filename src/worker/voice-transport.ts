@@ -498,26 +498,34 @@ export interface ConfirmedClaimMutation {
 }
 
 /**
- * `submitConfirmedClaim` constructs and submits exactly the same `IntentV1` shape a hand-typed
- * evidence-textarea submission would, through the exact same canonical path: it never builds its
- * own HTTP request or reimplements `buildIntentPayload`/the idempotency kernel — every request is
- * made via the caller-supplied `FieldVoiceBridge`'s `submitPreview`/`submitApply`, the same
- * functions the manual evidence UI buttons and Task 18's voice transport already call, so the
- * conversational path can never diverge from the canonical one. `submitPreview` always runs
- * first; `submitApply` only runs after building and immediately affirmatively answering a
- * `PendingVoiceConfirmation` via the existing `createPendingVoiceConfirmation`/
- * `respondToVoiceConfirmation` machinery (Task 18) — this mirrors the existing
- * `EVIDENCE_PREVIEW`/`EVIDENCE_APPLY_SHADOW` two-step already used by the manual UI. The claim
- * reaching this function is only ever `CONFIRMED` (compileClaim refuses to compile any other
- * state), so the "explicit second confirmation" the two-step design calls for already happened at
- * the conversation layer before a `ProposedMutation` could exist at all.
+ * Field-readiness blocker fix (P0): the previous `createConfirmedClaimSubmitter` ran
+ * `submitPreview`, then immediately fabricated its own `PendingVoiceConfirmation` and
+ * self-answered it `{ affirmative: true }` in the same synchronous flow — apply always followed
+ * preview with no real wait for a human to see the computed preview delta and approve it. The
+ * claim's own `userConfirmationState: "CONFIRMED"` (checked by `compileClaim`) only means "the
+ * user confirmed this is what they said" — it is not the same checkpoint as approving the actual
+ * computed evidence-preview consequence, which is what the rest of Howler's canonical
+ * EVIDENCE_PREVIEW/EVIDENCE_APPLY_SHADOW two-step exists to gate.
  *
- * Duplicate-confirmation protection: this factory keeps a small in-closure cache keyed by the
- * mutation's own `event.id`, so calling `submitConfirmedClaim` a second time for the identical
- * confirmed claim reuses the first call's in-flight/completed promise verbatim — zero additional
- * `submitPreview`/`submitApply` calls, not a new idempotency mechanism, just deterministic reuse
- * scoped to one already-fully-compiled claim (which, unlike a manual form edit, never changes
- * content between submissions).
+ * `createConversationalClaimGateway` splits this into two real phases mirroring Task 18's own
+ * `resolveAndDispatch` pattern (see `voiceBrowserClient` below): `previewClaim` runs
+ * `submitPreview` and returns a genuinely `PENDING` `PendingVoiceConfirmation` for the caller to
+ * present and await a real response for — it never calls `submitApply` itself.
+ * `respondToPendingClaim` is a separate call the caller makes only once an actual affirmative/
+ * negative response arrives (the next turn); it calls the real, unmodified
+ * `respondToVoiceConfirmation` state machine, and only on a genuine `CONSUMED` outcome does it
+ * call `bridge.submitApply` — exactly once, since `respondToVoiceConfirmation` refuses to consume
+ * an already-non-PENDING confirmation (a second call for the same confirmationId NOOPs, matching
+ * Task 18's own single-consume invariant; this reuses that machinery rather than adding a second
+ * idempotency mechanism).
+ *
+ * Preview-phase idempotency, without a poisoned cache: while a `previewClaim` call for a given
+ * `mutation.event.id` is in flight, or has already settled successfully, a duplicate call for the
+ * identical claim reuses that same promise — zero additional `submitPreview` calls. A *rejected*
+ * preview is removed from the cache the moment it settles, so a later retry for the same claim
+ * gets a fresh attempt rather than replaying the same failure forever (the defect in the previous
+ * `dedupe` map, which cached the promise itself with no distinction between in-flight, resolved,
+ * and permanently-poisoned-by-rejection).
  */
 /** Task 15: optional stage timing instrumentation. No-op when `recordTiming` is absent (the
  * default, every existing call site) — never required, never sent anywhere by default. */
@@ -527,27 +535,45 @@ export interface TimingSample {
 }
 export type RecordTiming = (sample: TimingSample) => void;
 
-export function createConfirmedClaimSubmitter(
+export interface ClaimPreviewOutcome {
+  previewResult: { workflowState: string };
+  confirmation: PendingVoiceConfirmation;
+}
+
+export type ClaimApplyOutcome =
+  | { outcome: "APPLIED"; result: { workflowState: string } }
+  | { outcome: "CANCELLED" }
+  | { outcome: "NOOP"; reason: string };
+
+export function createConversationalClaimGateway(
   bridge: FieldVoiceBridge,
   makeId: () => string,
   now: () => number = Date.now,
   recordTiming?: RecordTiming,
 ): {
-  submitConfirmedClaim: (
+  previewClaim: (
     mutation: ConfirmedClaimMutation,
     projectId: string,
     expectedProjectRevision: number,
-  ) => Promise<{ workflowState: string }>;
+    captureSessionId: string,
+  ) => Promise<ClaimPreviewOutcome>;
+  respondToPendingClaim: (
+    confirmationId: string,
+    response: { affirmative: boolean },
+    respondAt?: number,
+  ) => Promise<ClaimApplyOutcome>;
 } {
-  const dedupe = new Map<string, Promise<{ workflowState: string }>>();
+  const pendingByConfirmationId = new Map<string, PendingVoiceConfirmation>();
+  const previewCache = new Map<string, Promise<ClaimPreviewOutcome>>();
 
-  function submitConfirmedClaim(
+  function previewClaim(
     mutation: ConfirmedClaimMutation,
     projectId: string,
     expectedProjectRevision: number,
-  ): Promise<{ workflowState: string }> {
+    captureSessionId: string,
+  ): Promise<ClaimPreviewOutcome> {
     const key = mutation.event.id;
-    const existing = dedupe.get(key);
+    const existing = previewCache.get(key);
     if (existing) return existing;
 
     const previewStartedAt = now();
@@ -560,43 +586,64 @@ export function createConfirmedClaimSubmitter(
             durationMs: now() - previewStartedAt,
           });
         }
-        return previewResult;
-      })
-      .then(() => {
         const confirmation = createPendingVoiceConfirmation({
           confirmationId: makeId(),
           projectId,
           evidenceSnapshot: mutation.event,
-          captureSessionId: `conversation-${key}`,
+          captureSessionId,
           createdAt: now(),
           expectedProjectRevision,
         });
-        const outcome = respondToVoiceConfirmation(
+        pendingByConfirmationId.set(
+          confirmation.confirmationId,
           confirmation,
-          { affirmative: true },
-          now(),
         );
-        if (outcome.outcome !== "CONSUMED") {
-          throw new Error(
-            `submitConfirmedClaim: confirmation could not be consumed (${outcome.outcome})`,
-          );
-        }
-        const applyStartedAt = now();
-        return bridge.submitApply(outcome.confirmation).then((applyResult) => {
-          if (recordTiming) {
-            recordTiming({
-              stage: "EVIDENCE_APPLY_SHADOW",
-              durationMs: now() - applyStartedAt,
-            });
-          }
-          return applyResult;
-        });
+        return { previewResult, confirmation };
       });
-    dedupe.set(key, promise);
+    previewCache.set(key, promise);
+    promise.catch(() => {
+      previewCache.delete(key);
+    });
     return promise;
   }
 
-  return { submitConfirmedClaim };
+  function respondToPendingClaim(
+    confirmationId: string,
+    response: { affirmative: boolean },
+    respondAt: number = now(),
+  ): Promise<ClaimApplyOutcome> {
+    const confirmation = pendingByConfirmationId.get(confirmationId);
+    if (!confirmation) {
+      return Promise.resolve({
+        outcome: "NOOP",
+        reason: "no such pending confirmation",
+      });
+    }
+    const outcome = respondToVoiceConfirmation(
+      confirmation,
+      response,
+      respondAt,
+    );
+    pendingByConfirmationId.set(confirmationId, outcome.confirmation);
+    if (outcome.outcome === "CONSUMED") {
+      const applyStartedAt = now();
+      return bridge.submitApply(outcome.confirmation).then((result) => {
+        if (recordTiming) {
+          recordTiming({
+            stage: "EVIDENCE_APPLY_SHADOW",
+            durationMs: now() - applyStartedAt,
+          });
+        }
+        return { outcome: "APPLIED" as const, result };
+      });
+    }
+    if (outcome.outcome === "CANCELLED") {
+      return Promise.resolve({ outcome: "CANCELLED" });
+    }
+    return Promise.resolve({ outcome: "NOOP", reason: outcome.reason });
+  }
+
+  return { previewClaim, respondToPendingClaim };
 }
 
 export function voiceBrowserClient(
