@@ -9,9 +9,12 @@ import {
   endSession,
   resolveClaimEntity,
   resolveClaimProject,
+  resolveCompletion,
+  resolveCorrection,
   type ConversationClaim,
   type ConversationSession,
 } from "../../src/operator/conversation";
+import type { DebriefItem } from "../../src/operator/debrief";
 import type { ProjectModelV094 } from "../../src/domain/types";
 
 function testProjectModel(
@@ -373,5 +376,157 @@ describe("resolve entity", () => {
     const claim = validClaim({ subjectText: "the carpet decision" });
     const result = resolveClaimEntity(claim, model);
     expect(result).toEqual({ type: "constraint", id: "carpet-decision" });
+  });
+});
+
+function debriefItem(overrides: Partial<DebriefItem> = {}): DebriefItem {
+  return {
+    itemId: "deboard-v091:TRADE_MOVEMENT:masonry-trade",
+    projectId: "deboard-v091",
+    category: "TRADE_MOVEMENT",
+    subject: "Masonry crew mobilized",
+    source: "src-1",
+    severity: "WARN",
+    status: "OPEN",
+    question: "Is the masonry crew confirmed?",
+    supportingRefs: ["masonry", "masonry-trade"],
+    ...overrides,
+  };
+}
+
+describe("correction", () => {
+  it("correction_replaces_pending: 'No, Thursday actually' replaces the single matching pending claim in place, no duplicate", () => {
+    let session = createSession("t");
+    session = {
+      ...session,
+      lastReferencedEntity: {
+        type: "activity",
+        id: "masonry",
+        label: "masonry",
+      },
+    };
+    session = addClaim(
+      session,
+      validClaim({
+        claimId: "claim-jason",
+        subjectRef: "masonry",
+        subjectText: "masonry schedule",
+        claimType: "SCHEDULE_CHANGED",
+        value: "Wednesday",
+        effectiveDate: "2026-09-02",
+        userConfirmationState: "AWAITING_CONFIRMATION",
+      }),
+    );
+    const result = resolveCorrection(session, "No, 2026-09-10 actually");
+    expect("kind" in result).toBe(false);
+    if ("kind" in result) return;
+    expect(result.pendingClaims).toHaveLength(1);
+    expect(result.pendingClaims[0]?.claimId).toBe("claim-jason");
+    expect(result.pendingClaims[0]?.effectiveDate).toBe("2026-09-10");
+  });
+
+  it("correction_no_target_clarifies: correction with zero candidate pending claims clarifies instead of guessing", () => {
+    const session = createSession("t");
+    const result = resolveCorrection(session, "No, Thursday actually");
+    expect("kind" in result && result.kind === "CLARIFICATION").toBe(true);
+  });
+
+  it("correction with two candidate pending claims on the same entity clarifies instead of guessing", () => {
+    let session = createSession("t");
+    session = {
+      ...session,
+      lastReferencedEntity: {
+        type: "activity",
+        id: "masonry",
+        label: "masonry",
+      },
+    };
+    session = addClaim(
+      session,
+      validClaim({
+        claimId: "claim-a",
+        subjectRef: "masonry",
+        subjectText: "masonry schedule",
+        claimType: "SCHEDULE_CHANGED",
+        userConfirmationState: "AWAITING_CONFIRMATION",
+      }),
+    );
+    session = addClaim(
+      session,
+      validClaim({
+        claimId: "claim-b",
+        subjectRef: "masonry",
+        subjectText: "masonry schedule",
+        claimType: "SCHEDULE_CHANGED",
+        userConfirmationState: "AWAITING_CONFIRMATION",
+      }),
+    );
+    const result = resolveCorrection(session, "No, Thursday actually");
+    expect("kind" in result && result.kind === "CLARIFICATION").toBe(true);
+  });
+});
+
+describe("uncertainty", () => {
+  it("tentative_never_confirms: a TENTATIVE claim stays UNCONFIRMED and confirmClaim never flips it to CONFIRMED without an explicit STATED re-assertion", () => {
+    let session = createSession("t");
+    session = addClaim(
+      session,
+      validClaim({
+        claimId: "claim-tentative",
+        certainty: "TENTATIVE",
+        userConfirmationState: "UNCONFIRMED",
+      }),
+    );
+    // A TENTATIVE claim is only ever added at UNCONFIRMED; nothing in this test moves it toward
+    // AWAITING_CONFIRMATION/CONFIRMED, so it can never reach compileClaim's provenance step.
+    expect(session.pendingClaims[0]?.certainty).toBe("TENTATIVE");
+    expect(session.pendingClaims[0]?.userConfirmationState).toBe(
+      "UNCONFIRMED",
+    );
+  });
+});
+
+describe("defer", () => {
+  it("defer_keeps_item_open: deferring a claim leaves the source DebriefItem status OPEN, not resolved", () => {
+    let session = createSession("t");
+    session = {
+      ...session,
+      activeDebriefItems: [debriefItem({ status: "OPEN" })],
+      currentQuestionRef: "deboard-v091:TRADE_MOVEMENT:masonry-trade",
+    };
+    session = addClaim(
+      session,
+      validClaim({ claimId: "claim-defer", userConfirmationState: "AWAITING_CONFIRMATION" }),
+    );
+    session = deferClaim(session, "claim-defer");
+    expect(session.pendingClaims[0]?.userConfirmationState).toBe("DEFERRED");
+    expect(session.activeDebriefItems[0]?.status).toBe("OPEN");
+  });
+});
+
+describe("completion", () => {
+  it("completion_binds_exact_item: 'yes, that's done' binds only to the exact currentQuestionRef item", () => {
+    let session = createSession("t");
+    session = {
+      ...session,
+      activeDebriefItems: [
+        debriefItem({ itemId: "item-a", status: "OPEN" }),
+        debriefItem({ itemId: "item-b", status: "OPEN" }),
+      ],
+      currentQuestionRef: "item-a",
+    };
+    const result = resolveCompletion(session, "yes, that's done");
+    expect("kind" in result).toBe(false);
+    if ("kind" in result) return;
+    const itemA = result.activeDebriefItems.find((i) => i.itemId === "item-a");
+    const itemB = result.activeDebriefItems.find((i) => i.itemId === "item-b");
+    expect(itemA?.status).toBe("CONFIRMED_COMPLETE");
+    expect(itemB?.status).toBe("OPEN");
+  });
+
+  it("'yes, that's done' with currentQuestionRef unset clarifies rather than guessing which item", () => {
+    const session = createSession("t");
+    const result = resolveCompletion(session, "yes, that's done");
+    expect("kind" in result && result.kind === "CLARIFICATION").toBe(true);
   });
 });

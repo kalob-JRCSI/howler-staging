@@ -9,6 +9,7 @@
 // deterministic compiler (src/operator/claim-compiler.ts), never to this type or its producer.
 
 import { normalizeProjectId, projectMention } from "../worker/voice-transport";
+import type { DebriefItem } from "./debrief";
 import type { ProjectModelV094 } from "../domain/types";
 
 export type ConversationClaimType =
@@ -101,7 +102,7 @@ export interface ConversationSession {
   sessionId: string;
   startedAt: string;
   activeProjectId: string | null;
-  activeDebriefItems: unknown[]; // DebriefItem[] — typed by src/operator/debrief.ts (Task 8)
+  activeDebriefItems: DebriefItem[];
   currentQuestionRef: string | null; // itemId currently being asked about
   pendingClaims: ConversationClaim[];
   unresolvedClarifications: { message: string; relatedClaimId?: string }[];
@@ -374,4 +375,115 @@ export function resolveClaimEntity(
     };
   }
   return { type: only.type, id: only.id };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Correction, defer, and uncertainty behavior (Task 10).
+// ---------------------------------------------------------------------------------------------
+
+function claimMatchesLastReferencedEntity(
+  claim: ConversationClaim,
+  entity: ConversationSession["lastReferencedEntity"],
+): boolean {
+  if (!entity) return false;
+  const subject = `${claim.subjectText} ${claim.subjectRef}`.toLowerCase();
+  return (
+    subject.includes(entity.id.toLowerCase()) ||
+    subject.includes(entity.label.toLowerCase())
+  );
+}
+
+const ISO_DATE_IN_TEXT = /\d{4}-\d{2}-\d{2}/;
+
+/** Deterministic, non-LLM extraction of a correction's new value/date from raw correction text
+ * (e.g. "No, Thursday actually" / "No, 2026-09-10 actually"). Strips common correction framing
+ * ("No,", "actually") and keeps the remainder as the claim's new `value`; an ISO date literally
+ * present in the text also becomes the new `effectiveDate`. This function never calls a model —
+ * it is deliberately conservative rather than attempting full natural-language date resolution. */
+function extractCorrectionPatch(text: string): {
+  value?: string;
+  effectiveDate?: string;
+} {
+  const cleaned = text
+    .trim()
+    .replace(/^no[,]?\s*/i, "")
+    .replace(/\s*,?\s*actually\.?$/i, "")
+    .trim();
+  const isoMatch = ISO_DATE_IN_TEXT.exec(cleaned);
+  const patch: { value?: string; effectiveDate?: string } = {};
+  if (cleaned.length > 0) patch.value = cleaned;
+  if (isoMatch) patch.effectiveDate = isoMatch[0];
+  return patch;
+}
+
+/**
+ * "No, Thursday actually." — resolved against `session.pendingClaims` filtered to
+ * `AWAITING_CONFIRMATION` claims whose subject matches `session.lastReferencedEntity`. Exactly
+ * one candidate mutates that claim's `value`/`effectiveDate` in place (no new claim, no
+ * duplicate project event — reuses Task 2's `applyCorrection`). Zero or multiple candidates fail
+ * closed to a `Clarification` rather than guessing which pending claim the correction targets.
+ */
+export function resolveCorrection(
+  session: ConversationSession,
+  text: string,
+): ConversationSession | Clarification {
+  const candidates = session.pendingClaims.filter(
+    (claim) =>
+      claim.userConfirmationState === "AWAITING_CONFIRMATION" &&
+      claimMatchesLastReferencedEntity(claim, session.lastReferencedEntity),
+  );
+  if (candidates.length !== 1) {
+    return {
+      kind: "CLARIFICATION",
+      message:
+        "I don't have an open item to correct — what should I update?",
+    };
+  }
+  const target = candidates[0];
+  if (!target) {
+    return {
+      kind: "CLARIFICATION",
+      message:
+        "I don't have an open item to correct — what should I update?",
+    };
+  }
+  const patch = extractCorrectionPatch(text);
+  return applyCorrection(session, target.claimId, patch);
+}
+
+/**
+ * "Yes, that's done." — binds only to the exact `DebriefItem` at `session.currentQuestionRef`,
+ * never a fuzzy "most recent" guess. An unset `currentQuestionRef`, or one that no longer names
+ * an active item, fails closed to a `Clarification` rather than guessing which item.
+ */
+export function resolveCompletion(
+  session: ConversationSession,
+  _text: string,
+): ConversationSession | Clarification {
+  if (!session.currentQuestionRef) {
+    return {
+      kind: "CLARIFICATION",
+      message: "I don't know which item you mean — what should I mark done?",
+    };
+  }
+  const targetId = session.currentQuestionRef;
+  const index = session.activeDebriefItems.findIndex(
+    (item) => item.itemId === targetId,
+  );
+  if (index === -1) {
+    return {
+      kind: "CLARIFICATION",
+      message: "That item is no longer active — what should I mark done?",
+    };
+  }
+  const items = [...session.activeDebriefItems];
+  const target = items[index];
+  if (!target) {
+    return {
+      kind: "CLARIFICATION",
+      message: "That item is no longer active — what should I mark done?",
+    };
+  }
+  items[index] = { ...target, status: "CONFIRMED_COMPLETE" };
+  return { ...session, activeDebriefItems: items };
 }
