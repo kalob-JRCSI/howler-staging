@@ -479,9 +479,9 @@ describe("compileClaim", () => {
     const constraintOp = result.event.mutations.find(
       (m) => m.op === "SET_CONSTRAINT_STATE",
     );
-    expect(constraintOp && "state" in constraintOp ? constraintOp.state : undefined).toBe(
-      "SATISFIED",
-    );
+    expect(
+      constraintOp && "state" in constraintOp ? constraintOp.state : undefined,
+    ).toBe("SATISFIED");
   });
 
   it("compiles SCHEDULE_CHANGED into a COMMITMENT-class SET_SCHEDULE_LOCK mutation", () => {

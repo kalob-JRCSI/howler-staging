@@ -594,10 +594,7 @@ export function createConversationalClaimGateway(
           createdAt: now(),
           expectedProjectRevision,
         });
-        pendingByConfirmationId.set(
-          confirmation.confirmationId,
-          confirmation,
-        );
+        pendingByConfirmationId.set(confirmation.confirmationId, confirmation);
         return { previewResult, confirmation };
       });
     previewCache.set(key, promise);

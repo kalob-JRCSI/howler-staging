@@ -255,9 +255,7 @@ describe("ConversationSession session", () => {
     const confirmed = confirmClaim(session, "claim-z");
     expect("kind" in confirmed).toBe(false);
     if ("kind" in confirmed) return;
-    expect(confirmed.pendingClaims[0]?.userConfirmationState).toBe(
-      "CONFIRMED",
-    );
+    expect(confirmed.pendingClaims[0]?.userConfirmationState).toBe("CONFIRMED");
   });
 
   it("endSession is a no-op that returns nothing — there is no module-level state to survive it", () => {
@@ -578,12 +576,20 @@ describe("completion", () => {
     session = {
       ...session,
       activeDebriefItems: [
-        debriefItem({ itemId: "item-a", status: "OPEN", subject: "Masonry crew mobilized" }),
+        debriefItem({
+          itemId: "item-a",
+          status: "OPEN",
+          subject: "Masonry crew mobilized",
+        }),
         debriefItem({ itemId: "item-b", status: "OPEN" }),
       ],
       currentQuestionRef: "item-a",
     };
-    const result = resolveCompletion(session, "yes, that's done", "2026-09-03T12:00:00.000Z");
+    const result = resolveCompletion(
+      session,
+      "yes, that's done",
+      "2026-09-03T12:00:00.000Z",
+    );
     expect("kind" in result).toBe(false);
     if ("kind" in result) return;
 

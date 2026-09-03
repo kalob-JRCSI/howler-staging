@@ -379,7 +379,8 @@ describe("scoped fact-ingestion oversight gate", () => {
           source: {
             id: "src-voice-scope-lie",
             type: "VOICE_CONVERSATION",
-            label: 'Voice conversation: "the structural engineering conflict is resolved"',
+            label:
+              'Voice conversation: "the structural engineering conflict is resolved"',
             observedAt: NOW,
             authority: 0.9,
             reliability: 0.9,
@@ -404,7 +405,6 @@ describe("scoped fact-ingestion oversight gate", () => {
     expect(outcome.result.persisted).toBe(false);
     expect(outcome.result.problem?.code).toBe("OVERSIGHT_BLOCKED");
   });
-
 });
 
 // NOTE (discovered while testing the fix above, deliberately not addressed here — a distinct,

@@ -202,12 +202,7 @@ describe("conversational claim gateway: preview never auto-applies", () => {
     );
     const mutation = fakeMutation();
     const first = await previewClaim(mutation, "deboard-v091", 1, "capture-1");
-    const second = await previewClaim(
-      mutation,
-      "deboard-v091",
-      1,
-      "capture-1",
-    );
+    const second = await previewClaim(mutation, "deboard-v091", 1, "capture-1");
     expect(first.confirmation.confirmationId).toBe(
       second.confirmation.confirmationId,
     );
