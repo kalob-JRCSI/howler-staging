@@ -16,6 +16,124 @@ import {
   voiceBrowserClient,
 } from "./voice-transport";
 
+/**
+ * Task 19 "Howler Penthouse" shared design tokens and base component styles. Presentation only --
+ * no execution/business logic lives here or anywhere in this file's markup changes. Interpolated
+ * into each page's own <style> block so /admin, /admin/operator, and /admin/field share one
+ * coherent visual language: obsidian/charcoal surfaces, warm ivory text, brushed-metal neutrals,
+ * and a single restrained amber/gold accent reserved for consequential (mutating) actions --
+ * routine and read-only actions stay neutral. System fonts and CSS only: no external fonts, icon
+ * CDNs, animation libraries, or network requests exist solely for appearance.
+ */
+const PENTHOUSE_TOKENS = `
+    :root {
+      color-scheme: dark;
+      --hw-bg: #0a0b0d;
+      --hw-surface: #16181d;
+      --hw-surface-raised: #1c1f26;
+      --hw-border: rgba(214, 219, 230, 0.09);
+      --hw-border-strong: rgba(214, 219, 230, 0.18);
+      --hw-ink: #f2ede2;
+      --hw-ink-muted: #a3a6ad;
+      --hw-ink-faint: #6d7078;
+      --hw-accent: #c6a15b;
+      --hw-accent-strong: #d8b876;
+      --hw-accent-ink: #1a1300;
+      --hw-ok: #7fa889;
+      --hw-ok-bg: #10201a;
+      --hw-warn: #c6a15b;
+      --hw-warn-bg: #241d0e;
+      --hw-danger: #b3604a;
+      --hw-danger-bg: #241511;
+      --hw-focus: #d8b876;
+      --hw-radius-sm: 6px;
+      --hw-radius: 10px;
+      --hw-radius-lg: 16px;
+      --hw-font: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+      --hw-font-serif: ui-serif, Georgia, "Times New Roman", serif;
+      --hw-font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: max(18px, env(safe-area-inset-top)) 18px max(28px, env(safe-area-inset-bottom));
+      background:
+        radial-gradient(1100px 460px at 50% -14%, rgba(198, 161, 91, 0.05), transparent 60%),
+        var(--hw-bg);
+      color: var(--hw-ink);
+      font-family: var(--hw-font);
+      -webkit-font-smoothing: antialiased;
+    }
+    h1, h2, h3 { font-weight: 600; letter-spacing: -0.01em; }
+    h1 { font-size: 19px; margin: 0 0 4px; }
+    h2 { font-size: 14px; margin: 0; }
+    h3 {
+      font-size: 11px; margin: 0 0 4px; color: var(--hw-ink-faint);
+      text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600;
+    }
+    .hw-sub { color: var(--hw-ink-muted); margin: 0 0 16px; line-height: 1.5; font-size: 13px; }
+    .hw-banner, #env-banner {
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      border: 1px solid var(--hw-border-strong);
+      background: var(--hw-surface);
+      color: var(--hw-ink-muted);
+      padding: 9px 12px; border-radius: var(--hw-radius);
+      margin-bottom: 16px; font-size: 11px; font-weight: 600;
+      letter-spacing: 0.08em; text-transform: uppercase; text-align: center;
+    }
+    .hw-banner::before, #env-banner::before {
+      content: ""; width: 6px; height: 6px; border-radius: 50%;
+      background: var(--hw-ok); flex-shrink: 0;
+      box-shadow: 0 0 0 3px var(--hw-ok-bg);
+    }
+    .card {
+      background: var(--hw-surface);
+      border: 1px solid var(--hw-border);
+      border-radius: var(--hw-radius-lg);
+      padding: 16px;
+      margin: 12px 0;
+    }
+    label {
+      display: block; font-weight: 600; margin-bottom: 7px; font-size: 12px;
+      color: var(--hw-ink-muted); letter-spacing: 0.02em;
+    }
+    input, select, textarea {
+      box-sizing: border-box; width: 100%; font-size: 15px; padding: 11px 12px;
+      border-radius: var(--hw-radius-sm); border: 1px solid var(--hw-border-strong);
+      background: var(--hw-bg); color: var(--hw-ink); font-family: inherit;
+    }
+    input::placeholder, textarea::placeholder { color: var(--hw-ink-faint); }
+    textarea { font-family: var(--hw-font-mono); font-size: 13px; }
+    input:focus-visible, select:focus-visible, textarea:focus-visible,
+    button:focus-visible, a:focus-visible {
+      outline: 2px solid var(--hw-focus); outline-offset: 2px;
+    }
+    button {
+      min-height: 44px; border: 1px solid var(--hw-border-strong); border-radius: var(--hw-radius-sm);
+      padding: 10px 14px; font-size: 14px; font-weight: 600; letter-spacing: 0.01em;
+      background: var(--hw-surface-raised); color: var(--hw-ink); cursor: pointer;
+    }
+    button:hover:not(:disabled) { border-color: var(--hw-border-strong); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    button.secondary { background: transparent; border-color: var(--hw-border); color: var(--hw-ink-muted); }
+    button.danger,
+    button.btn-consequential {
+      background: var(--hw-accent); border-color: var(--hw-accent-strong); color: var(--hw-accent-ink);
+      font-weight: 700;
+    }
+    button.danger:hover:not(:disabled),
+    button.btn-consequential:hover:not(:disabled) { background: var(--hw-accent-strong); }
+    pre {
+      white-space: pre-wrap; overflow-wrap: anywhere;
+      background: var(--hw-bg); border: 1px solid var(--hw-border);
+      border-radius: var(--hw-radius); padding: 14px;
+      font-family: var(--hw-font-mono); font-size: 12px; line-height: 1.5; color: var(--hw-ink);
+    }
+    @media (prefers-reduced-motion: reduce) {
+      * { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+    }
+`;
+
 export function adminHtml(version: string): string {
   return `<!doctype html>
 <html lang="en">
@@ -233,6 +351,9 @@ export interface OperatorPanelElement {
   disabled: boolean;
   hidden: boolean;
   addEventListener(type: string, handler: (event?: unknown) => void): void;
+  /** Optional: only used for a purely cosmetic class toggle (see updateConditionalFields), never
+   * for behavior. Optional so existing minimal test fakes that omit it remain valid. */
+  classList?: { toggle(name: string, force?: boolean): void };
 }
 
 export interface OperatorPanelDocument {
@@ -831,6 +952,12 @@ export function operatorPanelClientScript(
     const isEvidence = EVIDENCE_KINDS.has(els.intentKind.value);
     els.revisionField.hidden = !isEvidence;
     els.evidenceField.hidden = !isEvidence;
+    // Presentation only: visually distinguishes the one consequential (mutating) intent kind from
+    // every routine/read-only one. Never affects which intent is actually submitted.
+    els.runButton.classList?.toggle(
+      "btn-consequential",
+      els.intentKind.value === "EVIDENCE_APPLY_SHADOW",
+    );
   }
   els.intentKind.addEventListener("change", updateConditionalFields);
   updateConditionalFields();
@@ -952,23 +1079,13 @@ export function operatorPanelHtml(): string {
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Howler Operator Panel</title>
   <style>
-    :root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    body { margin: 0; padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); background: #111318; color: #f4f6f8; font-size: 15px; }
+${PENTHOUSE_TOKENS}
+    body { font-size: 15px; }
     main { max-width: 640px; margin: 0 auto; }
-    h1 { font-size: 20px; margin: 0 0 4px; }
-    h2 { font-size: 15px; margin: 0 0 10px; }
-    .sub { color: #b8c0cc; margin: 0 0 14px; line-height: 1.4; font-size: 13px; }
-    #env-banner { border: 1px solid #1f7a3d; background: #0d2416; color: #7be3a3; padding: 10px 12px; border-radius: 10px; margin-bottom: 14px; font-weight: 700; letter-spacing: 0.02em; text-align: center; }
-    .card { background: #1b1f27; border: 1px solid #303744; border-radius: 12px; padding: 14px; margin: 10px 0; }
-    label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 13px; }
-    input, select, textarea { box-sizing: border-box; width: 100%; font-size: 15px; padding: 10px; border-radius: 8px; border: 1px solid #4b5565; background: #0f1217; color: #fff; font-family: inherit; }
-    textarea { font-family: ui-monospace, monospace; font-size: 13px; }
-    button { min-height: 44px; border: 0; border-radius: 8px; padding: 10px 14px; font-size: 15px; font-weight: 700; background: #315efb; color: #fff; cursor: pointer; }
-    button:disabled { opacity: 0.55; cursor: not-allowed; }
-    dl { margin: 0; display: grid; grid-template-columns: minmax(120px, auto) 1fr; gap: 6px 12px; font-size: 13px; }
-    dt { color: #b8c0cc; }
-    dd { margin: 0; word-break: break-word; }
-    #status { font-size: 13px; color: #b8c0cc; margin-top: 10px; }
+    dl { margin: 0; display: grid; grid-template-columns: minmax(120px, auto) 1fr; gap: 8px 12px; font-size: 13px; }
+    dt { color: var(--hw-ink-faint); }
+    dd { margin: 0; word-break: break-word; color: var(--hw-ink); }
+    #status { font-size: 12px; color: var(--hw-ink-muted); margin-top: 10px; }
     @media (max-width: 480px) { dl { grid-template-columns: 1fr; } dt { margin-top: 6px; } }
   </style>
 </head>
@@ -976,7 +1093,7 @@ export function operatorPanelHtml(): string {
 <main>
   <div id="env-banner" role="status">STAGING &middot; SHADOW &middot; NO LIVE SYSTEMS</div>
   <h1>Howler Operator Panel</h1>
-  <p class="sub">One canonical intent per action. This page submits requests only; all forecasting, revision, retry, and mutation logic runs server-side.</p>
+  <p class="hw-sub">One canonical intent per action. This page submits requests only; all forecasting, revision, retry, and mutation logic runs server-side.</p>
 
   <form id="intent-form">
     <section class="card">
@@ -1008,7 +1125,7 @@ export function operatorPanelHtml(): string {
     <section class="card" id="evidence-field" hidden>
       <label for="evidence-event-json">Evidence event (JSON)</label>
       <textarea id="evidence-event-json" rows="8" spellcheck="false" aria-describedby="evidence-help"></textarea>
-      <div id="evidence-help" class="sub">Paste the full ProjectEventInput JSON body.</div>
+      <div id="evidence-help" class="hw-sub">Paste the full ProjectEventInput JSON body.</div>
     </section>
 
     <button id="run-intent" type="submit">Run intent</button>
@@ -1167,7 +1284,7 @@ export function fieldDashboardClientScript(
       <div class="project-grid">
         <div><h3>Current status</h3><p id="fp-${String(index)}-status">${EM_DASH}</p></div>
         <div><h3>Priority actions</h3><p id="fp-${String(index)}-priority-actions">${EM_DASH}</p></div>
-        <div><h3>Top risks / blockers</h3><p id="fp-${String(index)}-risks">${EM_DASH}</p></div>
+        <div class="cell-risk"><h3>Top risks / blockers</h3><p id="fp-${String(index)}-risks">${EM_DASH}</p></div>
         <div><h3>Upcoming forecast</h3><p id="fp-${String(index)}-forecast">${EM_DASH}</p></div>
       </div>
       <p><strong>Recommended next move:</strong> <span id="fp-${String(index)}-recommendation">Run Refresh to load project intelligence.</span></p>
@@ -1506,6 +1623,7 @@ export function fieldDashboardClientScript(
       JSON.stringify(result.body, null, 2);
     updateProjectSummary(projectId);
     renderActiveWorkflows(projectId);
+    renderPortfolioOverview();
 
     const body = result.body as
       { run?: unknown; result?: unknown; error?: string } | undefined;
@@ -1688,11 +1806,289 @@ export function fieldDashboardClientScript(
       .addEventListener("click", () => {
         runEvidenceAction(projectId, index);
       });
-    document
-      .getElementById(`fp-${String(index)}-evidence-kind`)
-      .addEventListener("change", () => {
-        refreshBusyIndicators(projectId);
+    const evidenceKindEl = document.getElementById(
+      `fp-${String(index)}-evidence-kind`,
+    );
+    const evidenceRunEl = document.getElementById(
+      `fp-${String(index)}-evidence-run`,
+    );
+    function updateEvidenceRunEmphasis(): void {
+      // Presentation only: visually distinguishes the one consequential (mutating) evidence
+      // action from the routine preview. Never affects which kind is actually submitted.
+      evidenceRunEl.classList?.toggle(
+        "btn-consequential",
+        evidenceKindEl.value === "EVIDENCE_APPLY_SHADOW",
+      );
+    }
+    evidenceKindEl.addEventListener("change", () => {
+      refreshBusyIndicators(projectId);
+      updateEvidenceRunEmphasis();
+    });
+    updateEvidenceRunEmphasis();
+  }
+
+  /** Highest-severity signal any of a project's tracked actions is currently carrying, reusing
+   * exactly `isNoteworthy`'s classification (never a second definition of "noteworthy"). Used to
+   * drive the Penthouse portfolio row and priorities panel -- both read this instead of
+   * re-deriving urgency from raw workflow state. */
+  function projectSignal(
+    projectId: string,
+  ): "critical" | "attention" | "ok" | "unknown" {
+    let sawAttention = false;
+    for (const kind of ACTION_KINDS) {
+      const state = actionStateByKey.get(`${projectId}:${kind}`);
+      if (!isNoteworthy(state)) continue;
+      if (
+        state?.workflowState === "INTERRUPTED" ||
+        state?.workflowState === "BLOCKED"
+      ) {
+        return "critical";
+      }
+      sawAttention = true;
+    }
+    if (sawAttention) return "attention";
+    const health = healthByProject.get(projectId) ?? null;
+    return health && health.available === true ? "ok" : "unknown";
+  }
+
+  function projectFinishLine(projectId: string): string {
+    const health = healthByProject.get(projectId) ?? null;
+    if (!health || health.available !== true) return EM_DASH;
+    const completion = health.completionLikely;
+    return typeof completion === "string" ? completion : EM_DASH;
+  }
+
+  function projectHealthScore(projectId: string): string {
+    const health = healthByProject.get(projectId) ?? null;
+    if (!health || health.available !== true) return EM_DASH;
+    const confidence = health.meanForecastConfidence;
+    return typeof confidence === "number" ? String(confidence) : EM_DASH;
+  }
+
+  /** One compact portfolio row (signal / PROJECT / STATUS / FINISH / HEALTH) -- deliberately not
+   * the full project card: that detail still lives in the admin drawer below, unchanged. */
+  function portfolioRowHtml(projectId: string): string {
+    const safeId = escapeHtml(projectId);
+    const signal = projectSignal(projectId);
+    const statusLabel =
+      signal === "critical"
+        ? "Critical"
+        : signal === "attention"
+          ? "Attention"
+          : signal === "ok"
+            ? "On track"
+            : "Awaiting refresh";
+    return `<div class="ph-row" data-signal="${signal}">
+      <span class="ph-row-signal" aria-hidden="true"></span>
+      <span class="ph-row-name">${safeId}</span>
+      <span class="ph-row-status">${statusLabel}</span>
+      <span class="ph-row-finish">${escapeHtml(projectFinishLine(projectId))}</span>
+      <span class="ph-row-health">${escapeHtml(projectHealthScore(projectId))}</span>
+    </div>`;
+  }
+
+  /** Count of currently noteworthy project+action items -- the same underlying signal
+   * `renderActiveWorkflows` uses per project (isNoteworthy), just tallied at portfolio level. */
+  function priorityCount(): number {
+    let count = 0;
+    for (const projectId of trackedProjects) {
+      for (const kind of ACTION_KINDS) {
+        if (isNoteworthy(actionStateByKey.get(`${projectId}:${kind}`))) {
+          count += 1;
+        }
+      }
+    }
+    return count;
+  }
+
+  function prioritySeverityOverall(): "critical" | "attention" | "none" {
+    let sawAttention = false;
+    for (const projectId of trackedProjects) {
+      for (const kind of ACTION_KINDS) {
+        const state = actionStateByKey.get(`${projectId}:${kind}`);
+        if (!isNoteworthy(state)) continue;
+        if (
+          state?.workflowState === "INTERRUPTED" ||
+          state?.workflowState === "BLOCKED"
+        ) {
+          return "critical";
+        }
+        sawAttention = true;
+      }
+    }
+    return sawAttention ? "attention" : "none";
+  }
+
+  /** The Alerts list under the Priorities count: one line per noteworthy project+action --
+   * exactly the same items renderActiveWorkflows already lists per project, surfaced once more
+   * at portfolio level. No new severity logic, no per-item card chrome (plain hairline rows). */
+  function prioritiesListHtml(): string {
+    const rows: string[] = [];
+    for (const projectId of trackedProjects) {
+      for (const kind of ACTION_KINDS) {
+        const state = actionStateByKey.get(`${projectId}:${kind}`);
+        if (!isNoteworthy(state)) continue;
+        const label = ACTION_LABELS[kind] ?? kind;
+        const detail = state?.problemText
+          ? state.problemText
+          : (state?.workflowState ?? "");
+        rows.push(
+          `<li class="ph-alert-row"><span class="ph-alert-project">${escapeHtml(projectId)}</span><span class="ph-alert-detail">${escapeHtml(label)}: ${escapeHtml(detail)}</span></li>`,
+        );
+      }
+    }
+    return rows.length
+      ? `<ul class="ph-alert-list">${rows.join("")}</ul>`
+      : `<p class="ph-empty">Nothing needs you right now.</p>`;
+  }
+
+  /** The next 14 real calendar days (today first), using the browser's own clock -- never a
+   * fabricated/hardcoded date range. Each entry's `key` is a local-date string (YYYY-MM-DD) used
+   * to align a project's real `nextRiskDate` to a column; `day`/`dow` are display-only. */
+  function next14Days(): { key: string; day: string; dow: string }[] {
+    const now = new Date();
+    const days: { key: string; day: string; dow: string }[] = [];
+    for (let i = 0; i < 14; i += 1) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
+      days.push({
+        key: dateKey(d),
+        day: String(d.getDate()),
+        dow: d
+          .toLocaleDateString(undefined, { weekday: "short" })
+          .toUpperCase(),
       });
+    }
+    return days;
+  }
+
+  function dateKey(d: Date): string {
+    return `${String(d.getFullYear())}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+
+  /** Normalizes a real recovery `nextRiskDate` value (plain date or full ISO datetime) to the
+   * same local-date key `next14Days` uses, so a real date can be matched to its column. Returns
+   * "" for anything unparseable rather than guessing -- an unmatched date is treated as outside
+   * the visible window, never silently misplaced. */
+  function dateKeyFromValue(value: unknown): string {
+    if (typeof value !== "string") return "";
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? "" : dateKey(parsed);
+  }
+
+  /** One project's row in the 14-day movement timeline: a single real marker (from
+   * `recovery.nextRiskDate`) placed on the matching day column when it falls in the window, or
+   * an honest "Awaiting refresh" / "beyond 14 days" state when it doesn't -- never a fabricated
+   * multi-phase schedule, since no per-phase task data exists in this system. */
+  function movementRowHtml(projectId: string, days: { key: string }[]): string {
+    const recovery = recoveryByProject.get(projectId) ?? null;
+    const recoveryAvailable = recovery ? recovery.available === true : false;
+    const signal = projectSignal(projectId);
+    const riskKey = recoveryAvailable
+      ? dateKeyFromValue(recovery?.nextRiskDate)
+      : "";
+    const dayIndex = riskKey ? days.findIndex((d) => d.key === riskKey) : -1;
+    const marker =
+      dayIndex === -1
+        ? ""
+        : `<span class="ph-gantt-marker" data-signal="${signal}" style="grid-column: ${String(dayIndex + 1)}"></span>`;
+    const stateLabel = !recoveryAvailable
+      ? "Awaiting refresh"
+      : riskKey && dayIndex === -1
+        ? `Next risk ${riskKey} (beyond 14 days)`
+        : riskKey
+          ? `Next risk ${riskKey}`
+          : "No forecast yet";
+    return `<div class="ph-gantt-row-grid ph-gantt-row" data-signal="${signal}">
+      <span class="ph-gantt-project">${escapeHtml(projectId)}</span>
+      <div class="ph-gantt-track">${marker}</div>
+      <span class="ph-gantt-state">${escapeHtml(stateLabel)}</span>
+    </div>`;
+  }
+
+  /** The Movement timeline: a real 14-day date grid with one honest marker row per tracked
+   * project -- portfolio movement awareness only, not a scheduling tool. No phase names, no
+   * dependencies, no editing -- that detail belongs to the future project Index Card. */
+  function movementGanttHtml(): string {
+    if (trackedProjects.length === 0) {
+      return `<p class="ph-empty">No tracked projects yet.</p>`;
+    }
+    const days = next14Days();
+    const header = `<div class="ph-gantt-row-grid ph-gantt-header">
+      <span class="ph-gantt-header-label">Project</span>
+      <div class="ph-gantt-track">${days
+        .map(
+          (d, i) =>
+            `<span class="ph-gantt-day${i === 0 ? " ph-gantt-today" : ""}"><span class="ph-gantt-day-dow">${escapeHtml(d.dow)}</span>${escapeHtml(d.day)}</span>`,
+        )
+        .join("")}</div>
+      <span class="ph-gantt-header-label">Next risk</span>
+    </div>`;
+    const rows = trackedProjects
+      .map((projectId) => movementRowHtml(projectId, days))
+      .join("");
+    return `<div class="ph-gantt-scroll">${header}${rows}</div>`;
+  }
+
+  /** The single quiet "Howler notice" line: the first available top risk across tracked
+   * projects, or an honest idle/empty summary. Deliberately one line, never a second competing
+   * insight element -- see Task 19 brief. Plain text only (assigned via textContent below), so
+   * this never HTML-escapes its own output. */
+  function intelligenceNoticeText(): string {
+    for (const projectId of trackedProjects) {
+      const health = healthByProject.get(projectId) ?? null;
+      if (health && health.available === true) {
+        const risks = (health.topRisks as string[] | undefined) ?? [];
+        const topRisk = risks[0];
+        if (topRisk) return `${projectId}: ${topRisk}`;
+      }
+    }
+    const count = trackedProjects.length;
+    return count > 0
+      ? `Monitoring ${String(count)} tracked project${count === 1 ? "" : "s"}. Nothing urgent right now.`
+      : "Add a project to begin monitoring.";
+  }
+
+  /** Refreshes every portfolio-level Penthouse section from already-tracked state. Called
+   * whenever that state can have changed: after any action result settles (handleActionResult)
+   * and whenever the tracked-project list itself changes (renderProjects). Never introduces new
+   * business logic -- purely re-reads trackedProjects/healthByProject/recoveryByProject/
+   * actionStateByKey, the same maps the per-project card rendering already reads. */
+  function renderPortfolioOverview(): void {
+    document.getElementById("ph-portfolio-rows").innerHTML =
+      trackedProjects.length
+        ? trackedProjects.map((id) => portfolioRowHtml(id)).join("")
+        : `<p class="ph-empty">No tracked projects yet ${EM_DASH} add one in Admin &amp; diagnostics below.</p>`;
+
+    const severity = prioritySeverityOverall();
+    const prioritiesSection = document.getElementById("ph-priorities-section");
+    prioritiesSection.classList?.toggle(
+      "ph-severity-critical",
+      severity === "critical",
+    );
+    prioritiesSection.classList?.toggle(
+      "ph-severity-attention",
+      severity === "attention",
+    );
+    document.getElementById("ph-priority-count").textContent =
+      String(priorityCount());
+    document.getElementById("ph-priority-word").textContent =
+      severity === "critical"
+        ? "Critical"
+        : severity === "attention"
+          ? "Attention"
+          : "";
+    document.getElementById("ph-priority-caption").textContent =
+      severity === "critical"
+        ? "Critical items need you now."
+        : severity === "attention"
+          ? "Items need your attention."
+          : "Nothing needs you right now.";
+    document.getElementById("ph-priorities-list").innerHTML =
+      prioritiesListHtml();
+
+    document.getElementById("ph-movement-band").innerHTML = movementGanttHtml();
+    document.getElementById("ph-intelligence-text").textContent =
+      intelligenceNoticeText();
   }
 
   function renderProjects(): void {
@@ -1705,6 +2101,7 @@ export function fieldDashboardClientScript(
       updateProjectSummary(id);
       renderActiveWorkflows(id);
     });
+    renderPortfolioOverview();
   }
 
   els.addProjectButton.addEventListener("click", () => {
@@ -1790,6 +2187,72 @@ export function fieldDashboardClientScript(
   return voiceBridge;
 }
 
+/**
+ * Task 19: purely presentational voice-state indicator. Watches #voice-status's existing
+ * textContent (set entirely by voiceBrowserClient in voice-transport.ts, which this function
+ * never imports, calls, or modifies) and reflects it as a `data-voice-state` attribute on the
+ * voice section for CSS styling only -- READY/LISTENING/PROCESSING/CONFIRMATION/COMPLETED/FAILED.
+ * Read-only observer: it never writes to #voice-status, never touches the capture/resolver/
+ * confirmation/identity path, and has no effect if #voice-status or #voice-section are absent.
+ * `.toString()`-embedded the same way as every other field-dashboard script piece, so it must stay
+ * fully self-contained (no module-scope references).
+ */
+export function wireVoicePresentationState(document: {
+  getElementById(id: string): {
+    textContent: string | null;
+    setAttribute(name: string, value: string): void;
+  } | null;
+}): void {
+  const status = document.getElementById("voice-status");
+  const section = document.getElementById("voice-section");
+  if (!status || !section) return;
+
+  function classify(text: string): string {
+    const value = text.trim().toUpperCase();
+    if (
+      value.startsWith("LISTENING") ||
+      value.startsWith("REQUESTING_PERMISSION")
+    )
+      return "LISTENING";
+    if (value.startsWith("RESOLVING") || value.startsWith("SUBMITTING"))
+      return "PROCESSING";
+    if (value.startsWith("CONFIRMATION_REQUIRED")) return "CONFIRMATION";
+    if (value.startsWith("RESULT")) return "COMPLETED";
+    if (
+      value.startsWith("ERROR") ||
+      value.startsWith("CLARIFICATION") ||
+      value.startsWith("CANCELLED")
+    )
+      return "FAILED";
+    return "READY";
+  }
+
+  function apply(): void {
+    section?.setAttribute(
+      "data-voice-state",
+      classify(status?.textContent ?? ""),
+    );
+  }
+
+  apply();
+
+  const ObserverCtor = (
+    globalThis as unknown as {
+      MutationObserver?: new (callback: () => void) => {
+        observe(target: unknown, options: unknown): void;
+      };
+    }
+  ).MutationObserver;
+  if (ObserverCtor) {
+    const observer = new ObserverCtor(apply);
+    observer.observe(status, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+    });
+  }
+}
+
 export function fieldDashboardHtml(): string {
   return `<!doctype html>
 <html lang="en">
@@ -1798,56 +2261,342 @@ export function fieldDashboardHtml(): string {
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Howler Field Dashboard</title>
   <style>
-    :root { color-scheme: light dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-    body { margin: 0; padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); background: #111318; color: #f4f6f8; font-size: 15px; }
-    main { max-width: 920px; margin: 0 auto; }
-    h1 { font-size: 20px; margin: 0 0 4px; }
-    h2 { font-size: 16px; margin: 0; }
-    h3 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: #8891a0; margin: 0 0 4px; }
-    .sub { color: #b8c0cc; margin: 0 0 14px; line-height: 1.4; font-size: 13px; }
-    #env-banner { border: 1px solid #1f7a3d; background: #0d2416; color: #7be3a3; padding: 10px 12px; border-radius: 10px; margin-bottom: 14px; font-weight: 700; letter-spacing: 0.02em; text-align: center; }
-    .card { background: #1b1f27; border: 1px solid #303744; border-radius: 12px; padding: 14px; margin: 10px 0; }
-    .project-card { padding: 16px; }
-    .project-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
-    .project-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 10px; }
-    .project-grid p { margin: 0; font-size: 13px; word-break: break-word; }
-    label { display: block; font-weight: 600; margin-bottom: 6px; font-size: 13px; }
-    input, select, textarea { box-sizing: border-box; width: 100%; font-size: 15px; padding: 10px; border-radius: 8px; border: 1px solid #4b5565; background: #0f1217; color: #fff; font-family: inherit; margin-bottom: 8px; }
-    textarea { font-family: ui-monospace, monospace; font-size: 13px; }
-    button { min-height: 40px; border: 0; border-radius: 8px; padding: 8px 12px; font-size: 14px; font-weight: 700; background: #315efb; color: #fff; cursor: pointer; }
-    button:disabled { opacity: 0.55; cursor: not-allowed; }
-    .evidence-block { border-top: 1px solid #303744; margin-top: 10px; padding-top: 10px; }
+${PENTHOUSE_TOKENS}
+    body {
+      font-size: 15px;
+      background:
+        radial-gradient(1100px 620px at 82% -8%, rgba(196, 143, 80, 0.14), transparent 60%),
+        radial-gradient(900px 520px at -10% 12%, rgba(120, 150, 190, 0.08), transparent 55%),
+        var(--hw-bg);
+    }
+    .ph-layout { display: flex; max-width: 1480px; margin: 0 auto; align-items: flex-start; }
+    .ph-nav {
+      flex: 0 0 190px; display: flex; flex-direction: column; gap: 2px;
+      padding: 28px 14px; border-right: 1px solid var(--hw-border); position: sticky; top: 0;
+    }
+    .ph-nav-mark {
+      margin: 0 6px 18px; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--hw-ink-faint);
+    }
+    .ph-nav-mark span { display: block; font-size: 9px; letter-spacing: 0.18em; opacity: 0.75; }
+    .ph-nav-item {
+      text-align: left; background: none; border: none; padding: 9px 10px; cursor: pointer;
+      border-radius: var(--hw-radius-sm); font-size: 12px; letter-spacing: 0.05em;
+      text-transform: uppercase; color: var(--hw-ink-faint); font-family: var(--hw-font);
+    }
+    .ph-nav-item:hover { color: var(--hw-ink-muted); }
+    .ph-nav-item:focus-visible { outline: 2px solid var(--hw-focus); outline-offset: 2px; }
+    .ph-nav-item[aria-disabled="true"] { opacity: 0.55; }
+    .ph-nav-active {
+      color: var(--hw-accent-strong); background: var(--hw-surface); font-weight: 600;
+    }
+    .ph-shell { flex: 1 1 auto; min-width: 0; padding: 28px 24px 48px; }
+    h1 { font-size: 20px; }
+    .project-card { padding: 18px; }
+
+    /* Arrival: atmosphere + hero copy (left) beside portfolio + priorities (right) */
+    .ph-arrival {
+      position: relative; display: grid; grid-template-columns: 1fr;
+      border: 1px solid var(--hw-border); border-radius: var(--hw-radius-lg);
+      overflow: hidden; margin-bottom: 22px; background: var(--hw-surface);
+    }
+    .ph-atmosphere {
+      position: relative; display: flex; flex-direction: column; justify-content: flex-end;
+      padding: 22px 24px 26px; min-height: 360px;
+      background:
+        linear-gradient(180deg, rgba(8,9,11,0.12) 0%, rgba(8,9,11,0.6) 55%, rgba(8,9,11,0.92) 100%),
+        url("/assets/penthouse-atmosphere.24b1cb4d39.webp");
+      background-repeat: no-repeat, no-repeat;
+      background-size: cover, cover;
+      background-position: center, 32% 45%;
+    }
+    .ph-env-banner { position: absolute; top: 16px; right: 16px; font-size: 11px; }
+    .ph-lockup { margin-bottom: auto; display: flex; align-items: baseline; gap: 8px; }
+    .ph-lockup-word { font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--hw-ink); }
+    .ph-lockup-sub { font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--hw-ink-faint); }
+    .ph-greeting { margin: 0 0 6px; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--hw-ink-faint); }
+    .ph-command {
+      margin: 0 0 10px; font-family: var(--hw-font-serif); font-weight: 400; font-size: 38px;
+      line-height: 1.08; color: var(--hw-ink);
+    }
+    .ph-statement { margin: 0 0 20px; max-width: 34ch; font-size: 13px; color: var(--hw-ink-muted); }
+    .ph-voice-inline { display: flex; align-items: center; gap: 12px; }
+    .ph-voice-btn {
+      flex: 0 0 auto; width: 44px; height: 44px; border-radius: 50%; padding: 0;
+      border: 1px solid var(--hw-border-strong); background: rgba(20, 18, 15, 0.4);
+      display: flex; align-items: center; justify-content: center;
+    }
+    .ph-voice-ring { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--hw-ink-muted); }
+    .ph-voice-caption { margin: 0; font-size: 12px; font-weight: 400; color: var(--hw-ink-muted); }
+    #voice-status {
+      font-family: var(--hw-font-mono); font-size: 11px; letter-spacing: 0.03em;
+      color: var(--hw-ink-faint); margin-top: 2px;
+    }
+    #voice-section[data-voice-state="LISTENING"] .ph-voice-btn {
+      border-color: var(--hw-accent); box-shadow: 0 0 0 4px var(--hw-accent-ink);
+    }
+    #voice-section[data-voice-state="LISTENING"] .ph-voice-ring { border-color: var(--hw-accent); }
+    #voice-section[data-voice-state="LISTENING"] #voice-status { color: var(--hw-accent-strong); }
+    #voice-section[data-voice-state="PROCESSING"] .ph-voice-btn { border-style: dashed; }
+    #voice-section[data-voice-state="CONFIRMATION"] .ph-voice-btn { border-color: var(--hw-warn); }
+    #voice-section[data-voice-state="CONFIRMATION"] #voice-status { color: var(--hw-warn); }
+    #voice-section[data-voice-state="COMPLETED"] #voice-status { color: var(--hw-ok); }
+    #voice-section[data-voice-state="FAILED"] #voice-status { color: var(--hw-danger); }
+
+    .ph-data-grid { display: grid; grid-template-columns: 1fr; }
+    .ph-priorities { order: 1; padding: 18px 22px 22px; border-bottom: 1px solid var(--hw-border); }
+    .ph-portfolio { order: 2; padding: 18px 22px 22px; }
+    .ph-eyebrow-label {
+      margin: 0 0 4px; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+      color: var(--hw-ink-faint);
+    }
+    .ph-portfolio h2 { margin: 0 0 14px; font-size: 17px; font-weight: 500; color: var(--hw-ink); }
+    .ph-empty { color: var(--hw-ink-faint); font-size: 13px; margin: 0; }
+
+    .ph-row {
+      display: grid; grid-template-columns: 8px 1.3fr 1fr 0.8fr 0.6fr; align-items: center;
+      gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--hw-border); font-size: 13px;
+    }
+    .ph-row-labels {
+      font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--hw-ink-faint);
+    }
+    .ph-row-signal { width: 6px; height: 6px; border-radius: 50%; background: var(--hw-border-strong); justify-self: center; }
+    .ph-row[data-signal="critical"] .ph-row-signal { background: var(--hw-danger); }
+    .ph-row[data-signal="attention"] .ph-row-signal { background: var(--hw-warn); }
+    .ph-row[data-signal="ok"] .ph-row-signal { background: var(--hw-ok); }
+    .ph-row-name { font-weight: 500; }
+    .ph-row-status, .ph-row-finish, .ph-row-health { color: var(--hw-ink-muted); }
+
+    .ph-priority-summary { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
+    .ph-priority-count { font-family: var(--hw-font-serif); font-size: 38px; line-height: 1; color: var(--hw-ink); }
+    .ph-priority-word { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--hw-ink-muted); }
+    .ph-priorities.ph-severity-critical .ph-priority-count,
+    .ph-priorities.ph-severity-critical .ph-priority-word { color: var(--hw-danger); }
+    .ph-priorities.ph-severity-attention .ph-priority-count,
+    .ph-priorities.ph-severity-attention .ph-priority-word { color: var(--hw-warn); }
+    .ph-priority-caption { margin: 0 0 16px; font-size: 12px; color: var(--hw-ink-faint); }
+    .ph-alerts-label {
+      margin: 0 0 8px; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
+      color: var(--hw-ink-faint); border-top: 1px solid var(--hw-border); padding-top: 14px;
+    }
+    .ph-alert-list { list-style: none; margin: 0; padding: 0; }
+    .ph-alert-row { padding: 8px 0; border-bottom: 1px solid var(--hw-border); font-size: 12px; }
+    .ph-alert-row:last-child { border-bottom: none; }
+    .ph-alert-project { display: block; font-weight: 600; color: var(--hw-ink); margin-bottom: 2px; }
+    .ph-alert-detail { color: var(--hw-ink-muted); word-break: break-word; }
+
+    .ph-bottom-band { display: grid; grid-template-columns: 1fr; gap: 20px; margin-bottom: 22px; }
+    .ph-movement, .ph-intelligence {
+      min-width: 0; border: 1px solid var(--hw-border); border-radius: var(--hw-radius);
+      padding: 16px 18px;
+    }
+    .ph-movement h2 {
+      margin: 0 0 12px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em;
+      color: var(--hw-ink-muted);
+    }
+    .ph-gantt-scroll { overflow-x: auto; }
+    .ph-gantt-row-grid {
+      display: grid; grid-template-columns: 96px minmax(320px, 1fr) 130px; gap: 10px;
+      align-items: center; min-width: 480px;
+    }
+    .ph-gantt-header {
+      padding-bottom: 8px; border-bottom: 1px solid var(--hw-border-strong); margin-bottom: 4px;
+    }
+    .ph-gantt-header-label {
+      font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--hw-ink-faint);
+    }
+    .ph-gantt-header-label:last-child { text-align: right; }
+    .ph-gantt-track {
+      display: grid; grid-template-columns: repeat(14, 1fr); align-items: center; height: 18px;
+      position: relative;
+    }
+    .ph-gantt-track::before {
+      content: ""; position: absolute; inset: 0; pointer-events: none;
+      background-image: repeating-linear-gradient(
+        to right, var(--hw-border) 0, var(--hw-border) 1px, transparent 1px, transparent calc(100% / 14)
+      );
+    }
+    .ph-gantt-day {
+      text-align: center; font-size: 9px; line-height: 1.3; color: var(--hw-ink-faint); z-index: 1;
+    }
+    .ph-gantt-day-dow { display: block; letter-spacing: 0.04em; }
+    .ph-gantt-day.ph-gantt-today { color: var(--hw-accent-strong); font-weight: 600; }
+    .ph-gantt-row { padding: 7px 0; border-bottom: 1px solid var(--hw-border); font-size: 12px; }
+    .ph-gantt-row:last-child { border-bottom: none; }
+    .ph-gantt-project { font-weight: 500; }
+    .ph-gantt-marker {
+      width: 7px; height: 7px; border-radius: 50%; justify-self: center; z-index: 1;
+      background: var(--hw-border-strong);
+    }
+    .ph-gantt-row[data-signal="critical"] .ph-gantt-marker { background: var(--hw-danger); }
+    .ph-gantt-row[data-signal="attention"] .ph-gantt-marker { background: var(--hw-warn); }
+    .ph-gantt-row[data-signal="ok"] .ph-gantt-marker { background: var(--hw-ok); }
+    .ph-gantt-state { color: var(--hw-ink-muted); text-align: right; }
+    .ph-intelligence-label {
+      margin: 0 0 6px; font-family: var(--hw-font-serif); font-size: 12px; letter-spacing: 0.06em;
+      color: var(--hw-accent-strong); text-transform: uppercase;
+    }
+    .ph-intelligence p:last-child { margin: 0; font-size: 13px; color: var(--hw-ink-muted); }
+
+    .ph-admin-drawer { border-top: 1px solid var(--hw-border); padding-top: 12px; }
+    .ph-admin-drawer summary {
+      font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--hw-ink-muted);
+    }
+    .ph-admin-drawer > *:not(summary) { margin-top: 14px; }
+
+    @media (min-width: 861px) {
+      .ph-arrival { grid-template-columns: minmax(300px, 38%) 1fr; }
+      .ph-atmosphere { min-height: 520px; }
+      .ph-data-grid { grid-template-columns: 1.5fr 1fr; }
+      .ph-priorities { order: 2; border-bottom: none; border-left: 1px solid var(--hw-border); }
+      .ph-portfolio { order: 1; }
+      .ph-bottom-band { grid-template-columns: 1.6fr 1fr; }
+    }
+    @media (max-width: 760px) {
+      .ph-layout { flex-direction: column; align-items: stretch; }
+      .ph-atmosphere {
+        background-image:
+          linear-gradient(180deg, rgba(8,9,11,0.12) 0%, rgba(8,9,11,0.6) 55%, rgba(8,9,11,0.92) 100%),
+          url("/assets/penthouse-atmosphere-mobile.24a2efed46.webp");
+      }
+      .ph-nav {
+        flex-direction: row; flex-wrap: nowrap; overflow-x: auto; position: static; min-width: 0;
+        border-right: none; border-bottom: 1px solid var(--hw-border); padding: 10px 12px; gap: 4px;
+      }
+      .ph-nav-mark { display: none; }
+      .ph-nav-item { flex: 0 0 auto; padding: 7px 10px; font-size: 11px; }
+      .ph-row {
+        grid-template-columns: 8px 1fr; row-gap: 3px;
+        grid-template-areas: "signal name" "status finish" ". health";
+      }
+      .ph-row-signal { grid-area: signal; }
+      .ph-row-name { grid-area: name; }
+      .ph-row-status { grid-area: status; }
+      .ph-row-finish { grid-area: finish; }
+      .ph-row-health { grid-area: health; }
+      .ph-row-labels { display: none; }
+    }
+    .project-head {
+      display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+      margin-bottom: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--hw-border);
+    }
+    .project-head h2 { font-size: 15px; letter-spacing: 0.01em; }
+    .project-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px 16px; margin-bottom: 12px;
+    }
+    .project-grid p { margin: 0; font-size: 13px; word-break: break-word; color: var(--hw-ink); }
+    .cell-risk h3 { color: var(--hw-danger); }
+    .active-workflows { margin: 12px 0; }
+    .active-workflows h3 { margin-bottom: 6px; }
+    .workflow-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      padding: 8px 10px; font-size: 13px;
+      border-left: 2px solid var(--hw-danger); background: var(--hw-danger-bg);
+      border-radius: 0 var(--hw-radius-sm) var(--hw-radius-sm) 0;
+    }
+    .workflow-row + .workflow-row { margin-top: 6px; }
+    .none { color: var(--hw-ink-faint); font-size: 13px; margin: 0; }
+    .evidence-block { border-top: 1px solid var(--hw-border); margin-top: 12px; padding-top: 12px; }
     details { margin-top: 10px; }
-    pre { white-space: pre-wrap; word-break: break-word; font-size: 12px; max-height: 220px; overflow: auto; }
-    [id$="-card-status"] { font-size: 12px; color: #b8c0cc; margin-top: 8px; }
+    details summary { cursor: pointer; font-size: 12px; color: var(--hw-ink-muted); }
+    [id$="-card-status"] { font-size: 12px; color: var(--hw-ink-muted); margin-top: 10px; }
   </style>
 </head>
 <body>
-<main>
-  <div id="env-banner" role="status">STAGING &middot; SHADOW &middot; NO LIVE SYSTEMS</div>
-  <h1>Howler Field Dashboard (Pilot)</h1>
-  <p class="sub">Read-only forecast/health/recovery intelligence and explicit staging-only evidence actions, one project at a time. This page submits requests only; all forecasting, revision, retry, and mutation logic runs server-side.</p>
+<div class="ph-layout">
+  <nav class="ph-nav" aria-label="Penthouse">
+    <p class="ph-nav-mark">Howler<span>Penthouse</span></p>
+    <button type="button" class="ph-nav-item ph-nav-active" aria-current="page">Portfolio</button>
+    <button type="button" class="ph-nav-item" aria-disabled="true" title="Coming soon">Forecast</button>
+    <button type="button" class="ph-nav-item" aria-disabled="true" title="Coming soon">Trades</button>
+    <button type="button" class="ph-nav-item" aria-disabled="true" title="Coming soon">Materials</button>
+    <button type="button" class="ph-nav-item" aria-disabled="true" title="Coming soon">Inspections</button>
+    <button type="button" class="ph-nav-item" aria-disabled="true" title="Coming soon">Decisions</button>
+    <button type="button" class="ph-nav-item" aria-disabled="true" title="Coming soon">Risks</button>
+    <button type="button" class="ph-nav-item" aria-disabled="true" title="Coming soon">Documents</button>
+    <button type="button" class="ph-nav-item" aria-disabled="true" title="Coming soon">Activity</button>
+  </nav>
+<main class="ph-shell">
+  <div class="ph-arrival">
+    <div class="ph-atmosphere">
+      <div id="env-banner" role="status" class="ph-env-banner">STAGING &middot; SHADOW &middot; NO LIVE SYSTEMS</div>
+      <p class="ph-lockup"><span class="ph-lockup-word">Howler</span><span class="ph-lockup-sub">Penthouse</span></p>
+      <div>
+        <p class="ph-greeting">Portfolio command</p>
+        <h1 class="ph-command">Command<br>the work.</h1>
+        <p class="ph-statement">Real-time oversight of every tracked project, one voice away.</p>
+        <div class="ph-voice-inline" id="voice-section" aria-labelledby="voice-heading" data-voice-state="READY">
+          <button id="voice-push-to-talk" type="button" class="ph-voice-btn" aria-label="Push to talk">
+            <span class="ph-voice-ring" aria-hidden="true"></span>
+          </button>
+          <div>
+            <h2 id="voice-heading" class="ph-voice-caption">Press to speak with Howler</h2>
+            <div id="voice-status" role="status" aria-live="polite">IDLE</div>
+          </div>
+        </div>
+      </div>
+    </div>
 
-  <section class="card" aria-labelledby="voice-heading">
-    <h2 id="voice-heading">Voice transport</h2>
-    <button id="voice-push-to-talk" type="button" aria-label="Push to talk">Push to talk</button>
-    <div id="voice-status" role="status" aria-live="polite">IDLE</div>
-  </section>
+    <div class="ph-data-grid">
+      <section class="ph-priorities" id="ph-priorities-section" aria-labelledby="ph-priorities-heading">
+        <p class="ph-eyebrow-label" id="ph-priorities-heading">Priorities</p>
+        <div class="ph-priority-summary">
+          <span class="ph-priority-count" id="ph-priority-count">0</span>
+          <span class="ph-priority-word" id="ph-priority-word"></span>
+        </div>
+        <p class="ph-priority-caption" id="ph-priority-caption">Nothing needs you right now.</p>
+        <p class="ph-alerts-label">Alerts</p>
+        <div id="ph-priorities-list"><p class="ph-empty">Nothing needs you right now.</p></div>
+      </section>
 
-  <section class="card">
-    <label for="admin-key">HOWLER_ADMIN_KEY</label>
-    <input id="admin-key" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Paste the staging admin key">
-  </section>
+      <section class="ph-portfolio" aria-labelledby="ph-portfolio-heading">
+        <p class="ph-eyebrow-label">Portfolio overview</p>
+        <h2 id="ph-portfolio-heading">Active projects</h2>
+        <div class="ph-row ph-row-labels" aria-hidden="true">
+          <span class="ph-row-signal"></span>
+          <span class="ph-row-name">Project</span>
+          <span class="ph-row-status">Status</span>
+          <span class="ph-row-finish">Finish</span>
+          <span class="ph-row-health">Health</span>
+        </div>
+        <div id="ph-portfolio-rows"><p class="ph-empty">No tracked projects yet.</p></div>
+      </section>
+    </div>
+  </div>
 
-  <section class="card">
-    <label for="new-project-id">Add project</label>
-    <input id="new-project-id" type="text" autocapitalize="none" spellcheck="false" placeholder="Project ID">
-    <button id="add-project" type="button">Add project</button>
-    <button id="refresh-all" type="button">Refresh all</button>
-  </section>
+  <div class="ph-bottom-band">
+    <section class="ph-movement" aria-labelledby="ph-movement-heading">
+      <h2 id="ph-movement-heading">Movement</h2>
+      <div id="ph-movement-band"><p class="ph-empty">No portfolio movement yet.</p></div>
+    </section>
 
-  <div id="projects-container"></div>
+    <section class="ph-intelligence" aria-labelledby="ph-intelligence-heading">
+      <p class="ph-intelligence-label" id="ph-intelligence-heading">Howler notice</p>
+      <p id="ph-intelligence-text">Add a project to begin monitoring.</p>
+    </section>
+  </div>
+
+  <details class="ph-admin-drawer">
+    <summary>Admin &amp; diagnostics</summary>
+    <p class="hw-sub">Read-only forecast/health/recovery intelligence and explicit staging-only evidence actions, one project at a time. This page submits requests only; all forecasting, revision, retry, and mutation logic runs server-side.</p>
+
+    <section class="card">
+      <label for="admin-key">HOWLER_ADMIN_KEY</label>
+      <input id="admin-key" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Paste the staging admin key">
+    </section>
+
+    <section class="card">
+      <label for="new-project-id">Add project</label>
+      <input id="new-project-id" type="text" autocapitalize="none" spellcheck="false" placeholder="Project ID">
+      <button id="add-project" type="button">Add project</button>
+      <button id="refresh-all" type="button">Refresh all</button>
+    </section>
+
+    <div id="projects-container"></div>
+  </details>
 </main>
+</div>
 <script>
 ${createSubmissionKernel.toString()}
 ${normalizeProjectId.toString()}
@@ -1865,6 +2614,7 @@ ${classifyWorkflowStateForVoice.toString()}
 ${speakVoicePresentation.toString()}
 const __howlerFieldVoiceBridge = (${fieldDashboardClientScript.toString()})(document, sessionStorage, fetch, crypto);
 (${voiceBrowserClient.toString()})(document, __howlerFieldVoiceBridge, () => crypto.randomUUID());
+(${wireVoicePresentationState.toString()})(document);
 </script>
 </body>
 </html>`;
@@ -1875,8 +2625,14 @@ export function fieldDashboardPage(): Response {
     headers: {
       "content-type": "text/html; charset=utf-8",
       "cache-control": "no-store",
+      // img-src 'self' is the one deliberate deviation from the shared CSP baseline (see
+      // operatorPanelPage/adminPage) -- required so the atmosphere background (public/assets/*.webp,
+      // served by Cloudflare's Asset Worker, same-origin, never a third-party host) can render at
+      // all; `default-src 'none'` blocks images just like any other resource unless img-src
+      // explicitly allows them. 'self' only -- no data:, no external host -- so this cannot be
+      // used to load a remote or inline-encoded image.
       "content-security-policy":
-        "default-src 'none'; connect-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+        "default-src 'none'; connect-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
       "x-content-type-options": "nosniff",
       "referrer-policy": "no-referrer",
     },

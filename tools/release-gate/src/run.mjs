@@ -293,6 +293,10 @@ runVitestJson("test:release-gate", [
   "--config",
   "tools/release-gate/vitest.config.ts",
 ]);
+runVitestJson("test:browser-artifact", [
+  "--config",
+  "tools/browser-artifact/vitest.config.ts",
+]);
 recordSimpleGate("cf-typegen:check", npmRun("cf-typegen:check"));
 recordSimpleGate("build:dry", npmRun("build:dry"));
 

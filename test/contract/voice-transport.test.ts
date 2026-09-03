@@ -229,6 +229,14 @@ const STATIC_FIELD_IDS = [
   "projects-container",
   "voice-push-to-talk",
   "voice-status",
+  "ph-portfolio-rows",
+  "ph-priorities-section",
+  "ph-priority-count",
+  "ph-priority-word",
+  "ph-priority-caption",
+  "ph-priorities-list",
+  "ph-movement-band",
+  "ph-intelligence-text",
 ];
 
 /** Wires a real fieldDashboardClientScript bridge + the real voiceBrowserClient against one shared
