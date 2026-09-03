@@ -241,6 +241,15 @@ export function runOversightReview(
           "TRADE_CONFIRMATION",
           "INSPECTION",
           "ACTUAL_VERIFICATION",
+          // Conversational PM layer (docs/superpowers/specs/2026-09-03-howler-conversational-pm-
+          // design.md): a PM debrief claim that has gone through the full deterministic
+          // claim-compiler/evidence-preview/confirmation/apply pipeline is exactly the kind of
+          // independent, human-confirmed evidence this check exists to accept -- it is never an
+          // unconfirmed statement or an AI/calendar self-confirmation (compileClaim refuses to
+          // compile any claim before userConfirmationState === "CONFIRMED", and hardcodes
+          // verification "PM_CONFIRMED", which actualVerificationAccepted below still requires
+          // independently). Additive only: every other accepted source type above is unchanged.
+          "VOICE_CONVERSATION",
         ].includes(s.type),
       );
       const actualVerificationAccepted = [

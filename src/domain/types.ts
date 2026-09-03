@@ -138,6 +138,15 @@ export interface ProjectEventV094 {
   note?: string;
   causeCode?: string;
   causeVerification?: string;
+  /**
+   * Conversational PM layer (docs/superpowers/specs/2026-09-03-howler-conversational-pm-design.md
+   * "Oversight model" section): optional, additive, backward-compatible. Absent on every existing
+   * caller (admin UI evidence textarea, hand-built sync scripts) — those keep today's exact
+   * strict oversight-gate behavior. Only the conversational claim compiler
+   * (src/operator/claim-compiler.ts) ever sets this field, and only from its fixed CLASSIFY
+   * table, never inferred from event content.
+   */
+  mutationClass?: "FACT" | "COMMITMENT";
 }
 
 export interface ProjectModelV094 {

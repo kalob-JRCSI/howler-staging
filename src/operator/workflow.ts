@@ -1458,11 +1458,39 @@ async function runEvidencePreview(
 }
 
 /**
+ * Conversational PM layer (docs/superpowers/specs/2026-09-03-howler-conversational-pm-design.md
+ * "Oversight model" section): the one narrowly-scoped bypass rule to the project-wide oversight
+ * gate. Applies to `mutationClass: "FACT"` only — a `"COMMITMENT"` event (or one with
+ * `mutationClass` absent, today's every existing caller) never bypasses a BLOCK, regardless of
+ * scope. Among FACT events, this is a pure scope test on activity ids, never a semantic read of
+ * the event's own content: a FACT event is allowed through if and only if none of its
+ * `impactSeedActivityIds` intersect any BLOCK-severity finding's `activityIds` on the current
+ * oversight review. A FACT whose activities DO overlap a BLOCK finding is refused exactly like a
+ * COMMITMENT would be, regardless of what the event's payload/note asserts — this gate cannot be
+ * talked past by claim content, only by genuinely not touching the blocked activities.
+ */
+function isScopedFactBypass(
+  event: ProjectEventInput,
+  oversight: OversightReviewV094,
+): boolean {
+  if (event.mutationClass !== "FACT") return false;
+  const blockedActivityIds = new Set(
+    oversight.findings
+      .filter((finding) => finding.severity === "BLOCK")
+      .flatMap((finding) => finding.activityIds),
+  );
+  return !event.impactSeedActivityIds.some((activityId) =>
+    blockedActivityIds.has(activityId),
+  );
+}
+
+/**
  * Task 14: the only intent kind that mutates domain state. Shares LOAD_PROJECT / CHECK_REVISION /
  * PREPARE / EXECUTE_ENGINE with `runEvidencePreview` (design §7.2's steps 4-7 are identical for
  * both evidence kinds), then adds COMMIT_SHADOW — persisting the event/candidate/oversight
  * atomically via `runCommitShadowStep`, only when oversight did not BLOCK (design §11: "An
- * oversight BLOCK yields a blocked result and no domain mutation").
+ * oversight BLOCK yields a blocked result and no domain mutation") or the scoped FACT bypass
+ * above applies.
  */
 async function runEvidenceApplyShadow(
   deps: WorkflowExecutorDeps,
@@ -1576,7 +1604,10 @@ async function runEvidenceApplyShadow(
   );
   const { forecastRun } = engineOutput;
 
-  if (forecastRun.oversight.decision === "BLOCK") {
+  if (
+    forecastRun.oversight.decision === "BLOCK" &&
+    !isScopedFactBypass(event, forecastRun.oversight)
+  ) {
     const problem: WorkflowProblem = {
       code: "OVERSIGHT_BLOCKED",
       category: "POLICY",

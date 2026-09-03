@@ -29,6 +29,10 @@ export interface ProjectEventInput {
   note?: string;
   causeCode?: string;
   causeVerification?: string;
+  // Optional, additive (see src/domain/types.ts ProjectEventV094). Absent on every existing
+  // caller — this keeps today's exact strict oversight-gate behavior unless a caller explicitly
+  // opts into "FACT" (only ever the conversational claim compiler).
+  mutationClass?: "FACT" | "COMMITMENT";
 }
 
 export interface IntentV1 {
@@ -104,6 +108,7 @@ interface RawEventShape {
   note?: unknown;
   causeCode?: unknown;
   causeVerification?: unknown;
+  mutationClass?: unknown;
 }
 
 function validateEvent(
@@ -224,6 +229,22 @@ function validateEvent(
       problem(
         "EVENT_PAYLOAD_INVALID",
         "Evidence event payload must be an object",
+      ),
+    );
+  }
+  // Optional and additive — absence is valid (defaults to today's exact COMMITMENT-equivalent
+  // gate behavior downstream). When present, it must be exactly "FACT" or "COMMITMENT"; any
+  // other value is rejected rather than silently ignored.
+  if (
+    event.mutationClass !== undefined &&
+    event.mutationClass !== "FACT" &&
+    event.mutationClass !== "COMMITMENT"
+  ) {
+    problems.push(
+      problem(
+        "EVENT_MUTATION_CLASS_INVALID",
+        'Evidence event mutationClass must be "FACT" or "COMMITMENT" when present',
+        { mutationClass: event.mutationClass },
       ),
     );
   }

@@ -376,3 +376,43 @@ describe("validateIntent: malformed top-level shape", () => {
     }
   });
 });
+
+describe("validateIntent: mutationClass", () => {
+  it("accepts an evidence intent with mutationClass absent — defaults to today's exact COMMITMENT-equivalent behavior", () => {
+    const result = validateIntent(validEvidenceIntent("EVIDENCE_APPLY_SHADOW"));
+    expect(result.valid).toBe(true);
+  });
+
+  it("accepts mutationClass FACT", () => {
+    const result = validateIntent(
+      validEvidenceIntent(
+        "EVIDENCE_APPLY_SHADOW",
+        {},
+        { mutationClass: "FACT" },
+      ),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("accepts mutationClass COMMITMENT", () => {
+    const result = validateIntent(
+      validEvidenceIntent(
+        "EVIDENCE_APPLY_SHADOW",
+        {},
+        { mutationClass: "COMMITMENT" },
+      ),
+    );
+    expect(result.valid).toBe(true);
+  });
+
+  it("rejects a malformed mutationClass value — proves it is now validated, not silently ignored", () => {
+    const result = validateIntent(
+      validEvidenceIntent(
+        "EVIDENCE_APPLY_SHADOW",
+        {},
+        { mutationClass: "DELETE_EVERYTHING" as never },
+      ),
+    );
+    expect(result.valid).toBe(false);
+  });
+});
