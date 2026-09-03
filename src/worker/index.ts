@@ -466,6 +466,93 @@ async function handle(request: Request, env: Env): Promise<Response> {
     );
   }
 
+  // Conversational PM layer (Task 13): generalizes the deboard-v091/seed route above into a
+  // reusable, projectId-parameterized onboarding path — reuses repo.createProject/
+  // validateProjectModel/forecastInitial verbatim (all existing, unchanged); no second creation
+  // path is built. `dryRun: true` runs the same validation/forecast preview without ever calling
+  // repo.createProject (zero D1 writes) — the same EVIDENCE_PREVIEW/EVIDENCE_APPLY_SHADOW
+  // two-step pattern already used elsewhere in this codebase, applied to project creation.
+  if (
+    request.method === "POST" &&
+    parts.length === 4 &&
+    parts[1] === "projects" &&
+    parts[2] &&
+    parts[3] === "import"
+  ) {
+    const targetProjectId = parts[2];
+    const raw = (await readJson(request)) as {
+      project?: unknown;
+      provenance?: unknown;
+      dryRun?: unknown;
+    } | null;
+    if (!raw || typeof raw !== "object" || !raw.project) {
+      throw new HttpError(400, "import requires a project body");
+    }
+    const model = raw.project as ProjectModelV094;
+    if (model.projectId !== targetProjectId) {
+      throw new HttpError(
+        400,
+        `import payload projectId "${String(model.projectId)}" does not match URL project id "${targetProjectId}"`,
+      );
+    }
+    const provenance =
+      raw.provenance && typeof raw.provenance === "object"
+        ? (raw.provenance as Record<string, unknown>)
+        : {};
+    const missingProvenance = [
+      ...Object.keys(model.activities ?? {}),
+      ...Object.keys(model.constraints ?? {}),
+    ].filter((id) => !(id in provenance));
+    if (missingProvenance.length > 0) {
+      throw new HttpError(
+        400,
+        `import payload is missing a provenance manifest entry for: ${missingProvenance.join(", ")}`,
+      );
+    }
+
+    try {
+      validateProjectModel(model);
+    } catch (error) {
+      throw new HttpError(
+        400,
+        error instanceof Error ? error.message : "Invalid project model",
+      );
+    }
+    const initial = forecastInitial(model, new Date().toISOString(), 1);
+
+    if (raw.dryRun === true) {
+      return json({
+        preview: true,
+        projectId: model.projectId,
+        forecastable: initial.forecastable,
+        commitmentEligible: initial.commitmentEligible,
+        oversightPublishable: initial.publishable,
+        provenanceManifest: provenance,
+      });
+    }
+
+    if (await repo.projectExists(targetProjectId)) {
+      throw new HttpError(409, `Project ${targetProjectId} already exists`);
+    }
+    // Do not bypass oversight. A blocked import remains WORKING, never force-labeled PUBLISHED —
+    // mirrors the existing deboard-v091/seed handler's own contract exactly.
+    await repo.createProject(model, initial.candidate, initial.oversight);
+    return json(
+      {
+        project: model,
+        initialForecast: initial.candidate,
+        oversight: initial.oversight,
+        forecastable: initial.forecastable,
+        commitmentEligible: initial.commitmentEligible,
+        oversightPublishable: initial.publishable,
+        publishable: false,
+        stagingOnly: true,
+        provenanceManifest: provenance,
+      },
+      201,
+    );
+  }
+
   // Task 15: additive operator HTTP contracts (design §7.3). Thin adapters only — all four
   // routes call straight into `executeWorkflow`/the repository; no workflow/domain logic is
   // reimplemented here.
