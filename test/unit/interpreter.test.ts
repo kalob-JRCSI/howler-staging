@@ -191,3 +191,33 @@ describe("interpretTurn", () => {
     expect(result.clarifications.length).toBeGreaterThan(0);
   });
 });
+
+describe("interpretTurn timing", () => {
+  it("reports exactly one timing sample per call when recordTiming is provided", async () => {
+    const session = createSession("2026-09-03T08:00:00.000Z");
+    const callModel = fakeCallModel({ spans: [] });
+    const samples: { stage: string; durationMs: number }[] = [];
+    let tick = 1000;
+    const clock = () => (tick += 25);
+    await interpretTurn(
+      "masonry started Friday",
+      session,
+      callModel,
+      { projectIds: [], aliases: [] },
+      "2026-09-03T08:00:00.000Z",
+      (sample) => samples.push(sample),
+      clock,
+    );
+    expect(samples).toHaveLength(1);
+    expect(samples[0]?.stage).toBe("interpretTurn");
+    expect(samples[0]?.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("reports no samples when recordTiming is omitted (the default, every existing call site)", async () => {
+    const session = createSession("2026-09-03T08:00:00.000Z");
+    const callModel = fakeCallModel({ spans: [] });
+    // No recordTiming argument at all — must behave exactly as before, no throw, no timing.
+    const result = await interpretTurn("masonry started Friday", session, callModel);
+    expect(result.claims).toEqual([]);
+  });
+});

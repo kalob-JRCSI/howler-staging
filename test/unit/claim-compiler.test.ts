@@ -573,3 +573,42 @@ describe("compileClaim", () => {
     }
   });
 });
+
+describe("compileClaim timing", () => {
+  const session = createSession("2026-09-03T08:00:00.000Z");
+
+  it("reports exactly one timing sample per call when recordTiming is provided", () => {
+    const model = projectModel();
+    const samples: { stage: string; durationMs: number }[] = [];
+    let tick = 1000;
+    const clock = () => (tick += 10);
+    compileClaim(
+      confirmedClaim({
+        claimType: "ACTIVITY_STARTED",
+        subjectText: "masonry",
+        effectiveDate: "2026-08-28",
+      }),
+      model,
+      session,
+      (sample) => samples.push(sample),
+      clock,
+    );
+    expect(samples).toHaveLength(1);
+    expect(samples[0]?.stage).toBe("compileClaim");
+    expect(samples[0]?.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it("reports no samples when recordTiming is omitted", () => {
+    const model = projectModel();
+    const result = compileClaim(
+      confirmedClaim({
+        claimType: "ACTIVITY_STARTED",
+        subjectText: "masonry",
+        effectiveDate: "2026-08-28",
+      }),
+      model,
+      session,
+    );
+    expect("event" in result).toBe(true);
+  });
+});

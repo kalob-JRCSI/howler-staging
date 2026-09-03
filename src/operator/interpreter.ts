@@ -132,6 +132,14 @@ function toClarification(raw: RawClaimSpan): Clarification {
   return clarification;
 }
 
+/** Task 15: optional stage timing instrumentation. No-op when `recordTiming` is absent (the
+ * default, every existing call site) — never required, never sent anywhere by default. */
+export interface TimingSample {
+  stage: string;
+  durationMs: number;
+}
+export type RecordTiming = (sample: TimingSample) => void;
+
 /**
  * The single probabilistic boundary. Segments `text` into independent claim spans via the
  * injected `callModel`, and — critically — every parsed claim is built by `toClaim`'s strict
@@ -147,6 +155,25 @@ export async function interpretTurn(
   callModel: (prompt: string) => Promise<string>,
   vocabulary: InterpreterVocabulary = { projectIds: [], aliases: [] },
   now: string = new Date().toISOString(),
+  recordTiming?: RecordTiming,
+  clock: () => number = Date.now,
+): Promise<InterpretedTurn> {
+  const startedAt = clock();
+  try {
+    return await interpretTurnBody(text, session, callModel, vocabulary, now);
+  } finally {
+    if (recordTiming) {
+      recordTiming({ stage: "interpretTurn", durationMs: clock() - startedAt });
+    }
+  }
+}
+
+async function interpretTurnBody(
+  text: string,
+  session: ConversationSession,
+  callModel: (prompt: string) => Promise<string>,
+  vocabulary: InterpreterVocabulary,
+  now: string,
 ): Promise<InterpretedTurn> {
   const sourceTurnId = `turn-${String(session.turnLog.length + 1)}`;
   const prompt = buildPrompt(text, session, vocabulary);

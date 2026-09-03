@@ -419,17 +419,29 @@ export function speakVoicePresentation(
     speechSynthesis?: { speak(utterance: unknown): void };
     SpeechSynthesisUtterance?: new (text: string) => unknown;
   },
+  recordTiming?: RecordTiming,
+  clock: () => number = Date.now,
 ): boolean {
-  if (!platform.speechSynthesis || !platform.SpeechSynthesisUtterance)
-    return false;
+  const startedAt = clock();
   try {
-    const utterance = new platform.SpeechSynthesisUtterance(
-      presentation.safeSummary,
-    );
-    platform.speechSynthesis.speak(utterance);
-    return true;
-  } catch {
-    return false;
+    if (!platform.speechSynthesis || !platform.SpeechSynthesisUtterance)
+      return false;
+    try {
+      const utterance = new platform.SpeechSynthesisUtterance(
+        presentation.safeSummary,
+      );
+      platform.speechSynthesis.speak(utterance);
+      return true;
+    } catch {
+      return false;
+    }
+  } finally {
+    if (recordTiming) {
+      recordTiming({
+        stage: "speakVoicePresentation",
+        durationMs: clock() - startedAt,
+      });
+    }
   }
 }
 
@@ -507,10 +519,19 @@ export interface ConfirmedClaimMutation {
  * scoped to one already-fully-compiled claim (which, unlike a manual form edit, never changes
  * content between submissions).
  */
+/** Task 15: optional stage timing instrumentation. No-op when `recordTiming` is absent (the
+ * default, every existing call site) — never required, never sent anywhere by default. */
+export interface TimingSample {
+  stage: string;
+  durationMs: number;
+}
+export type RecordTiming = (sample: TimingSample) => void;
+
 export function createConfirmedClaimSubmitter(
   bridge: FieldVoiceBridge,
   makeId: () => string,
   now: () => number = Date.now,
+  recordTiming?: RecordTiming,
 ): {
   submitConfirmedClaim(
     mutation: ConfirmedClaimMutation,
@@ -529,8 +550,18 @@ export function createConfirmedClaimSubmitter(
     const existing = dedupe.get(key);
     if (existing) return existing;
 
+    const previewStartedAt = now();
     const promise = bridge
       .submitPreview(projectId, mutation.event, expectedProjectRevision)
+      .then((previewResult) => {
+        if (recordTiming) {
+          recordTiming({
+            stage: "EVIDENCE_PREVIEW",
+            durationMs: now() - previewStartedAt,
+          });
+        }
+        return previewResult;
+      })
       .then(() => {
         const confirmation = createPendingVoiceConfirmation({
           confirmationId: makeId(),
@@ -550,7 +581,16 @@ export function createConfirmedClaimSubmitter(
             `submitConfirmedClaim: confirmation could not be consumed (${outcome.outcome})`,
           );
         }
-        return bridge.submitApply(outcome.confirmation);
+        const applyStartedAt = now();
+        return bridge.submitApply(outcome.confirmation).then((applyResult) => {
+          if (recordTiming) {
+            recordTiming({
+              stage: "EVIDENCE_APPLY_SHADOW",
+              durationMs: now() - applyStartedAt,
+            });
+          }
+          return applyResult;
+        });
       });
     dedupe.set(key, promise);
     return promise;

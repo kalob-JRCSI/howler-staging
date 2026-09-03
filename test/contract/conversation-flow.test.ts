@@ -227,3 +227,72 @@ describe("debrief spoken responses", () => {
     expect(spoken).toBe(presentation.safeSummary);
   });
 });
+
+describe("timing", () => {
+  it("submitConfirmedClaim reports one timing sample for the preview leg and one for the apply leg", async () => {
+    const { bridge } = fakeBridge();
+    const samples: { stage: string; durationMs: number }[] = [];
+    let tick = 1000;
+    const { submitConfirmedClaim } = createConfirmedClaimSubmitter(
+      bridge,
+      () => "confirmation-1",
+      () => (tick += 15),
+      (sample) => samples.push(sample),
+    );
+    await submitConfirmedClaim(fakeMutation(), "deboard-v091", 1);
+    const stages = samples.map((s) => s.stage).sort();
+    expect(stages).toEqual(["EVIDENCE_APPLY_SHADOW", "EVIDENCE_PREVIEW"]);
+    for (const sample of samples) {
+      expect(sample.durationMs).toBeGreaterThanOrEqual(0);
+    }
+  });
+
+  it("submitConfirmedClaim reports no samples when recordTiming is omitted", async () => {
+    const { bridge } = fakeBridge();
+    const { submitConfirmedClaim } = createConfirmedClaimSubmitter(
+      bridge,
+      () => "confirmation-1",
+      () => 1_000,
+    );
+    const result = await submitConfirmedClaim(fakeMutation(), "deboard-v091", 1);
+    expect(result.workflowState).toBe("SUCCEEDED");
+  });
+
+  it("speakVoicePresentation reports one timing sample when recordTiming is provided", () => {
+    const presentation = createDebriefApplyPresentation({
+      projectId: "deboard-v091",
+      delta: realDeboardDelta(),
+    });
+    const samples: { stage: string; durationMs: number }[] = [];
+    let tick = 2000;
+    const platform = {
+      speechSynthesis: { speak: () => undefined },
+      SpeechSynthesisUtterance: class {
+        constructor(_text: string) {}
+      } as unknown as new (text: string) => unknown,
+    };
+    speakVoicePresentation(
+      presentation,
+      platform,
+      (sample) => samples.push(sample),
+      () => (tick += 5),
+    );
+    expect(samples).toHaveLength(1);
+    expect(samples[0]?.stage).toBe("speakVoicePresentation");
+  });
+
+  it("speakVoicePresentation reports no samples when recordTiming is omitted", () => {
+    const presentation = createDebriefApplyPresentation({
+      projectId: "deboard-v091",
+      delta: null,
+    });
+    const platform = {
+      speechSynthesis: { speak: () => undefined },
+      SpeechSynthesisUtterance: class {
+        constructor(_text: string) {}
+      } as unknown as new (text: string) => unknown,
+    };
+    const ok = speakVoicePresentation(presentation, platform);
+    expect(ok).toBe(true);
+  });
+});

@@ -365,7 +365,32 @@ function buildMutations(
  * a typed `Clarification` instead of falling through to a best-guess mutation or a best-guess
  * `mutationClass`.
  */
+/** Task 15: optional stage timing instrumentation. No-op when `recordTiming` is absent (the
+ * default, every existing call site) — never required, never sent anywhere by default. */
+export interface TimingSample {
+  stage: string;
+  durationMs: number;
+}
+export type RecordTiming = (sample: TimingSample) => void;
+
 export function compileClaim(
+  claim: ConversationClaim,
+  projectModel: ProjectModelV094,
+  session: ConversationSession,
+  recordTiming?: RecordTiming,
+  clock: () => number = Date.now,
+): CompileClaimResult {
+  const startedAt = clock();
+  try {
+    return compileClaimBody(claim, projectModel, session);
+  } finally {
+    if (recordTiming) {
+      recordTiming({ stage: "compileClaim", durationMs: clock() - startedAt });
+    }
+  }
+}
+
+function compileClaimBody(
   claim: ConversationClaim,
   projectModel: ProjectModelV094,
   _session: ConversationSession,
