@@ -9,7 +9,11 @@
 // routing, UI, microphone code, bearer-token parsing, or fetch — so any future adapter (HTTP,
 // voice, watch, desktop, glasses, ...) can submit the same intent into it unchanged.
 
-import type { ProjectEventV094, ProjectModelV094 } from "../domain/types";
+import type {
+  EventMutationV094,
+  ProjectEventV094,
+  ProjectModelV094,
+} from "../domain/types";
 import { forecastAfterEvent } from "../engine/engine";
 import type { ForecastRunV094 } from "../engine/engine";
 import type { OversightReviewV094 } from "../engine/oversight";
@@ -1458,28 +1462,116 @@ async function runEvidencePreview(
 }
 
 /**
+ * Field-readiness blocker fix: the real scope of a FACT event for the BLOCK-bypass decision must
+ * come from what its `mutations` actually touch, never from the caller-declared
+ * `impactSeedActivityIds` alone — that field is caller-supplied on every intent (including a
+ * hand-typed evidence textarea submission) and was never cross-checked against the mutations it
+ * claims to summarize. Without this, a caller could declare an innocuous seed ("masonry") while
+ * the real mutation resolves a constraint/conflict on a BLOCKED activity, and the scope test would
+ * wrongly see no overlap. Returns `determinable: false` when any mutation's real target can't be
+ * resolved against the loaded model (an unknown constraintId/conflictId/dependencyId, or an
+ * unrecognized op) — the caller must treat that as "cannot prove non-overlap", never as "no
+ * overlap". `UPSERT_SOURCE`/`SUPERSEDE_SOURCE` are provenance-only and never touch activity/
+ * constraint state, so they contribute no scope and never make the result indeterminable.
+ */
+function deriveMutationActivityIds(
+  mutations: EventMutationV094[],
+  model: ProjectModelV094,
+): { activityIds: Set<string>; determinable: boolean } {
+  const activityIds = new Set<string>();
+  for (const mutation of mutations) {
+    switch (mutation.op) {
+      case "SET_ACTUAL_START":
+      case "SET_ACTUAL_FINISH":
+      case "SET_ACTIVITY_STATE":
+      case "SET_DURATION":
+      case "SET_SCHEDULE_LOCK":
+      case "CLEAR_SCHEDULE_LOCK":
+        activityIds.add(mutation.activityId);
+        break;
+      case "SET_CONSTRAINT_STATE":
+      case "SET_CONSTRAINT_READINESS": {
+        const constraint = model.constraints[mutation.constraintId];
+        if (!constraint) return { activityIds, determinable: false };
+        activityIds.add(constraint.activityId);
+        break;
+      }
+      case "UPSERT_ACTIVITY":
+        activityIds.add(mutation.activity.id);
+        break;
+      case "UPSERT_CONSTRAINT":
+        activityIds.add(mutation.constraint.activityId);
+        break;
+      case "UPSERT_CONFLICT":
+        mutation.conflict.activityIds.forEach((id) => activityIds.add(id));
+        break;
+      case "RESOLVE_CONFLICT": {
+        const conflict = model.conflicts?.[mutation.conflictId];
+        if (!conflict) return { activityIds, determinable: false };
+        conflict.activityIds.forEach((id) => activityIds.add(id));
+        break;
+      }
+      case "UPSERT_COMMERCIAL_SIGNAL":
+        mutation.signal.activityIds.forEach((id) => activityIds.add(id));
+        break;
+      case "UPSERT_WORKLOAD_SIGNAL":
+        mutation.signal.activityIds.forEach((id) => activityIds.add(id));
+        break;
+      case "UPSERT_DEPENDENCY":
+        activityIds.add(mutation.dependency.predecessorId);
+        activityIds.add(mutation.dependency.successorId);
+        break;
+      case "DEACTIVATE_DEPENDENCY": {
+        const dependency = model.dependencies[mutation.dependencyId];
+        if (!dependency) return { activityIds, determinable: false };
+        activityIds.add(dependency.predecessorId);
+        activityIds.add(dependency.successorId);
+        break;
+      }
+      case "UPSERT_SOURCE":
+      case "SUPERSEDE_SOURCE":
+        // Provenance only -- never touches activity/constraint state, contributes no scope.
+        break;
+      default: {
+        // A mutation op this switch doesn't recognize (malformed/future-added, past whatever
+        // compile-time exhaustiveness `EventMutationV094` would otherwise give this switch, since
+        // this event arrived over HTTP as validated-but-not-narrowed JSON) can never prove
+        // non-overlap -- fail closed rather than silently ignore it.
+        return { activityIds, determinable: false };
+      }
+    }
+  }
+  return { activityIds, determinable: true };
+}
+
+/**
  * Conversational PM layer (docs/superpowers/specs/2026-09-03-howler-conversational-pm-design.md
  * "Oversight model" section): the one narrowly-scoped bypass rule to the project-wide oversight
  * gate. Applies to `mutationClass: "FACT"` only — a `"COMMITMENT"` event (or one with
  * `mutationClass` absent, today's every existing caller) never bypasses a BLOCK, regardless of
  * scope. Among FACT events, this is a pure scope test on activity ids, never a semantic read of
- * the event's own content: a FACT event is allowed through if and only if none of its
- * `impactSeedActivityIds` intersect any BLOCK-severity finding's `activityIds` on the current
- * oversight review. A FACT whose activities DO overlap a BLOCK finding is refused exactly like a
- * COMMITMENT would be, regardless of what the event's payload/note asserts — this gate cannot be
- * talked past by claim content, only by genuinely not touching the blocked activities.
+ * the event's own content: a FACT event is allowed through if and only if none of the activities
+ * its `mutations` actually touch (derived fresh from the loaded project model, never trusted from
+ * the caller-declared `impactSeedActivityIds`) intersect any BLOCK-severity finding's
+ * `activityIds` on the current oversight review. A FACT whose activities DO overlap a BLOCK
+ * finding is refused exactly like a COMMITMENT would be, regardless of what the event's
+ * payload/note/declared seed asserts — this gate cannot be talked past by claim content or by a
+ * mismatched seed list, only by genuinely not touching the blocked activities.
  */
 function isScopedFactBypass(
   event: ProjectEventInput,
   oversight: OversightReviewV094,
+  model: ProjectModelV094,
 ): boolean {
   if (event.mutationClass !== "FACT") return false;
+  const derived = deriveMutationActivityIds(event.mutations, model);
+  if (!derived.determinable) return false;
   const blockedActivityIds = new Set(
     oversight.findings
       .filter((finding) => finding.severity === "BLOCK")
       .flatMap((finding) => finding.activityIds),
   );
-  return !event.impactSeedActivityIds.some((activityId) =>
+  return ![...derived.activityIds].some((activityId) =>
     blockedActivityIds.has(activityId),
   );
 }
@@ -1606,7 +1698,7 @@ async function runEvidenceApplyShadow(
 
   if (
     forecastRun.oversight.decision === "BLOCK" &&
-    !isScopedFactBypass(event, forecastRun.oversight)
+    !isScopedFactBypass(event, forecastRun.oversight, model)
   ) {
     const problem: WorkflowProblem = {
       code: "OVERSIGHT_BLOCKED",

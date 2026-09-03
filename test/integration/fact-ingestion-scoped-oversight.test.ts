@@ -359,4 +359,62 @@ describe("scoped fact-ingestion oversight gate", () => {
     expect(outcome.result.persisted).toBe(false);
     expect(outcome.result.problem?.code).toBe("OVERSIGHT_BLOCKED");
   });
+
+  it("caller_supplied_seed_cannot_lie_about_scope: a FACT event whose declared impactSeedActivityIds is unrelated to masonry but whose real mutations target the blocked structural_reconcile constraint is still refused — the gate must derive scope from the mutations themselves, never trust the caller's own seed list", async () => {
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    await seedMasonryProject(repo);
+
+    // Declares only "masonry" (genuinely unrelated to any BLOCK finding) as its impact seed, but
+    // its actual mutation satisfies "engineering-reconcile", whose real activityId is
+    // "structural_reconcile" -- exactly one of the open BLOCK finding's own activityIds. A gate
+    // that trusts the declared seed list would wrongly let this through.
+    const event = masonryEvent({
+      id: "voice-conversation-scope-lie",
+      mutationClass: "FACT",
+      impactSeedActivityIds: ["masonry"],
+      sourceIds: ["src-voice-scope-lie"],
+      mutations: [
+        {
+          op: "UPSERT_SOURCE",
+          source: {
+            id: "src-voice-scope-lie",
+            type: "VOICE_CONVERSATION",
+            label: 'Voice conversation: "the structural engineering conflict is resolved"',
+            observedAt: NOW,
+            authority: 0.9,
+            reliability: 0.9,
+          },
+        },
+        {
+          op: "SET_CONSTRAINT_STATE",
+          constraintId: "engineering-reconcile",
+          state: "SATISFIED",
+          verification: "PM_CONFIRMED",
+        },
+      ],
+    });
+    const outcome = await executeWorkflow(
+      buildDeps(repo),
+      applyShadowIntent(event),
+    );
+
+    expect(outcome.outcome).toBe("COMPLETED");
+    if (outcome.outcome !== "COMPLETED") return;
+    expect(outcome.result.status).toBe("BLOCKED");
+    expect(outcome.result.persisted).toBe(false);
+    expect(outcome.result.problem?.code).toBe("OVERSIGHT_BLOCKED");
+  });
+
 });
+
+// NOTE (discovered while testing the fix above, deliberately not addressed here — a distinct,
+// deeper architectural question from "caller-supplied seed lying about scope"): forecastAfterEvent
+// (src/engine/engine.ts) computes the oversight review AFTER applying the event's own mutations,
+// so a FACT-class RESOLVE_CONFLICT that resolves the very conflict a BLOCK finding is derived from
+// legitimately clears that BLOCK by the time isScopedFactBypass's caller checks
+// `forecastRun.oversight.decision`, regardless of scope derivation. The design spec's own "worked
+// not-automatically-allowed case" says resolving a BLOCK-scoped condition must never be reachable
+// through this gate at all -- today RESOLVE_CONFLICT is not producible by the claim compiler, so
+// this is only reachable via a directly-submitted (non-conversational) evidence intent, but it is
+// a real gap: whether the gate should check the PRE-mutation oversight review instead (or refuse
+// RESOLVE_CONFLICT under mutationClass "FACT" outright) is a decision this fix does not make.
