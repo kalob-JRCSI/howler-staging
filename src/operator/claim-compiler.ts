@@ -6,8 +6,20 @@
 // Pure functions only — no network/D1 access anywhere in this file. Every failure mode returns a
 // typed Clarification rather than falling through to a best-guess mutation.
 
-import type { ConversationClaim, Clarification } from "./conversation";
-import type { ProjectModelV094 } from "../domain/types";
+import type {
+  Clarification,
+  ConversationClaim,
+  ConversationClaimType,
+  ConversationSession,
+} from "./conversation";
+import { resolveClaimEntity } from "./conversation";
+import type {
+  ConstraintReadinessV094,
+  EventMutationV094,
+  ProjectEventV094,
+  ProjectModelV094,
+  SourceV094,
+} from "../domain/types";
 
 type ResolvedEntity = { type: "activity" | "constraint"; id: string };
 
@@ -110,4 +122,303 @@ export function validateClaimValue(
     };
   }
   return { valid: true };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Deterministic claim-to-mutation compiler (Task 5).
+//
+// `CLASSIFY` is the one and only place `mutationClass` is ever assigned, and it is a total,
+// TypeScript-exhaustiveness-checked table keyed only by `claim.claimType` — the `satisfies`
+// clause below makes it a compile error to add a fourteenth `ConversationClaimType` without also
+// giving it a `CLASSIFY` entry. No branch anywhere in `compileClaim` reads `claim.value`,
+// `claim.effectiveDate`, or any other claim content to influence `mutationClass`, and no branch
+// ever reads an interpreter-supplied `mutationClass`/`mutationOp`/`activityId`/`constraintId`
+// field even if one is smuggled onto the claim object — `ConversationClaim` has no such field,
+// and every mutation op/entity id/verification state below is either a compiler-chosen literal
+// or a value already proven real by `resolveClaimEntity` (Task 3).
+// ---------------------------------------------------------------------------------------------
+
+export const CLASSIFY = {
+  ACTIVITY_STARTED: "FACT",
+  ACTIVITY_COMPLETED: "FACT",
+  ITEM_COMPLETED: "FACT",
+  DELIVERY_RECEIVED: "FACT",
+  INSPECTION_COMPLETED: "FACT",
+  CONDITION_OBSERVED: "FACT",
+  SCHEDULE_CHANGED: "COMMITMENT",
+  DELIVERY_EXPECTED: "COMMITMENT",
+  TRADE_ATTENDANCE_PLANNED: "COMMITMENT",
+  WORK_REQUESTED: "COMMITMENT",
+  DECISION_EXPECTED: "COMMITMENT",
+  DECISION_UNRESOLVED: null,
+  CONSTRAINT_UNRESOLVED: null,
+} satisfies Record<ConversationClaimType, "FACT" | "COMMITMENT" | null>;
+
+export interface ProposedMutation {
+  event: ProjectEventV094;
+  mutationClass: "FACT" | "COMMITMENT";
+}
+
+/** The two no-mutation claim types (`DECISION_UNRESOLVED`/`CONSTRAINT_UNRESOLVED`) resolve here:
+ * no event, `mutationClass: null` — this claim only confirms an item stays open. */
+export interface NoMutationResult {
+  mutationClass: null;
+}
+
+export type CompileClaimResult =
+  | ProposedMutation
+  | NoMutationResult
+  | Clarification;
+
+type ResolvedClaimEntity = { type: "activity" | "constraint"; id: string };
+
+function sourceIdFor(claim: ConversationClaim): string {
+  return `src-voice-${claim.sessionId}-${claim.sourceTurnId}-${claim.claimId}`;
+}
+
+function buildSourceMutation(
+  claim: ConversationClaim,
+  sourceId: string,
+): { op: "UPSERT_SOURCE"; source: SourceV094 } {
+  const excerpt = (claim.value ?? claim.subjectText).slice(0, 200);
+  const source: SourceV094 = {
+    id: sourceId,
+    type: "VOICE_CONVERSATION",
+    label: `Voice conversation (session ${claim.sessionId}, turn ${claim.sourceTurnId}): "${excerpt}"`,
+    observedAt: claim.capturedAt,
+    authority: 0.9,
+    reliability: 0.9,
+    ...(claim.effectiveDate ? { effectiveDate: claim.effectiveDate } : {}),
+  };
+  return { op: "UPSERT_SOURCE", source };
+}
+
+function requireDate(claim: ConversationClaim): string | Clarification {
+  if (!claim.effectiveDate) {
+    return {
+      kind: "CLARIFICATION",
+      message: "What date should I record for that?",
+    };
+  }
+  return claim.effectiveDate;
+}
+
+function wrongEntityType(expected: string): Clarification {
+  return { kind: "CLARIFICATION", message: `I need ${expected} for that.` };
+}
+
+function requireConstraintOfType(
+  entity: ResolvedClaimEntity,
+  projectModel: ProjectModelV094,
+  type: string,
+): Clarification | undefined {
+  if (entity.type !== "constraint") return wrongEntityType("a constraint");
+  const constraint = projectModel.constraints[entity.id];
+  if (!constraint || constraint.type.toUpperCase() !== type) {
+    return {
+      kind: "CLARIFICATION",
+      message: `That doesn't look like a ${type.toLowerCase()} item.`,
+    };
+  }
+  return undefined;
+}
+
+function resolveImpactSeedActivityIds(
+  entity: ResolvedClaimEntity,
+  projectModel: ProjectModelV094,
+): string[] {
+  if (entity.type === "activity") return [entity.id];
+  const constraint = projectModel.constraints[entity.id];
+  return constraint ? [constraint.activityId] : [];
+}
+
+function buildMutations(
+  claim: ConversationClaim,
+  entity: ResolvedClaimEntity,
+  projectModel: ProjectModelV094,
+  sourceId: string,
+): EventMutationV094[] | Clarification {
+  switch (claim.claimType) {
+    case "ACTIVITY_STARTED": {
+      if (entity.type !== "activity") return wrongEntityType("an activity");
+      const date = requireDate(claim);
+      if (typeof date !== "string") return date;
+      return [{ op: "SET_ACTUAL_START", activityId: entity.id, date }];
+    }
+    case "ACTIVITY_COMPLETED":
+    case "ITEM_COMPLETED": {
+      if (entity.type === "activity") {
+        const date = requireDate(claim);
+        if (typeof date !== "string") return date;
+        return [
+          { op: "SET_ACTUAL_FINISH", activityId: entity.id, date },
+          { op: "SET_ACTIVITY_STATE", activityId: entity.id, state: "COMPLETE" },
+        ];
+      }
+      return [
+        {
+          op: "SET_CONSTRAINT_STATE",
+          constraintId: entity.id,
+          state: "SATISFIED",
+          verification: "PM_CONFIRMED",
+        },
+      ];
+    }
+    case "DELIVERY_RECEIVED": {
+      const problem = requireConstraintOfType(entity, projectModel, "MATERIAL");
+      if (problem) return problem;
+      return [
+        {
+          op: "SET_CONSTRAINT_STATE",
+          constraintId: entity.id,
+          state: "SATISFIED",
+          verification: "PM_CONFIRMED",
+        },
+      ];
+    }
+    case "INSPECTION_COMPLETED": {
+      const problem = requireConstraintOfType(
+        entity,
+        projectModel,
+        "INSPECTION",
+      );
+      if (problem) return problem;
+      return [
+        {
+          op: "SET_CONSTRAINT_STATE",
+          constraintId: entity.id,
+          state: "SATISFIED",
+          verification: "PM_CONFIRMED",
+        },
+      ];
+    }
+    case "CONDITION_OBSERVED": {
+      if (entity.type !== "constraint") return wrongEntityType("a constraint");
+      return [
+        {
+          op: "SET_CONSTRAINT_STATE",
+          constraintId: entity.id,
+          state: "SATISFIED",
+          verification: "PM_CONFIRMED",
+        },
+      ];
+    }
+    case "SCHEDULE_CHANGED":
+    case "DELIVERY_EXPECTED":
+    case "TRADE_ATTENDANCE_PLANNED":
+    case "WORK_REQUESTED": {
+      if (entity.type !== "activity") return wrongEntityType("an activity");
+      const date = requireDate(claim);
+      if (typeof date !== "string") return date;
+      return [
+        {
+          op: "SET_SCHEDULE_LOCK",
+          activityId: entity.id,
+          lock: { startDate: date, sourceId },
+        },
+      ];
+    }
+    case "DECISION_EXPECTED": {
+      const problem = requireConstraintOfType(entity, projectModel, "DECISION");
+      if (problem) return problem;
+      const date = requireDate(claim);
+      if (typeof date !== "string") return date;
+      const constraint = projectModel.constraints[entity.id];
+      const readiness: ConstraintReadinessV094 = {
+        optimistic: constraint?.readiness?.optimistic ?? date,
+        likely: date,
+        conservative: constraint?.readiness?.conservative ?? date,
+      };
+      return [
+        {
+          op: "SET_CONSTRAINT_READINESS",
+          constraintId: entity.id,
+          readiness,
+          verification: "PM_CONFIRMED",
+        },
+      ];
+    }
+    case "DECISION_UNRESOLVED":
+    case "CONSTRAINT_UNRESOLVED":
+      // Unreachable in practice — CLASSIFY[claim.claimType] is null for both, and compileClaim
+      // returns a NoMutationResult before ever calling buildMutations for them. Kept only so the
+      // switch remains exhaustive over ConversationClaimType.
+      return {
+        kind: "CLARIFICATION",
+        message: "This claim type never produces a mutation.",
+      };
+    default: {
+      const exhaustive: never = claim.claimType;
+      throw new Error(
+        `buildMutations: unhandled claimType ${String(exhaustive)}`,
+      );
+    }
+  }
+}
+
+/**
+ * Pure function, no network/D1 access. Given a `ConversationClaim`, the current
+ * `ProjectModelV094` for the already-resolved project, and the session, resolves the claim's
+ * entity, validates the transition and value, classifies `mutationClass` via the fixed `CLASSIFY`
+ * table above (the only step that ever decides FACT vs. COMMITMENT), and — only once the claim is
+ * `CONFIRMED` — compiles a real, applyable `ProposedMutation`. Any failure along the way returns
+ * a typed `Clarification` instead of falling through to a best-guess mutation or a best-guess
+ * `mutationClass`.
+ */
+export function compileClaim(
+  claim: ConversationClaim,
+  projectModel: ProjectModelV094,
+  _session: ConversationSession,
+): CompileClaimResult {
+  const mutationClass = CLASSIFY[claim.claimType];
+
+  if (mutationClass === null) {
+    return { mutationClass: null };
+  }
+
+  if (claim.userConfirmationState !== "CONFIRMED") {
+    return {
+      kind: "CLARIFICATION",
+      message:
+        "I have not confirmed that yet — say yes to record it, or correct it first.",
+    };
+  }
+
+  const entity = resolveClaimEntity(claim, projectModel);
+  if ("kind" in entity) return entity;
+
+  const transitionCheck = validateClaimTransition(claim, entity, projectModel);
+  if ("kind" in transitionCheck) return transitionCheck;
+
+  const valueCheck = validateClaimValue(claim);
+  if ("kind" in valueCheck) return valueCheck;
+
+  const sourceId = sourceIdFor(claim);
+  const mutations = buildMutations(claim, entity, projectModel, sourceId);
+  if (!Array.isArray(mutations)) return mutations;
+
+  const sourceMutation = buildSourceMutation(claim, sourceId);
+  const impactSeedActivityIds = resolveImpactSeedActivityIds(
+    entity,
+    projectModel,
+  );
+
+  const event: ProjectEventV094 = {
+    id: `voice-conversation-${claim.claimId}`,
+    baseRevision: projectModel.revision,
+    projectId: projectModel.projectId,
+    type: "FIELD_UPDATE",
+    occurredAt: claim.effectiveDate
+      ? `${claim.effectiveDate}T12:00:00.000Z`
+      : claim.capturedAt,
+    receivedAt: claim.capturedAt,
+    sourceIds: [sourceMutation.source.id],
+    verification: "PM_CONFIRMED",
+    impactSeedActivityIds,
+    mutations: [sourceMutation, ...mutations],
+    payload: { claimType: claim.claimType, subjectText: claim.subjectText },
+    note: `Voice conversation claim ${claim.claimId}`,
+  };
+
+  return { event, mutationClass };
 }

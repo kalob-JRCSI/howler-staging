@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  CLASSIFY,
+  compileClaim,
   validateClaimTransition,
   validateClaimValue,
 } from "../../src/operator/claim-compiler";
+import { createSession } from "../../src/operator/conversation";
 import type {
   Clarification,
   ConversationClaim,
+  ConversationClaimType,
 } from "../../src/operator/conversation";
 import type { ProjectModelV094 } from "../../src/domain/types";
 
@@ -83,7 +87,7 @@ function projectModel(
         id: "masonry-material",
         activityId: "masonry",
         type: "MATERIAL",
-        label: "CMU block package on site",
+        label: "CMU block package delivered",
         state: "UNVERIFIED",
         hard: true,
         sourceIds: [],
@@ -93,7 +97,7 @@ function projectModel(
         id: "masonry-trade",
         activityId: "masonry",
         type: "TRADE_AVAILABILITY",
-        label: "Masonry crew mobilized",
+        label: "Trade crew mobilized on site",
         state: "SATISFIED",
         hard: true,
         sourceIds: [],
@@ -198,5 +202,374 @@ describe("validateClaimValue", () => {
     delete c.effectiveDate;
     const result = validateClaimValue(c);
     expect(isValid(result)).toBe(true);
+  });
+});
+
+function decisionProjectModel(): ProjectModelV094 {
+  const base = projectModel();
+  return {
+    ...base,
+    activities: {
+      ...base.activities,
+      flooring: {
+        id: "flooring",
+        name: "Flooring install",
+        phase: "Finishes",
+        state: "NOT_STARTED",
+        duration: { optimistic: 1, likely: 2, conservative: 3, sourceIds: [] },
+        constraintIds: ["carpet-decision"],
+        sourceIds: [],
+        tags: ["flooring"],
+      },
+    },
+    constraints: {
+      ...base.constraints,
+      "carpet-decision": {
+        id: "carpet-decision",
+        activityId: "flooring",
+        type: "DECISION",
+        label: "Client carpet selection decision",
+        state: "UNVERIFIED",
+        hard: false,
+        sourceIds: [],
+        verification: "UNVERIFIED",
+      },
+      "rough-inspection": {
+        id: "rough-inspection",
+        activityId: "electrical_rough",
+        type: "INSPECTION",
+        label: "MEP rough inspection",
+        state: "UNVERIFIED",
+        hard: true,
+        sourceIds: [],
+        verification: "UNVERIFIED",
+      },
+    },
+  };
+}
+
+function confirmedClaim(
+  overrides: Partial<ConversationClaim> = {},
+): ConversationClaim {
+  return claim({ userConfirmationState: "CONFIRMED", ...overrides });
+}
+
+describe("CLASSIFY table", () => {
+  it("is exhaustive and correct over all thirteen ConversationClaimType values", () => {
+    const expected: Record<ConversationClaimType, "FACT" | "COMMITMENT" | null> = {
+      ACTIVITY_STARTED: "FACT",
+      ACTIVITY_COMPLETED: "FACT",
+      ITEM_COMPLETED: "FACT",
+      DELIVERY_RECEIVED: "FACT",
+      INSPECTION_COMPLETED: "FACT",
+      CONDITION_OBSERVED: "FACT",
+      SCHEDULE_CHANGED: "COMMITMENT",
+      DELIVERY_EXPECTED: "COMMITMENT",
+      TRADE_ATTENDANCE_PLANNED: "COMMITMENT",
+      WORK_REQUESTED: "COMMITMENT",
+      DECISION_EXPECTED: "COMMITMENT",
+      DECISION_UNRESOLVED: null,
+      CONSTRAINT_UNRESOLVED: null,
+    };
+    expect(CLASSIFY).toEqual(expected);
+  });
+
+  it.each([
+    ["ACTIVITY_STARTED", "FACT"],
+    ["ACTIVITY_COMPLETED", "FACT"],
+    ["ITEM_COMPLETED", "FACT"],
+    ["DELIVERY_RECEIVED", "FACT"],
+    ["INSPECTION_COMPLETED", "FACT"],
+    ["CONDITION_OBSERVED", "FACT"],
+    ["SCHEDULE_CHANGED", "COMMITMENT"],
+    ["DELIVERY_EXPECTED", "COMMITMENT"],
+    ["TRADE_ATTENDANCE_PLANNED", "COMMITMENT"],
+    ["WORK_REQUESTED", "COMMITMENT"],
+    ["DECISION_EXPECTED", "COMMITMENT"],
+    ["DECISION_UNRESOLVED", null],
+    ["CONSTRAINT_UNRESOLVED", null],
+  ] as [ConversationClaimType, "FACT" | "COMMITMENT" | null][])(
+    "classify_%s_is_%s",
+    (claimType, expectedClass) => {
+      expect(CLASSIFY[claimType]).toBe(expectedClass);
+    },
+  );
+
+  it("classify_activity_started_is_fact: 'masonry started Friday' classifies FACT", () => {
+    expect(CLASSIFY.ACTIVITY_STARTED).toBe("FACT");
+  });
+
+  it("classify_attendance_planned_is_commitment: 'Jason will be there Wednesday' classifies COMMITMENT", () => {
+    expect(CLASSIFY.TRADE_ATTENDANCE_PLANNED).toBe("COMMITMENT");
+  });
+
+  it("classify_delivery_received_vs_expected: block arrived vs. block is coming, same subject, distinct classes", () => {
+    expect(CLASSIFY.DELIVERY_RECEIVED).toBe("FACT");
+    expect(CLASSIFY.DELIVERY_EXPECTED).toBe("COMMITMENT");
+    expect(CLASSIFY.DELIVERY_RECEIVED).not.toBe(CLASSIFY.DELIVERY_EXPECTED);
+  });
+
+  it("classify_work_requested_is_commitment: 'schedule framing Thursday' classifies COMMITMENT", () => {
+    expect(CLASSIFY.WORK_REQUESTED).toBe("COMMITMENT");
+  });
+
+  it("classify_decision_expected_is_commitment: DECISION_EXPECTED is COMMITMENT, never null", () => {
+    expect(CLASSIFY.DECISION_EXPECTED).toBe("COMMITMENT");
+    expect(CLASSIFY.DECISION_EXPECTED).not.toBeNull();
+  });
+});
+
+describe("compileClaim", () => {
+  const session = createSession("2026-09-03T08:00:00.000Z");
+
+  it("compiles ACTIVITY_STARTED into a FACT-class SET_ACTUAL_START mutation", () => {
+    const model = projectModel();
+    const result = compileClaim(
+      confirmedClaim({
+        claimType: "ACTIVITY_STARTED",
+        subjectText: "masonry",
+        effectiveDate: "2026-08-28",
+      }),
+      model,
+      session,
+    );
+    expect("event" in result).toBe(true);
+    if (!("event" in result)) return;
+    expect(result.mutationClass).toBe("FACT");
+    const ops = result.event.mutations.map((m) => m.op);
+    expect(ops).toContain("SET_ACTUAL_START");
+    expect(ops).toContain("UPSERT_SOURCE");
+    expect(result.event.verification).toBe("PM_CONFIRMED");
+    expect(result.event.impactSeedActivityIds).toEqual(["masonry"]);
+  });
+
+  it("compiles ACTIVITY_COMPLETED against an activity into SET_ACTUAL_FINISH + SET_ACTIVITY_STATE", () => {
+    const model = decisionProjectModel();
+    const result = compileClaim(
+      confirmedClaim({
+        claimType: "ACTIVITY_COMPLETED",
+        subjectText: "flooring install",
+        effectiveDate: "2026-09-10",
+      }),
+      model,
+      session,
+    );
+    expect("event" in result).toBe(true);
+    if (!("event" in result)) return;
+    expect(result.mutationClass).toBe("FACT");
+    const ops = result.event.mutations.map((m) => m.op);
+    expect(ops).toContain("SET_ACTUAL_FINISH");
+    expect(ops).toContain("SET_ACTIVITY_STATE");
+  });
+
+  it("compiles DELIVERY_RECEIVED against a MATERIAL constraint into SET_CONSTRAINT_STATE SATISFIED", () => {
+    const model = projectModel();
+    const result = compileClaim(
+      confirmedClaim({
+        claimType: "DELIVERY_RECEIVED",
+        subjectText: "block package",
+      }),
+      model,
+      session,
+    );
+    expect("event" in result).toBe(true);
+    if (!("event" in result)) return;
+    expect(result.mutationClass).toBe("FACT");
+    const stateMutation = result.event.mutations.find(
+      (m) => m.op === "SET_CONSTRAINT_STATE",
+    );
+    expect(stateMutation && "state" in stateMutation ? stateMutation.state : undefined).toBe(
+      "SATISFIED",
+    );
+    expect(result.event.impactSeedActivityIds).toEqual(["masonry"]);
+  });
+
+  it("compiles INSPECTION_COMPLETED against an INSPECTION constraint into SET_CONSTRAINT_STATE SATISFIED", () => {
+    const model = decisionProjectModel();
+    const result = compileClaim(
+      confirmedClaim({
+        claimType: "INSPECTION_COMPLETED",
+        subjectText: "MEP rough inspection",
+      }),
+      model,
+      session,
+    );
+    expect("event" in result).toBe(true);
+    if (!("event" in result)) return;
+    expect(result.mutationClass).toBe("FACT");
+  });
+
+  it("compiles CONDITION_OBSERVED against a named constraint into SET_CONSTRAINT_STATE SATISFIED", () => {
+    const model = projectModel();
+    const result = compileClaim(
+      confirmedClaim({
+        claimType: "CONDITION_OBSERVED",
+        subjectText: "block package",
+      }),
+      model,
+      session,
+    );
+    expect("event" in result).toBe(true);
+    if (!("event" in result)) return;
+    expect(result.mutationClass).toBe("FACT");
+  });
+
+  it("compiles SCHEDULE_CHANGED into a COMMITMENT-class SET_SCHEDULE_LOCK mutation", () => {
+    const model = projectModel();
+    const result = compileClaim(
+      confirmedClaim({
+        claimType: "SCHEDULE_CHANGED",
+        subjectText: "masonry",
+        effectiveDate: "2026-09-02",
+      }),
+      model,
+      session,
+    );
+    expect("event" in result).toBe(true);
+    if (!("event" in result)) return;
+    expect(result.mutationClass).toBe("COMMITMENT");
+    const ops = result.event.mutations.map((m) => m.op);
+    expect(ops).toContain("SET_SCHEDULE_LOCK");
+  });
+
+  it("classify_decision_expected_is_commitment / row 42: DECISION_EXPECTED resolves the existing decision constraint and compiles to SET_CONSTRAINT_READINESS", () => {
+    const model = decisionProjectModel();
+    const result = compileClaim(
+      confirmedClaim({
+        claimType: "DECISION_EXPECTED",
+        subjectText: "carpet decision",
+        effectiveDate: "2026-09-12",
+      }),
+      model,
+      session,
+    );
+    expect("event" in result).toBe(true);
+    if (!("event" in result)) return;
+    expect(result.mutationClass).toBe("COMMITMENT");
+    const readinessMutation = result.event.mutations.find(
+      (m) => m.op === "SET_CONSTRAINT_READINESS",
+    );
+    expect(readinessMutation).toBeDefined();
+    if (readinessMutation && "readiness" in readinessMutation) {
+      expect(readinessMutation.readiness.likely).toBe("2026-09-12");
+      expect(readinessMutation.constraintId).toBe("carpet-decision");
+    }
+    // Never UPSERT_CONSTRAINT — the constraint must already exist.
+    expect(result.event.mutations.map((m) => m.op)).not.toContain(
+      "UPSERT_CONSTRAINT",
+    );
+  });
+
+  it("a DECISION_EXPECTED claim with no matching existing constraint fails closed to Clarification, never creates one", () => {
+    const model = projectModel(); // no decision-type constraint present
+    const result = compileClaim(
+      confirmedClaim({
+        claimType: "DECISION_EXPECTED",
+        subjectText: "paint color decision",
+        effectiveDate: "2026-09-12",
+      }),
+      model,
+      session,
+    );
+    expect("kind" in result && result.kind === "CLARIFICATION").toBe(true);
+  });
+
+  it("DECISION_UNRESOLVED classifies null mutationClass and produces no event", () => {
+    const model = decisionProjectModel();
+    const result = compileClaim(
+      confirmedClaim({
+        claimType: "DECISION_UNRESOLVED",
+        subjectText: "carpet decision",
+      }),
+      model,
+      session,
+    );
+    expect("event" in result).toBe(false);
+    expect("mutationClass" in result && result.mutationClass === null).toBe(
+      true,
+    );
+  });
+
+  it("CONSTRAINT_UNRESOLVED classifies null mutationClass and produces no event", () => {
+    const model = projectModel();
+    const result = compileClaim(
+      confirmedClaim({
+        claimType: "CONSTRAINT_UNRESOLVED",
+        subjectText: "block package",
+      }),
+      model,
+      session,
+    );
+    expect("event" in result).toBe(false);
+    expect("mutationClass" in result && result.mutationClass === null).toBe(
+      true,
+    );
+  });
+
+  it("refuses to compile a claim that is not yet CONFIRMED", () => {
+    const model = projectModel();
+    const result = compileClaim(
+      claim({
+        claimType: "ACTIVITY_STARTED",
+        subjectText: "masonry",
+        effectiveDate: "2026-08-28",
+        userConfirmationState: "AWAITING_CONFIRMATION",
+      }),
+      model,
+      session,
+    );
+    expect("kind" in result && result.kind === "CLARIFICATION").toBe(true);
+  });
+
+  it("interpreter_ignores_injected_mutation_class: an adversarial mutationClass on the claim has zero effect on compileClaim's output", () => {
+    const model = projectModel();
+    const legitimate = confirmedClaim({
+      claimType: "SCHEDULE_CHANGED",
+      subjectText: "masonry",
+      effectiveDate: "2026-09-02",
+    });
+    const adversarial = {
+      ...legitimate,
+      mutationClass: "FACT",
+    } as unknown as ConversationClaim;
+    const legitimateResult = compileClaim(legitimate, model, session);
+    const adversarialResult = compileClaim(adversarial, model, session);
+    expect("event" in legitimateResult && "event" in adversarialResult).toBe(
+      true,
+    );
+    if ("event" in legitimateResult && "event" in adversarialResult) {
+      expect(adversarialResult.mutationClass).toBe(
+        legitimateResult.mutationClass,
+      );
+      expect(adversarialResult.mutationClass).toBe("COMMITMENT");
+    }
+  });
+
+  it("provenance: applied fact carries a VOICE_CONVERSATION source with a text-only transcript excerpt and session/turn refs, never raw audio", () => {
+    const model = projectModel();
+    const result = compileClaim(
+      confirmedClaim({
+        claimType: "ACTIVITY_STARTED",
+        subjectText: "masonry",
+        value: "masonry actually started Friday",
+        effectiveDate: "2026-08-28",
+        sessionId: "session-42",
+        sourceTurnId: "turn-7",
+      }),
+      model,
+      session,
+    );
+    expect("event" in result).toBe(true);
+    if (!("event" in result)) return;
+    const upsertSource = result.event.mutations.find(
+      (m) => m.op === "UPSERT_SOURCE",
+    );
+    expect(upsertSource && "source" in upsertSource).toBe(true);
+    if (upsertSource && "source" in upsertSource) {
+      expect(upsertSource.source.type).toBe("VOICE_CONVERSATION");
+      expect(upsertSource.source.label).toContain("session-42");
+      expect(upsertSource.source.label).toContain("turn-7");
+      expect(typeof upsertSource.source.label).toBe("string");
+    }
   });
 });
