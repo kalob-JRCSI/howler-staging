@@ -329,6 +329,14 @@ describe("real wrangler bundle: /admin/field embedded script", () => {
     "voice-push-to-talk",
     "voice-status",
     "voice-section",
+    "ph-portfolio-rows",
+    "ph-priorities-section",
+    "ph-priority-count",
+    "ph-priority-word",
+    "ph-priority-caption",
+    "ph-priorities-list",
+    "ph-movement-band",
+    "ph-intelligence-text",
   ];
 
   it("executes in an isolated context with no ReferenceError, including the Task 18 voice client and the Task 19 voice-state observer", async () => {

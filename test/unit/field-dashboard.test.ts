@@ -338,6 +338,14 @@ function mountWithFetch(
     "add-project",
     "refresh-all",
     "projects-container",
+    "ph-portfolio-rows",
+    "ph-priorities-section",
+    "ph-priority-count",
+    "ph-priority-word",
+    "ph-priority-caption",
+    "ph-priorities-list",
+    "ph-movement-band",
+    "ph-intelligence-text",
   ]);
   const storage = makeStorage();
   if (options.trackedProjects) {
@@ -785,6 +793,14 @@ describe("admin key handling", () => {
       "add-project",
       "refresh-all",
       "projects-container",
+      "ph-portfolio-rows",
+      "ph-priorities-section",
+      "ph-priority-count",
+      "ph-priority-word",
+      "ph-priority-caption",
+      "ph-priorities-list",
+      "ph-movement-band",
+      "ph-intelligence-text",
     ]);
     const storage = makeStorage();
     storage.setItem("howler_admin_key", "saved-key");

@@ -13,6 +13,15 @@
   // runtime (grepped), so disabling it is safe and removes the defect at its source rather than
   // working around it per call site.
   "keep_names": false,
+  // Task 19: serves the Penthouse atmosphere images (public/assets/*.webp) as real, independently
+  // cacheable static files instead of base64 data URIs. With no `run_worker_first`, Cloudflare's
+  // Asset Worker serves any request that matches a file under `public/` directly -- it never
+  // reaches src/worker/index.ts, so there is no new route/path-handling code in this Worker and
+  // no interaction with admin auth, D1, or any other binding. Any request that doesn't match a
+  // file (every existing route) falls through to the User Worker exactly as before.
+  "assets": {
+    "directory": "./public",
+  },
   "d1_databases": [
     {
       "binding": "HOWLER_DB",
