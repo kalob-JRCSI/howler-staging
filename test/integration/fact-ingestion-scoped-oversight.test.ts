@@ -405,16 +405,56 @@ describe("scoped fact-ingestion oversight gate", () => {
     expect(outcome.result.persisted).toBe(false);
     expect(outcome.result.problem?.code).toBe("OVERSIGHT_BLOCKED");
   });
-});
 
-// NOTE (discovered while testing the fix above, deliberately not addressed here — a distinct,
-// deeper architectural question from "caller-supplied seed lying about scope"): forecastAfterEvent
-// (src/engine/engine.ts) computes the oversight review AFTER applying the event's own mutations,
-// so a FACT-class RESOLVE_CONFLICT that resolves the very conflict a BLOCK finding is derived from
-// legitimately clears that BLOCK by the time isScopedFactBypass's caller checks
-// `forecastRun.oversight.decision`, regardless of scope derivation. The design spec's own "worked
-// not-automatically-allowed case" says resolving a BLOCK-scoped condition must never be reachable
-// through this gate at all -- today RESOLVE_CONFLICT is not producible by the claim compiler, so
-// this is only reachable via a directly-submitted (non-conversational) evidence intent, but it is
-// a real gap: whether the gate should check the PRE-mutation oversight review instead (or refuse
-// RESOLVE_CONFLICT under mutationClass "FACT" outright) is a decision this fix does not make.
+  it("field-readiness blocker: a FACT-class RESOLVE_CONFLICT cannot self-clear the very BLOCK finding its own conflict produced and then execute in the same event — the authorization decision must use PRE-mutation oversight, not the state after the event already resolved the condition that was supposed to gate it", async () => {
+    const repo = new D1HowlerRepository(env.HOWLER_DB);
+    await seedMasonryProject(repo);
+
+    // conf-plan-engineering is a real, already-seeded conflict whose own activityIds
+    // (structural_reconcile, framing) are exactly the open BLOCK finding's activities. The
+    // declared seed list lies and says only "masonry" (irrelevant now that scope is derived from
+    // mutations, not trusted -- see the prior test -- but included here to prove this is a
+    // distinct defect: even with correct scope derivation, forecastAfterEvent computes oversight
+    // AFTER applying this event's own RESOLVE_CONFLICT, so the derived scope (structural_reconcile,
+    // framing, from the conflict's own activityIds) would find NO block in the POST-mutation
+    // oversight, because this very event just resolved it).
+    const event = masonryEvent({
+      id: "voice-conversation-resolve-conflict-self-clear",
+      mutationClass: "FACT",
+      impactSeedActivityIds: ["masonry"],
+      sourceIds: ["src-voice-resolve-conflict-self-clear"],
+      mutations: [
+        {
+          op: "UPSERT_SOURCE",
+          source: {
+            id: "src-voice-resolve-conflict-self-clear",
+            type: "VOICE_CONVERSATION",
+            label: 'Voice conversation: "the engineering conflict is resolved"',
+            observedAt: NOW,
+            authority: 0.9,
+            reliability: 0.9,
+          },
+        },
+        {
+          op: "RESOLVE_CONFLICT",
+          conflictId: "conf-plan-engineering",
+          resolutionNote: "noted via voice",
+        },
+      ],
+    });
+    const outcome = await executeWorkflow(
+      buildDeps(repo),
+      applyShadowIntent(event),
+    );
+
+    expect(outcome.outcome).toBe("COMPLETED");
+    if (outcome.outcome !== "COMPLETED") return;
+    expect(outcome.result.status).toBe("BLOCKED");
+    expect(outcome.result.persisted).toBe(false);
+    expect(outcome.result.problem?.code).toBe("OVERSIGHT_BLOCKED");
+
+    // The conflict itself must remain OPEN -- the refused event must never have been committed.
+    const project = await repo.loadProject(MASONRY_PROJECT_ID);
+    expect(project?.conflicts?.["conf-plan-engineering"]?.status).toBe("OPEN");
+  });
+});

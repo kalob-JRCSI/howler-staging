@@ -14,7 +14,7 @@ import type {
   ProjectEventV094,
   ProjectModelV094,
 } from "../domain/types";
-import { forecastAfterEvent } from "../engine/engine";
+import { forecastAfterEvent, forecastInitial } from "../engine/engine";
 import type { ForecastRunV094 } from "../engine/engine";
 import type { OversightReviewV094 } from "../engine/oversight";
 import { analyzeRecovery } from "../engine/solver";
@@ -1691,21 +1691,37 @@ async function runEvidenceApplyShadow(
         nextForecastVersion,
         comparisonBaseline,
       );
-      return { forecastRun };
+      // Field-readiness blocker fix: the authorization decision below must never be based on
+      // oversight computed AFTER this event's own mutations were applied (forecastRun.oversight
+      // is exactly that -- forecastAfterEvent applies the mutations first, then recomputes
+      // oversight from the result) -- an event may not use its own mutation to erase the safety
+      // condition that determines whether that same event is authorized to execute. This computes
+      // oversight fresh against the untouched, still-loaded `model`, before any of this event's
+      // mutations are considered. forecastInitial's "no triggering event, no baseline" shape is
+      // exactly what's needed here: the conflict/constraint-derived BLOCK/WARN findings that
+      // matter for this gate depend only on `model` itself, never on a triggering event or a
+      // forecast delta baseline. The version number passed is never persisted or returned to any
+      // caller -- only `.oversight` is used.
+      const preMutationOversight = forecastInitial(
+        model,
+        preparedEvent.receivedAt,
+        1,
+      ).oversight;
+      return { forecastRun, preMutationOversight };
     },
   );
-  const { forecastRun } = engineOutput;
+  const { forecastRun, preMutationOversight } = engineOutput;
 
   if (
-    forecastRun.oversight.decision === "BLOCK" &&
-    !isScopedFactBypass(event, forecastRun.oversight, model)
+    preMutationOversight.decision === "BLOCK" &&
+    !isScopedFactBypass(event, preMutationOversight, model)
   ) {
     const problem: WorkflowProblem = {
       code: "OVERSIGHT_BLOCKED",
       category: "POLICY",
-      message: `Oversight review ${forecastRun.oversight.id} blocked this shadow evidence application`,
+      message: `Oversight review ${preMutationOversight.id} blocked this shadow evidence application`,
       retryable: false,
-      details: { oversightId: forecastRun.oversight.id },
+      details: { oversightId: preMutationOversight.id },
     };
     return blockRun(
       deps,
