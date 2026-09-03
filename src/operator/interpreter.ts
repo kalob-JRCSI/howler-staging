@@ -93,8 +93,7 @@ function toClaim(
   if (typeof raw.claimType !== "string") return null;
   if (!CLAIM_TYPES.has(raw.claimType as ConversationClaimType)) return null;
   if (typeof raw.subjectText !== "string") return null;
-  const certainty =
-    raw.certainty === "TENTATIVE" ? "TENTATIVE" : "STATED";
+  const certainty = raw.certainty === "TENTATIVE" ? "TENTATIVE" : "STATED";
 
   const claim: ConversationClaim = {
     claimId: `${session.sessionId}-${sourceTurnId}-${String(index)}`,

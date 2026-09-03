@@ -27,7 +27,9 @@ function fakeEvent(id: string): ProjectEventV094 {
   };
 }
 
-function fakeMutation(id = "voice-conversation-masonry-start"): ConfirmedClaimMutation {
+function fakeMutation(
+  id = "voice-conversation-masonry-start",
+): ConfirmedClaimMutation {
   return { event: fakeEvent(id), mutationClass: "FACT" };
 }
 
@@ -44,7 +46,11 @@ function fakeBridge(): {
     getEvidenceFields: () => null,
     submitQuery: () => Promise.resolve({ workflowState: "SUCCEEDED" }),
     submitPreview: (projectId, evidenceSnapshot, expectedProjectRevision) => {
-      previewCalls.push({ projectId, evidenceSnapshot, expectedProjectRevision });
+      previewCalls.push({
+        projectId,
+        evidenceSnapshot,
+        expectedProjectRevision,
+      });
       return Promise.resolve({ workflowState: "SUCCEEDED" });
     },
     submitApply: (confirmation) => {
@@ -212,9 +218,11 @@ describe("debrief spoken responses", () => {
     });
     let spoken: string | undefined;
     const platform = {
-      speechSynthesis: { speak: (utterance: unknown) => {
-        spoken = (utterance as { text?: string }).text;
-      } },
+      speechSynthesis: {
+        speak: (utterance: unknown) => {
+          spoken = (utterance as { text?: string }).text;
+        },
+      },
       SpeechSynthesisUtterance: class {
         text: string;
         constructor(text: string) {
@@ -254,7 +262,11 @@ describe("timing", () => {
       () => "confirmation-1",
       () => 1_000,
     );
-    const result = await submitConfirmedClaim(fakeMutation(), "deboard-v091", 1);
+    const result = await submitConfirmedClaim(
+      fakeMutation(),
+      "deboard-v091",
+      1,
+    );
     expect(result.workflowState).toBe("SUCCEEDED");
   });
 
@@ -267,8 +279,8 @@ describe("timing", () => {
     let tick = 2000;
     const platform = {
       speechSynthesis: { speak: () => undefined },
-      SpeechSynthesisUtterance: class {
-        constructor(_text: string) {}
+      SpeechSynthesisUtterance: function (text: string) {
+        void text;
       } as unknown as new (text: string) => unknown,
     };
     speakVoicePresentation(
@@ -288,8 +300,8 @@ describe("timing", () => {
     });
     const platform = {
       speechSynthesis: { speak: () => undefined },
-      SpeechSynthesisUtterance: class {
-        constructor(_text: string) {}
+      SpeechSynthesisUtterance: function (text: string) {
+        void text;
       } as unknown as new (text: string) => unknown,
     };
     const ok = speakVoicePresentation(presentation, platform);

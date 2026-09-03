@@ -218,8 +218,8 @@ export function confirmClaim(
  * explicit, testable contract point — the caller's own reference was always the only place this
  * session's data lived, and discarding that reference is the caller's job, not this function's.
  */
-export function endSession(_session: ConversationSession): void {
-  return;
+export function endSession(session: ConversationSession): void {
+  void session;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -338,7 +338,11 @@ export function resolveClaimEntity(
       [activity.name, ...(activity.tags ?? [])].join(" "),
     );
     if (candidateTokens.some((token) => subjectTokens.has(token))) {
-      candidates.push({ type: "activity", id: activity.id, label: activity.name });
+      candidates.push({
+        type: "activity",
+        id: activity.id,
+        label: activity.name,
+      });
     }
   }
   for (const constraint of Object.values(projectModel.constraints)) {
@@ -435,16 +439,14 @@ export function resolveCorrection(
   if (candidates.length !== 1) {
     return {
       kind: "CLARIFICATION",
-      message:
-        "I don't have an open item to correct — what should I update?",
+      message: "I don't have an open item to correct — what should I update?",
     };
   }
   const target = candidates[0];
   if (!target) {
     return {
       kind: "CLARIFICATION",
-      message:
-        "I don't have an open item to correct — what should I update?",
+      message: "I don't have an open item to correct — what should I update?",
     };
   }
   const patch = extractCorrectionPatch(text);
@@ -458,8 +460,9 @@ export function resolveCorrection(
  */
 export function resolveCompletion(
   session: ConversationSession,
-  _text: string,
+  text: string,
 ): ConversationSession | Clarification {
+  void text;
   if (!session.currentQuestionRef) {
     return {
       kind: "CLARIFICATION",

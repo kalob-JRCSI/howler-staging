@@ -3,7 +3,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { env } from "cloudflare:workers";
 import worker from "../../src/worker/index";
-import { applySchema, baselineMigrationSql, dropAllTables } from "../helpers/d1";
+import {
+  applySchema,
+  baselineMigrationSql,
+  dropAllTables,
+} from "../helpers/d1";
 
 // Vite's import.meta.glob (not node:fs, unavailable in the workerd test pool) enumerates real
 // files on disk at test-collection time — a genuine file-existence assertion, not a guess.
@@ -51,7 +55,10 @@ beforeEach(async () => {
 
 function stewartFixture(projectId = "stewart-v01"): {
   project: unknown;
-  provenance: Record<string, { sourceId: string; section?: string; modifiedTime?: string }>;
+  provenance: Record<
+    string,
+    { sourceId: string; section?: string; modifiedTime?: string }
+  >;
 } {
   return {
     project: {
@@ -78,7 +85,12 @@ function stewartFixture(projectId = "stewart-v01"): {
           name: "Framing",
           phase: "Framing",
           state: "NOT_STARTED",
-          duration: { optimistic: 5, likely: 7, conservative: 10, sourceIds: ["src-kf-dashboard"] },
+          duration: {
+            optimistic: 5,
+            likely: 7,
+            conservative: 10,
+            sourceIds: ["src-kf-dashboard"],
+          },
           constraintIds: [],
           sourceIds: ["src-kf-dashboard"],
         },
@@ -196,6 +208,20 @@ describe("POST /v1/projects/:id/import", () => {
     const response = await worker.fetch(
       jsonRequest("POST", "/v1/projects/no-provenance-v01/import", {
         project: fixture.project,
+        provenance: {},
+      }),
+      adminEnv(),
+    );
+    expect(response.status).toBe(400);
+  });
+
+  it("rejects a payload missing activities/constraints entirely with a clean 400, not an unhandled crash", async () => {
+    // The provenance-manifest check reads Object.keys(model.activities)/model.constraints on the
+    // raw request body BEFORE validateProjectModel ever runs -- a payload from an untrusted HTTP
+    // caller that omits those fields must fail closed with a normal error response, never throw.
+    const response = await worker.fetch(
+      jsonRequest("POST", "/v1/projects/malformed-v01/import", {
+        project: { projectId: "malformed-v01" },
         provenance: {},
       }),
       adminEnv(),

@@ -492,15 +492,22 @@ async function handle(request: Request, env: Env): Promise<Response> {
     if (model.projectId !== targetProjectId) {
       throw new HttpError(
         400,
-        `import payload projectId "${String(model.projectId)}" does not match URL project id "${targetProjectId}"`,
+        `import payload projectId "${model.projectId}" does not match URL project id "${targetProjectId}"`,
       );
     }
     const provenance =
       raw.provenance && typeof raw.provenance === "object"
         ? (raw.provenance as Record<string, unknown>)
         : {};
+    // `model` is `raw.project as ProjectModelV094` -- an unchecked cast on untrusted request JSON,
+    // not yet proven by validateProjectModel (below) -- so `activities`/`constraints` being
+    // non-optional in the *type* does not mean they are actually present at *runtime*. Without the
+    // `?? {}` fallback, a payload omitting either field throws `Object.keys(undefined)` here and
+    // surfaces as an unhandled 500 instead of the intended 400, before validation ever runs.
     const missingProvenance = [
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- see comment above
       ...Object.keys(model.activities ?? {}),
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- see comment above
       ...Object.keys(model.constraints ?? {}),
     ].filter((id) => !(id in provenance));
     if (missingProvenance.length > 0) {

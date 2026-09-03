@@ -108,7 +108,11 @@ describe("interpretTurn", () => {
         },
       ],
     });
-    const result = await interpretTurn("Jason moved Wednesday", session, callModel);
+    const result = await interpretTurn(
+      "Jason moved Wednesday",
+      session,
+      callModel,
+    );
     expect(result.claims).toHaveLength(0);
     expect(result.clarifications).toHaveLength(1);
   });
@@ -129,11 +133,15 @@ describe("interpretTurn", () => {
         },
       ],
     });
-    const result = await interpretTurn("masonry started Friday", session, callModel);
-    expect(result.claims).toHaveLength(1);
-    expect("mutationOp" in (result.claims[0] as unknown as Record<string, unknown>)).toBe(
-      false,
+    const result = await interpretTurn(
+      "masonry started Friday",
+      session,
+      callModel,
     );
+    expect(result.claims).toHaveLength(1);
+    expect(
+      "mutationOp" in (result.claims[0] as unknown as Record<string, unknown>),
+    ).toBe(false);
     expect(() => {
       assertNoForbiddenClaimFields(result.claims[0]);
     }).not.toThrow();
@@ -155,9 +163,14 @@ describe("interpretTurn", () => {
         },
       ],
     });
-    const result = await interpretTurn("masonry started Friday", session, callModel);
+    const result = await interpretTurn(
+      "masonry started Friday",
+      session,
+      callModel,
+    );
     expect(
-      "verification" in (result.claims[0] as unknown as Record<string, unknown>),
+      "verification" in
+        (result.claims[0] as unknown as Record<string, unknown>),
     ).toBe(false);
   });
 
@@ -177,9 +190,14 @@ describe("interpretTurn", () => {
         },
       ],
     });
-    const result = await interpretTurn("masonry moved Wednesday", session, callModel);
+    const result = await interpretTurn(
+      "masonry moved Wednesday",
+      session,
+      callModel,
+    );
     expect(
-      "mutationClass" in (result.claims[0] as unknown as Record<string, unknown>),
+      "mutationClass" in
+        (result.claims[0] as unknown as Record<string, unknown>),
     ).toBe(false);
   });
 
@@ -217,7 +235,11 @@ describe("interpretTurn timing", () => {
     const session = createSession("2026-09-03T08:00:00.000Z");
     const callModel = fakeCallModel({ spans: [] });
     // No recordTiming argument at all — must behave exactly as before, no throw, no timing.
-    const result = await interpretTurn("masonry started Friday", session, callModel);
+    const result = await interpretTurn(
+      "masonry started Friday",
+      session,
+      callModel,
+    );
     expect(result.claims).toEqual([]);
   });
 });

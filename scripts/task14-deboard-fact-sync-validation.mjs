@@ -20,7 +20,9 @@ const BASE_URL = process.env.HOWLER_BASE_URL ?? "http://127.0.0.1:8799";
 const ADMIN_KEY = process.env.HOWLER_ADMIN_KEY;
 
 if (!ADMIN_KEY) {
-  console.error("Set HOWLER_ADMIN_KEY (must match the running wrangler dev's .dev.vars).");
+  console.error(
+    "Set HOWLER_ADMIN_KEY (must match the running wrangler dev's .dev.vars).",
+  );
   process.exit(1);
 }
 
@@ -114,13 +116,17 @@ async function main() {
   console.log("== init-db ==");
   await call("/v1/admin/init-db");
 
-  console.log("== seed deboard-v091 (idempotent: 409 if already seeded, fine) ==");
+  console.log(
+    "== seed deboard-v091 (idempotent: 409 if already seeded, fine) ==",
+  );
   const seed = await call("/v1/projects/deboard-v091/seed");
   if (seed.status === 201) {
     assert(seed.body.project.revision === 1, "seed revision is 1");
     assert(seed.body.oversight.decision === "BLOCK", "seed oversight is BLOCK");
   } else {
-    console.log(`  (seed returned ${String(seed.status)}, assuming already seeded)`);
+    console.log(
+      `  (seed returned ${String(seed.status)}, assuming already seeded)`,
+    );
   }
 
   console.log(
@@ -139,7 +145,10 @@ async function main() {
       event: redEvent,
     }),
   );
-  assert(red.body.result?.problem?.code === "OVERSIGHT_BLOCKED", "RED: OVERSIGHT_BLOCKED");
+  assert(
+    red.body.result?.problem?.code === "OVERSIGHT_BLOCKED",
+    "RED: OVERSIGHT_BLOCKED",
+  );
   assert(red.body.result?.persisted === false, "RED: not persisted");
 
   console.log("== GREEN check 1: EVIDENCE_PREVIEW succeeds ==");
@@ -157,9 +166,14 @@ async function main() {
       event: greenEvent,
     }),
   );
-  assert(preview.body.result?.status === "SUCCEEDED", "GREEN check 1: preview SUCCEEDED");
+  assert(
+    preview.body.result?.status === "SUCCEEDED",
+    "GREEN check 1: preview SUCCEEDED",
+  );
 
-  console.log("== GREEN check 2: EVIDENCE_APPLY_SHADOW succeeds, revision 1 -> 2 ==");
+  console.log(
+    "== GREEN check 2: EVIDENCE_APPLY_SHADOW succeeds, revision 1 -> 2 ==",
+  );
   const apply = await call(
     "/v1/intents",
     intent({
@@ -170,13 +184,27 @@ async function main() {
     }),
   );
   assert(apply.body.result?.persisted === true, "GREEN check 2: persisted");
-  assert(apply.body.result?.projectRevisionBefore === 1, "GREEN check 2: revision before 1");
-  assert(apply.body.result?.projectRevisionAfter === 2, "GREEN check 2: revision after 2");
+  assert(
+    apply.body.result?.projectRevisionBefore === 1,
+    "GREEN check 2: revision before 1",
+  );
+  assert(
+    apply.body.result?.projectRevisionAfter === 2,
+    "GREEN check 2: revision after 2",
+  );
 
-  console.log("== GREEN check 3-5: masonry IN_PROGRESS, delta matches, completion 2026-11-13 ==");
+  console.log(
+    "== GREEN check 3-5: masonry IN_PROGRESS, delta matches, completion 2026-11-13 ==",
+  );
   const delta = apply.body.result?.output?.data?.delta;
-  assert(delta?.completionLikely?.from === "2026-11-11", "check 5: completion from 2026-11-11");
-  assert(delta?.completionLikely?.to === "2026-11-13", "check 5: completion to 2026-11-13");
+  assert(
+    delta?.completionLikely?.from === "2026-11-11",
+    "check 5: completion from 2026-11-11",
+  );
+  assert(
+    delta?.completionLikely?.to === "2026-11-13",
+    "check 5: completion to 2026-11-13",
+  );
   assert(delta?.shiftedActivityCount === 30, "check 5: 30 shifted activities");
   assert(delta?.criticalShiftCount === 18, "check 5: 18 critical shifted");
 
@@ -187,7 +215,8 @@ async function main() {
     .filter((f) => f.severity === "BLOCK")
     .flatMap((f) => f.activityIds);
   assert(
-    stillBlocked.includes("structural_reconcile") && stillBlocked.includes("brick_veneer"),
+    stillBlocked.includes("structural_reconcile") &&
+      stillBlocked.includes("brick_veneer"),
     "check 6: structural_reconcile and brick_veneer still BLOCK",
   );
 

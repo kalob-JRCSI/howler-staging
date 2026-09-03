@@ -201,7 +201,12 @@ describe("buildDebriefItems", () => {
           name: "Flooring install",
           phase: "Finishes",
           state: "NOT_STARTED",
-          duration: { optimistic: 1, likely: 2, conservative: 3, sourceIds: [] },
+          duration: {
+            optimistic: 1,
+            likely: 2,
+            conservative: 3,
+            sourceIds: [],
+          },
           constraintIds: ["carpet-decision"],
           sourceIds: [],
         },

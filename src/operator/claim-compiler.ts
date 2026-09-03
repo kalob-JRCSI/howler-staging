@@ -166,9 +166,7 @@ export interface NoMutationResult {
 }
 
 export type CompileClaimResult =
-  | ProposedMutation
-  | NoMutationResult
-  | Clarification;
+  ProposedMutation | NoMutationResult | Clarification;
 
 type ResolvedClaimEntity = { type: "activity" | "constraint"; id: string };
 
@@ -252,7 +250,11 @@ function buildMutations(
         if (typeof date !== "string") return date;
         return [
           { op: "SET_ACTUAL_FINISH", activityId: entity.id, date },
-          { op: "SET_ACTIVITY_STATE", activityId: entity.id, state: "COMPLETE" },
+          {
+            op: "SET_ACTIVITY_STATE",
+            activityId: entity.id,
+            state: "COMPLETE",
+          },
         ];
       }
       return [
@@ -356,6 +358,14 @@ function buildMutations(
   }
 }
 
+/** Task 15: optional stage timing instrumentation. No-op when `recordTiming` is absent (the
+ * default, every existing call site) — never required, never sent anywhere by default. */
+export interface TimingSample {
+  stage: string;
+  durationMs: number;
+}
+export type RecordTiming = (sample: TimingSample) => void;
+
 /**
  * Pure function, no network/D1 access. Given a `ConversationClaim`, the current
  * `ProjectModelV094` for the already-resolved project, and the session, resolves the claim's
@@ -365,14 +375,6 @@ function buildMutations(
  * a typed `Clarification` instead of falling through to a best-guess mutation or a best-guess
  * `mutationClass`.
  */
-/** Task 15: optional stage timing instrumentation. No-op when `recordTiming` is absent (the
- * default, every existing call site) — never required, never sent anywhere by default. */
-export interface TimingSample {
-  stage: string;
-  durationMs: number;
-}
-export type RecordTiming = (sample: TimingSample) => void;
-
 export function compileClaim(
   claim: ConversationClaim,
   projectModel: ProjectModelV094,
@@ -381,8 +383,12 @@ export function compileClaim(
   clock: () => number = Date.now,
 ): CompileClaimResult {
   const startedAt = clock();
+  // `session` is accepted for interface stability (the design/plan's stated signature is
+  // `compileClaim(claim, projectModel, session)`) but is not currently read by compileClaimBody —
+  // the compiler resolves everything it needs from `claim`/`projectModel` alone.
+  void session;
   try {
-    return compileClaimBody(claim, projectModel, session);
+    return compileClaimBody(claim, projectModel);
   } finally {
     if (recordTiming) {
       recordTiming({ stage: "compileClaim", durationMs: clock() - startedAt });
@@ -393,7 +399,6 @@ export function compileClaim(
 function compileClaimBody(
   claim: ConversationClaim,
   projectModel: ProjectModelV094,
-  _session: ConversationSession,
 ): CompileClaimResult {
   const mutationClass = CLASSIFY[claim.claimType];
 

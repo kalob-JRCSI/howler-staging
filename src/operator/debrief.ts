@@ -24,7 +24,7 @@ export function classifySourceFreshness(
   now: string,
   supersededBy?: { tense: "PAST"; effectiveDate?: string },
 ): SourceFreshness {
-  if (supersededBy && supersededBy.tense === "PAST") {
+  if (supersededBy) {
     return "OBSERVED_CONFIRMED";
   }
   if (claim.tense === "PAST") {
@@ -94,9 +94,7 @@ const GROUPABLE_CATEGORIES = new Set<DebriefItem["category"]>([
   "MATERIAL_MOVEMENT",
 ]);
 
-function categoryForConstraintType(
-  type: string,
-): DebriefItem["category"] {
+function categoryForConstraintType(type: string): DebriefItem["category"] {
   switch (type.toUpperCase()) {
     case "MATERIAL":
       return "MATERIAL_MOVEMENT";
@@ -111,10 +109,7 @@ function categoryForConstraintType(
   }
 }
 
-function questionFor(
-  category: DebriefItem["category"],
-  label: string,
-): string {
+function questionFor(category: DebriefItem["category"], label: string): string {
   switch (category) {
     case "MATERIAL_MOVEMENT":
       return `Has "${label}" arrived and been verified?`;
@@ -239,9 +234,7 @@ export function buildDebriefItems(
  * `masonry-material`/`masonry-trade` mechanism — then orders every group into the required
  * 8-category priority order (a group's rank is its highest-priority member's category).
  */
-export function prioritizeDebriefItems(
-  items: DebriefItem[],
-): DebriefItem[][] {
+export function prioritizeDebriefItems(items: DebriefItem[]): DebriefItem[][] {
   const groups: DebriefItem[][] = [];
   const groupByKey = new Map<string, DebriefItem[]>();
 
@@ -270,7 +263,11 @@ export function prioritizeDebriefItems(
     );
 
   return groups
-    .map((group, originalIndex) => ({ group, originalIndex, rank: rankOf(group) }))
+    .map((group, originalIndex) => ({
+      group,
+      originalIndex,
+      rank: rankOf(group),
+    }))
     .sort((a, b) => a.rank - b.rank || a.originalIndex - b.originalIndex)
     .map((entry) => entry.group);
 }

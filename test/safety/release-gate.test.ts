@@ -99,6 +99,11 @@ describe("release gate: no legacy mutation route (real repo)", () => {
     "/v1/projects/deboard-v091/seed",
     "/v1/intents",
     "SEGMENTS(len=4){1=workflows,3=resume}",
+    // Conversational PM layer (Task 13): POST /v1/projects/:id/import — generalizes the
+    // deboard-v091/seed route above into a reusable, projectId-parameterized onboarding path.
+    // Reuses repo.createProject/validateProjectModel/forecastInitial verbatim; no new domain
+    // mutation mechanism.
+    "SEGMENTS(len=4){1=projects,3=import}",
     "SEGMENTS(len=5){3=understanding,4=preview}",
     "SEGMENTS(len=5){3=events,4=preview}",
     "SEGMENTS(len=5){3=events,4=apply-shadow}",

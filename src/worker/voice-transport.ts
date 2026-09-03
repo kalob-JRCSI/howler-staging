@@ -533,11 +533,11 @@ export function createConfirmedClaimSubmitter(
   now: () => number = Date.now,
   recordTiming?: RecordTiming,
 ): {
-  submitConfirmedClaim(
+  submitConfirmedClaim: (
     mutation: ConfirmedClaimMutation,
     projectId: string,
     expectedProjectRevision: number,
-  ): Promise<{ workflowState: string }>;
+  ) => Promise<{ workflowState: string }>;
 } {
   const dedupe = new Map<string, Promise<{ workflowState: string }>>();
 

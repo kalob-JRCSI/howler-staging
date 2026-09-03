@@ -330,8 +330,7 @@ describe("scoped fact-ingestion oversight gate", () => {
           source: {
             id: "src-voice-decision-expected",
             type: "VOICE_CONVERSATION",
-            label:
-              'Voice conversation: "Jason Bonham is confirmed for Friday"',
+            label: 'Voice conversation: "Jason Bonham is confirmed for Friday"',
             observedAt: NOW,
             authority: 0.9,
             reliability: 0.9,
