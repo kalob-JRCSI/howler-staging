@@ -475,10 +475,22 @@ export function resolveCorrection(
  * "Yes, that's done." — binds only to the exact `DebriefItem` at `session.currentQuestionRef`,
  * never a fuzzy "most recent" guess. An unset `currentQuestionRef`, or one that no longer names
  * an active item, fails closed to a `Clarification` rather than guessing which item.
+ *
+ * Field-readiness blocker fix: this used to flip the `DebriefItem`'s own `status` to
+ * `"CONFIRMED_COMPLETE"` directly, in the ephemeral session view, with no corresponding canonical
+ * project mutation ever produced — a user saying "yes, that's done" made the debrief item *look*
+ * resolved while the real project model's activity/constraint state never changed. It now leaves
+ * `activeDebriefItems` untouched and instead adds a real `ITEM_COMPLETED` `ConversationClaim`
+ * (already `CONFIRMED`, since the user just explicitly affirmed it) to `session.pendingClaims` —
+ * the same claim the compiler/evidence-apply pipeline is built to carry through to a real
+ * mutation. The item's status only actually changes once that claim is compiled, applied, and
+ * `buildDebriefItems` re-derives the view from the new canonical truth; this function itself
+ * never claims completion ahead of that.
  */
 export function resolveCompletion(
   session: ConversationSession,
   text: string,
+  now: string = new Date().toISOString(),
 ): ConversationSession | Clarification {
   void text;
   if (!session.currentQuestionRef) {
@@ -488,23 +500,26 @@ export function resolveCompletion(
     };
   }
   const targetId = session.currentQuestionRef;
-  const index = session.activeDebriefItems.findIndex(
+  const target = session.activeDebriefItems.find(
     (item) => item.itemId === targetId,
   );
-  if (index === -1) {
-    return {
-      kind: "CLARIFICATION",
-      message: "That item is no longer active — what should I mark done?",
-    };
-  }
-  const items = [...session.activeDebriefItems];
-  const target = items[index];
   if (!target) {
     return {
       kind: "CLARIFICATION",
       message: "That item is no longer active — what should I mark done?",
     };
   }
-  items[index] = { ...target, status: "CONFIRMED_COMPLETE" };
-  return { ...session, activeDebriefItems: items };
+  const claim: ConversationClaim = {
+    claimId: `completion-${target.itemId}`,
+    sessionId: session.sessionId,
+    projectRef: target.projectId,
+    subjectRef: target.subject,
+    subjectText: target.subject,
+    claimType: "ITEM_COMPLETED",
+    certainty: "STATED",
+    sourceTurnId: `turn-${String(session.turnLog.length)}`,
+    capturedAt: now,
+    userConfirmationState: "CONFIRMED",
+  };
+  return addClaim(session, claim);
 }

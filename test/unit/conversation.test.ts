@@ -541,23 +541,34 @@ describe("defer", () => {
 });
 
 describe("completion", () => {
-  it("completion_binds_exact_item: 'yes, that's done' binds only to the exact currentQuestionRef item", () => {
+  it("completion_binds_exact_item: 'yes, that's done' binds only to the exact currentQuestionRef item, and produces a real claim rather than flipping the item's status directly", () => {
     let session = createSession("t");
     session = {
       ...session,
       activeDebriefItems: [
-        debriefItem({ itemId: "item-a", status: "OPEN" }),
+        debriefItem({ itemId: "item-a", status: "OPEN", subject: "Masonry crew mobilized" }),
         debriefItem({ itemId: "item-b", status: "OPEN" }),
       ],
       currentQuestionRef: "item-a",
     };
-    const result = resolveCompletion(session, "yes, that's done");
+    const result = resolveCompletion(session, "yes, that's done", "2026-09-03T12:00:00.000Z");
     expect("kind" in result).toBe(false);
     if ("kind" in result) return;
+
+    // Field-readiness blocker fix: the item's status is never touched directly -- only a real
+    // canonical mutation, once applied, can change it (via buildDebriefItems re-deriving from
+    // actual project truth).
     const itemA = result.activeDebriefItems.find((i) => i.itemId === "item-a");
     const itemB = result.activeDebriefItems.find((i) => i.itemId === "item-b");
-    expect(itemA?.status).toBe("CONFIRMED_COMPLETE");
+    expect(itemA?.status).toBe("OPEN");
     expect(itemB?.status).toBe("OPEN");
+
+    const claim = result.pendingClaims.find(
+      (c) => c.subjectText === "Masonry crew mobilized",
+    );
+    expect(claim?.claimType).toBe("ITEM_COMPLETED");
+    expect(claim?.userConfirmationState).toBe("CONFIRMED");
+    expect(claim?.projectRef).toBe("deboard-v091");
   });
 
   it("'yes, that's done' with currentQuestionRef unset clarifies rather than guessing which item", () => {
