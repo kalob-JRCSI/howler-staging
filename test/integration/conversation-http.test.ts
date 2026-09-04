@@ -15,6 +15,7 @@ import {
   baselineMigrationSql,
   dropAllTables,
 } from "../helpers/d1";
+import { hmacSha256Hex } from "../../src/worker/hash";
 
 const operatorMigrationSources = import.meta.glob<string>(
   "../../migrations/*.sql",
@@ -29,9 +30,17 @@ function operatorMigrationSql(): string {
 }
 
 const ADMIN_KEY = "test-admin-key-conversation-http";
+// Deliberately a different value from ADMIN_KEY -- a real, server-only secret the browser/client
+// never sees (see src/worker/env.d.ts and the confirmation-signing block in src/worker/index.ts).
+const CONFIRMATION_SIGNING_SECRET =
+  "test-confirmation-signing-secret-conversation-http-never-sent-to-client";
 
 function adminEnv(): Env {
-  return { ...env, HOWLER_ADMIN_KEY: ADMIN_KEY };
+  return {
+    ...env,
+    HOWLER_ADMIN_KEY: ADMIN_KEY,
+    HOWLER_CONFIRMATION_SIGNING_SECRET: CONFIRMATION_SIGNING_SECRET,
+  };
 }
 
 function jsonRequest(
@@ -544,6 +553,59 @@ describe("safety repair blocker 2: server-bound confirmation — client tamperin
     expect(status).toBe(400);
     const model = await loadDeboardModel();
     expect(model.activities.masonry?.actualStart).toBeUndefined();
+  });
+
+  // The critical adversarial case: HOWLER_ADMIN_KEY is, by this app's own design, known to any
+  // authenticated client (the operator pastes it into the browser and it is sent as the
+  // Authorization header on every request) -- so a client that could forge a valid confirmation
+  // using ADMIN_KEY as the signing secret would defeat the entire point of server-side signing.
+  // This proves it cannot: a "forged" mac computed with the exact same algorithm the server uses,
+  // but keyed by the client-known ADMIN_KEY instead of the real, never-transmitted
+  // HOWLER_CONFIRMATION_SIGNING_SECRET, is still rejected.
+  it("knowledge of ADMIN_KEY alone cannot forge a valid confirmation for altered project/evidence/revision — only the real, never-transmitted signing secret can", async () => {
+    const { session, confirmation } = await realDeboardConfirmation();
+    const alteredEvidence = {
+      ...(confirmation.canonicalEvidence as Record<string, unknown>),
+      mutations: [
+        { op: "SET_ACTUAL_FINISH", activityId: "masonry", date: "2026-09-03" },
+      ],
+    };
+    const alteredPayload = {
+      confirmationId: confirmation.confirmationId,
+      projectId: "some-other-project",
+      expectedProjectRevision: 999,
+      canonicalEvidence: alteredEvidence,
+      snapshotFingerprint: confirmation.snapshotFingerprint,
+      createdAt: confirmation.createdAt,
+      expiresAt: confirmation.expiresAt,
+    };
+    // The attacker only has ADMIN_KEY (the credential every authenticated client legitimately
+    // holds) -- never CONFIRMATION_SIGNING_SECRET, which this test process only holds because it
+    // is the test harness impersonating the server, not because a real client ever could.
+    const forgedMacUsingAdminKey = await hmacSha256Hex(
+      ADMIN_KEY,
+      alteredPayload,
+    );
+    const forged = {
+      ...confirmation,
+      projectId: alteredPayload.projectId,
+      expectedProjectRevision: alteredPayload.expectedProjectRevision,
+      canonicalEvidence: alteredPayload.canonicalEvidence,
+      serverMac: forgedMacUsingAdminKey,
+    };
+    const { status } = await confirmWith(session, forged);
+    expect(status).toBe(400);
+    const model = await loadDeboardModel();
+    expect(model.activities.masonry?.actualStart).toBeUndefined();
+
+    // Proves the real secret (which no client ever sees) is what actually would have signed it --
+    // never claim this without checking it, since a bug that made both secrets equal would let
+    // the "forged" mac above pass by coincidence rather than by the attack actually working.
+    const realMac = await hmacSha256Hex(
+      CONFIRMATION_SIGNING_SECRET,
+      alteredPayload,
+    );
+    expect(realMac).not.toBe(forgedMacUsingAdminKey);
   });
 
   it("an untampered, genuinely-issued confirmation still applies normally", async () => {

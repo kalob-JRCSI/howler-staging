@@ -794,11 +794,6 @@ async function handle(request: Request, env: Env): Promise<Response> {
 
   if (parts[0] !== "v1") throw new HttpError(404, "Not found");
   await requireAdmin(request, env.HOWLER_ADMIN_KEY);
-  // requireAdmin above already throws (500) when this is unset -- adminKey is a real, non-empty
-  // string for the rest of this handler. Named locally (rather than re-reading env.HOWLER_ADMIN_KEY,
-  // typed `string | undefined`) so the conversation/turn route's confirmation-signing calls below
-  // don't need a second, redundant guard.
-  const adminKey: string = env.HOWLER_ADMIN_KEY ?? "";
 
   if (request.method === "POST" && parts.join("/") === "v1/admin/init-db") {
     const result = await initializeSchema(env.HOWLER_DB);
@@ -1121,6 +1116,21 @@ async function handle(request: Request, env: Env): Promise<Response> {
     parts[3] === "conversation" &&
     parts[4] === "turn"
   ) {
+    // Safety repair (blocker 2 — server-bound confirmation, corrected): HOWLER_CONFIRMATION_SIGNING_SECRET
+    // is a genuinely server-only secret (see src/worker/env.d.ts) -- never HOWLER_ADMIN_KEY, which
+    // this app's own design already puts in the browser's hands (the operator pastes it into the
+    // admin-key field; the client sends it as the Authorization header on every request). Signing
+    // confirmations with a secret the client already possesses would let any authenticated-but-
+    // tampering client forge its own valid signature for an altered project/evidence/revision --
+    // exactly the attack this fix exists to prevent. Fails closed (500) rather than falling back
+    // to any other value if this secret is not configured.
+    const confirmationSigningSecret = env.HOWLER_CONFIRMATION_SIGNING_SECRET;
+    if (!confirmationSigningSecret) {
+      throw new HttpError(
+        500,
+        "HOWLER_CONFIRMATION_SIGNING_SECRET is not configured",
+      );
+    }
     const body = (await readJson(request)) as {
       text?: unknown;
       session?: unknown;
@@ -1200,7 +1210,11 @@ async function handle(request: Request, env: Env): Promise<Response> {
       // own :id. Any alteration to project, evidence, hash, or revision is refused before ever
       // reaching respondToVoiceConfirmation/submitApply.
       const confirmation = parsePendingConfirmation(body.confirm.confirmation);
-      await verifyConfirmationBinding(adminKey, confirmation, projectId);
+      await verifyConfirmationBinding(
+        confirmationSigningSecret,
+        confirmation,
+        projectId,
+      );
       const affirmative = body.confirm.affirmative;
       if (typeof affirmative !== "boolean") {
         throw new HttpError(400, "confirm.affirmative must be a boolean");
@@ -1272,7 +1286,7 @@ async function handle(request: Request, env: Env): Promise<Response> {
     // ever computed. Each one was created only from a genuinely SUCCEEDED preview (blocker 1),
     // so a signature only ever exists for a confirmation that is real and untampered at the
     // moment of issuance.
-    await signPendingConfirmations(adminKey, result);
+    await signPendingConfirmations(confirmationSigningSecret, result);
     return json({ session: nextSession, turn: result, timing });
   }
 
