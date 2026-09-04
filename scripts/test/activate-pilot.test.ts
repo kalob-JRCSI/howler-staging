@@ -15,7 +15,7 @@
 // boundary.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { activatePilot } from "../activate-pilot.ts";
+import { activatePilot, KNOWN_STAGING_TARGET } from "../activate-pilot.ts";
 import { PILOT_PROJECTS, buildPilotSeedProject } from "../pilot-seed.ts";
 
 interface Call {
@@ -488,6 +488,65 @@ describe("activatePilot: aborts clearly on unexpected/conflicting state", () => 
         : succeededIntent();
     stubFetch(handlers);
     await expect(activatePilot(OPTS)).rejects.toThrow();
+  });
+});
+
+// Pre-deploy correction: activation must actually be staging-only, fail closed, and never rely on
+// the caller merely asserting a target is staging. assertStagingTarget() runs before any HTTP call
+// activatePilot() makes (including init-db, the first mutating call) -- every rejection case below
+// asserts zero fetch calls were made, not just that the promise rejected.
+describe("activatePilot: staging-only target gate (fail closed, checked before any mutation)", () => {
+  it("accepts a localhost target and proceeds normally", async () => {
+    const { calls } = stubFetch(alreadyActivatedHandlers());
+    const rows = await activatePilot({
+      baseUrl: "http://127.0.0.1:8787",
+      adminKey: "test-admin-key",
+    });
+    expect(rows).toHaveLength(7);
+    expect(calls.some((c) => c.path === "/v1/admin/init-db")).toBe(true);
+  });
+
+  it("accepts the known Howler staging Worker target and proceeds normally", async () => {
+    const { calls } = stubFetch(alreadyActivatedHandlers());
+    const rows = await activatePilot({
+      baseUrl: KNOWN_STAGING_TARGET,
+      adminKey: "test-admin-key",
+    });
+    expect(rows).toHaveLength(7);
+    expect(calls.some((c) => c.path === "/v1/admin/init-db")).toBe(true);
+  });
+
+  it("rejects a production-looking target before any mutation is attempted", async () => {
+    const { calls } = stubFetch({});
+    await expect(
+      activatePilot({
+        baseUrl: "https://jarvis-voice.kalob.workers.dev",
+        adminKey: "test-admin-key",
+      }),
+    ).rejects.toThrow();
+    expect(calls).toHaveLength(0);
+  });
+
+  it("rejects an arbitrary remote URL before any mutation is attempted", async () => {
+    const { calls } = stubFetch({});
+    await expect(
+      activatePilot({
+        baseUrl: "https://evil.example.com",
+        adminKey: "test-admin-key",
+      }),
+    ).rejects.toThrow();
+    expect(calls).toHaveLength(0);
+  });
+
+  it("rejects a target whose hostname merely contains 'staging' but isn't the known Worker URL", async () => {
+    const { calls } = stubFetch({});
+    await expect(
+      activatePilot({
+        baseUrl: "https://howler-staging.attacker.example.com",
+        adminKey: "test-admin-key",
+      }),
+    ).rejects.toThrow();
+    expect(calls).toHaveLength(0);
   });
 });
 

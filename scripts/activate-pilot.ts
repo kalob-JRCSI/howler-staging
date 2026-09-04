@@ -73,9 +73,15 @@
 // Usage:
 //   HOWLER_ADMIN_KEY=<key> node scripts/activate-pilot.ts [--base-url http://127.0.0.1:8787]
 //
-// Defaults to a local wrangler dev server. Pointing this at a real staging/production URL is the
-// operator's own separate, explicit decision (--base-url or HOWLER_BASE_URL) -- never this
-// script's default, and this script does not deploy anything itself.
+// Defaults to a local wrangler dev server. This script does not deploy anything itself.
+//
+// STAGING-ONLY, FAIL CLOSED. This script never trusts the caller's say-so that a target is
+// staging -- --base-url/HOWLER_BASE_URL is checked against a fixed allowlist (assertStagingTarget,
+// below) before init-db, before any project import/seed, before reconciliation, before any
+// mutating call whatsoever. Only two shapes of target are ever permitted: localhost/127.0.0.1 (any
+// port, for local wrangler dev) and the one known Howler staging Worker URL. Anything else --
+// production, a differently-named/staging-adjacent Worker, or any arbitrary remote URL -- is
+// refused immediately, before the first HTTP call this script makes.
 
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
@@ -101,6 +107,34 @@ const DEBOARD_BOOTSTRAP_EVENT_ID = "deboard-v091-baseline-evidence-2026-08-26";
 // without this script ever having to guess or separately track it. A non-negative integer, as
 // required by the intent schema (src/operator/intent.ts).
 const PROBE_REVISION_SENTINEL = Number.MAX_SAFE_INTEGER;
+
+// The one known Howler staging Worker URL. Deliberately a single fixed literal, not a pattern --
+// widening this to "anything under *.workers.dev" or "anything with -staging in the name" would
+// admit an arbitrary attacker- or typo-controlled Worker just because its name looks right. Kept
+// in sync with the value referenced in .github/workflows/deploy.yml's own documentation.
+export const KNOWN_STAGING_TARGET =
+  "https://jarvis-voice-staging.kalob.workers.dev";
+
+// Local wrangler dev only -- http(s), 127.0.0.1 or localhost, an optional port, nothing else
+// (no path, no query, no extra host segments).
+const LOCALHOST_TARGET_PATTERN =
+  /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/?$/;
+
+/**
+ * Fail-closed staging-target gate: never trusts the caller's say-so that a target is staging.
+ * Called as the very first thing activatePilot() does, before init-db (the first mutating call)
+ * or any other request. Refuses anything that is not exactly localhost/127.0.0.1 or the one known
+ * Howler staging Worker URL -- production, a differently-named Worker, or any other arbitrary
+ * remote URL is rejected before a single HTTP call is made. Uses the same abort() (never
+ * mutation-attempting) path every other refusal in this script uses.
+ */
+function assertStagingTarget(baseUrl: string): void {
+  if (LOCALHOST_TARGET_PATTERN.test(baseUrl)) return;
+  if (baseUrl === KNOWN_STAGING_TARGET) return;
+  abort(
+    `refusing to activate pilot data against "${baseUrl}" -- this is not an allowlisted staging target. Only localhost/127.0.0.1 (any port) or the known Howler staging Worker (${KNOWN_STAGING_TARGET}) are permitted. No mutation was attempted.`,
+  );
+}
 
 interface ActivationOptions {
   baseUrl: string;
@@ -561,6 +595,9 @@ async function verifyAllSevenProjects(
 export async function activatePilot(
   opts: ActivationOptions,
 ): Promise<VerificationRow[]> {
+  // Fail closed, before the very first HTTP call this script makes (init-db). Never relies on the
+  // caller's say-so that a target is staging.
+  assertStagingTarget(opts.baseUrl);
   log(`Activating pilot data against ${opts.baseUrl} ...`);
   await initSchema(opts);
 

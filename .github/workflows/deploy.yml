@@ -13,6 +13,27 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Setup Node
+        uses: actions/setup-node@v6.0.0
+        with:
+          node-version: 24.20.0
+          cache: npm
+
+      - name: Install dependencies (npm ci)
+        run: npm ci
+
+      # Fails closed (non-zero exit, before the deploy step below ever runs) if the Worker is
+      # missing HOWLER_CONFIRMATION_SIGNING_SECRET or HOWLER_ADMIN_KEY -- verifies by binding NAME
+      # only (via `wrangler secret list`, which never returns secret values), using the exact same
+      # Cloudflare credentials the deploy step already has. Never creates, sets, or rotates a
+      # secret itself -- see scripts/preflight-worker-secrets.ts for the one-time manual step to
+      # take if this fails.
+      - name: Preflight -- verify required Worker secret bindings exist
+        run: node scripts/preflight-worker-secrets.ts --worker-name jarvis-voice-staging
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
       - name: Deploy jarvis-voice-staging
         uses: cloudflare/wrangler-action@v4
         with:
