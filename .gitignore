@@ -1,0 +1,6 @@
+.worktrees/
+dist/
+node_modules/
+tools/context-pack/.local/
+.dev.vars
+.wrangler/

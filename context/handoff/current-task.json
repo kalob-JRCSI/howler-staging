@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1",
+  "kind": "handoffRecord",
+  "taskId": "task-18",
+  "title": "Task 18: Voice Transport Pilot",
+  "status": "IN_PROGRESS",
+  "baseSha": "6697435e0efd14da5c1addf635c0353fadee0355",
+  "blocks": ["task-19"],
+  "summary": "Task 17 is accepted history (see context/receipts/accepted/through-task-017.json). Task 18 is the current voice transport pilot: persistent-page-session push-to-talk on the field dashboard, browser-native speech recognition where supported, canonical IntentV1 mapping, immutable 30-second confirmation for EVIDENCE_APPLY_SHADOW, exact Resume reuse, in-memory current interaction state only, and no audio persistence or live connectors. The earlier foundation-plan Task 18 deployment section is deferred/renamed and is not authority for this voice transport task. Task 19 remains blocked and unaccepted.",
+  "relevantPaths": [
+    "src/worker/index.ts",
+    "src/operator/intent.ts",
+    "src/operator/workflow.ts",
+    "src/operator/result.ts",
+    "src/operator/policy.ts",
+    "src/worker/admin.ts",
+    "src/worker/voice-transport.ts",
+    "tools/release-gate/src/run.mjs",
+    "wrangler.jsonc",
+    "package.json",
+    "docs/superpowers/specs/2026-09-02-howler-v095-task18-voice-transport-design.md",
+    "docs/superpowers/plans/2026-09-02-howler-v095-task18-voice-transport-plan.md"
+  ]
+}

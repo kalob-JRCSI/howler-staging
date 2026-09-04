@@ -1,0 +1,39 @@
+{
+  "schemaVersion": "1",
+  "id": "through-phase0-2",
+  "kind": "acceptedReceipt",
+  "throughTask": 13,
+  "baseSha": "6df623cd1e2ff0f0d4c2e877b36dc9380f3033fa",
+  "acceptedAt": "2026-08-30T00:00:00.000Z",
+  "summary": "Layered on top of through-task-013 (Tasks 1-13, unchanged and still accepted as-is): the Howler Context + Skill Fabric, Phase 0-2, is now accepted development infrastructure. This is the lean AGENTS.md router, the context/{receipts,handoff,catalog} structure, four canonical repo-local development skills under .agents/skills/, and the deterministic, no-embeddings context packer under tools/context-pack/ (with its own CI-enforced test gate and a PR #6 correction pass fixing verify integration, a missing-mandatory measurement gap, and progressive-reference budget enforcement). It does not modify Howler runtime behavior and does not represent Task 14 as accepted.",
+  "evidence": [
+    {
+      "authority": "ACCEPTED_RECEIPT",
+      "path": "context/receipts/accepted/through-task-013.json",
+      "note": "Prior accepted layer: Tasks 1-13, left unchanged by this receipt."
+    },
+    {
+      "authority": "GIT_CANONICAL",
+      "path": "AGENTS.md",
+      "note": "Router: authority order, accepted-history rule, context locations, progressive disclosure, safety routing."
+    },
+    {
+      "authority": "GIT_CANONICAL",
+      "path": ".agents/skills/",
+      "note": "Four canonical development skills (Phase 1): howler-task-handoff, howler-accepted-history, howler-parity-review, howler-cloudflare-safety."
+    },
+    {
+      "authority": "GIT_CANONICAL",
+      "path": "tools/context-pack/",
+      "note": "Deterministic context packer (Phase 2): catalog-driven selection, priority tiers, budget-aware progressive disclosure, stable canonical hash."
+    },
+    {
+      "authority": "GIT_CANONICAL",
+      "path": "sha:6df623cd1e2ff0f0d4c2e877b36dc9380f3033fa",
+      "note": "Merge commit for PR #6 (Context + Skill Fabric, Phase 0-2), the accepted baseline tip this receipt describes."
+    }
+  ],
+  "notAccepted": [
+    "Task 14 (implement revision-safe shadow mutation and resumability: EVIDENCE_APPLY_SHADOW execution, concurrent resume leasing, shadow-commit reconciliation, resume HTTP route) is not represented by this receipt and is not accepted history."
+  ]
+}

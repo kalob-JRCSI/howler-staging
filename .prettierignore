@@ -1,0 +1,8 @@
+.github/
+.superpowers/
+coverage/
+docs/
+dist/
+node_modules/
+worker-configuration.d.ts
+test/fixtures/v094/

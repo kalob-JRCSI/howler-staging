@@ -1,12 +1,38 @@
 {
   "name": "howler-staging",
   "private": true,
+  "type": "module",
   "version": "0.9.0",
+  "engines": {
+    "node": "24.20.0"
+  },
   "scripts": {
-    "deploy": "wrangler deploy",
-    "check": "wrangler deploy --dry-run"
+    "build:dry": "wrangler deploy --dry-run --outdir dist",
+    "cf-typegen": "wrangler types worker-configuration.d.ts",
+    "cf-typegen:check": "npm run cf-typegen && git diff --exit-code -- worker-configuration.d.ts",
+    "format:check": "prettier --check .",
+    "lint": "eslint .",
+    "test": "vitest run --passWithNoTests test/unit test/integration test/contract test/parity test/safety",
+    "test:contract": "vitest run --passWithNoTests test/contract",
+    "test:integration": "vitest run --passWithNoTests test/integration",
+    "test:parity": "vitest run --passWithNoTests test/parity",
+    "test:safety": "vitest run --passWithNoTests test/safety",
+    "test:unit": "vitest run --passWithNoTests test/unit",
+    "test:context-pack": "vitest run --config tools/context-pack/vitest.config.ts",
+    "test:release-gate": "vitest run --config tools/release-gate/vitest.config.ts",
+    "test:browser-artifact": "vitest run --config tools/browser-artifact/vitest.config.ts",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test/tsconfig.json && tsc --noEmit -p tools/context-pack/tsconfig.json && tsc --noEmit -p tools/release-gate/tsconfig.json && tsc --noEmit -p tools/browser-artifact/tsconfig.json",
+    "verify": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run test:context-pack && npm run test:release-gate && npm run test:browser-artifact && npm run cf-typegen:check && npm run build:dry",
+    "gate:release": "node tools/release-gate/src/run.mjs"
   },
   "devDependencies": {
-    "wrangler": "4.68.0"
+    "@cloudflare/vitest-plugin": "1.1.0",
+    "@types/node": "24.13.3",
+    "eslint": "10.8.0",
+    "prettier": "3.9.6",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.68.0",
+    "vitest": "4.1.1",
+    "wrangler": "4.126.0"
   }
 }

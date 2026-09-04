@@ -1,6 +1,36 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "jarvis-voice-staging",
-  "main": "worker.js",
-  "compatibility_date": "2026-08-26"
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-08-26",
+  // esbuild's keep_names transform (Wrangler default: true) injects a `__name(fn, "name")` call
+  // after every named function/class declaration so `.name` survives bundler renaming. This repo
+  // embeds several server-side functions into pages via `fn.toString()` for a browser <script> tag
+  // (see src/worker/admin.ts, src/worker/voice-transport.ts) -- those `__name(...)` calls end up
+  // inside the extracted text (they are sibling statements to nested function declarations), and
+  // reference a `__name` helper that exists only in the Worker's own bundle scope, never in the
+  // browser tab re-executing that text standalone. Nothing in this codebase reads `.name` at
+  // runtime (grepped), so disabling it is safe and removes the defect at its source rather than
+  // working around it per call site.
+  "keep_names": false,
+  // Task 19: serves the Penthouse atmosphere images (public/assets/*.webp) as real, independently
+  // cacheable static files instead of base64 data URIs. With no `run_worker_first`, Cloudflare's
+  // Asset Worker serves any request that matches a file under `public/` directly -- it never
+  // reaches src/worker/index.ts, so there is no new route/path-handling code in this Worker and
+  // no interaction with admin auth, D1, or any other binding. Any request that doesn't match a
+  // file (every existing route) falls through to the User Worker exactly as before.
+  "assets": {
+    "directory": "./public",
+  },
+  "d1_databases": [
+    {
+      "binding": "HOWLER_DB",
+      "database_name": "howler-intelligence-staging",
+      "database_id": "b1049979-11cc-4faa-9a94-a0f42f9f4f23",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "vars": {
+    "HOWLER_MODE": "shadow",
+  },
 }

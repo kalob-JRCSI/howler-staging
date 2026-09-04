@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.2
+
+      - name: Setup Node
+        uses: actions/setup-node@v6.0.0
+        with:
+          node-version: 24.20.0
+          cache: npm
+
+      - name: Install dependencies (npm ci)
+        run: npm ci
+
+      - name: Verify lockfile is unchanged by npm ci
+        run: git diff --exit-code -- package-lock.json
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Cloudflare binding type drift check
+        run: npm run cf-typegen:check
+
+      - name: Wrangler dry-run build
+        run: npm run build:dry
+
+      - name: Generate dry-run bundle manifest (SHA-256)
+        run: sha256sum dist/index.js > dist/manifest.sha256.txt
+
+      - name: Upload dry-run bundle and manifest
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: dry-run-bundle
+          path: dist/
+          if-no-files-found: error
