@@ -44,8 +44,8 @@
 
 import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
-import { PILOT_PROJECTS, buildPilotSeedProject } from "./pilot-seed";
-import { deboardReconciliationEvent } from "./deboard-reconciliation";
+import { PILOT_PROJECTS, buildPilotSeedProject } from "./pilot-seed.ts";
+import { deboardReconciliationEvent } from "./deboard-reconciliation.ts";
 import type { ProjectModelV094 } from "../src/domain/types";
 
 const DEBOARD_PROJECT_ID = "deboard-v091";
