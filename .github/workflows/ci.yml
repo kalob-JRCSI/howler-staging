@@ -45,6 +45,18 @@ jobs:
       - name: Test
         run: npm test
 
+      - name: Context pack tests
+        run: npm run test:context-pack
+
+      - name: Release gate tool tests
+        run: npm run test:release-gate
+
+      - name: Browser artifact tests
+        run: npm run test:browser-artifact
+
+      - name: Pilot activation tests
+        run: npm run test:pilot-activation
+
       - name: Cloudflare binding type drift check
         run: npm run cf-typegen:check
 
