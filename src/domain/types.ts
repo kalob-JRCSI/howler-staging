@@ -149,6 +149,31 @@ export interface ProjectEventV094 {
   mutationClass?: "FACT" | "COMMITMENT";
 }
 
+// v0.9.6 Contractor Hub: the Project Genesis intake/review artifact carried on the canonical
+// model, additive and optional (docs/superpowers/specs/2026-09-04-howler-contractor-hub-v096-design.md).
+// A project created before v0.9.6, or via the existing seed/import paths, simply has no
+// `projectProfile` -- every existing required field on ProjectModelV094 is unchanged.
+export interface ProjectProfileScopeItemV096 {
+  id: string;
+  label: string;
+  phase: string;
+}
+
+export interface ProjectBudgetV096 {
+  baseline?: number;
+  spent?: number;
+  currency: string;
+}
+
+export interface ProjectProfileV096 {
+  clientName?: string;
+  address?: string;
+  baselineScope: ProjectProfileScopeItemV096[];
+  budget?: ProjectBudgetV096;
+  genesisSourceId?: string;
+  genesisApprovedAt?: ISODateTime;
+}
+
 export interface ProjectModelV094 {
   projectId: string;
   revision: number;
@@ -165,6 +190,7 @@ export interface ProjectModelV094 {
   commercialSignals?: Record<string, CommercialSignalV094>;
   workloadSignals?: Record<string, WorkloadSignalV094>;
   eventLedger: ProjectEventV094[];
+  projectProfile?: ProjectProfileV096;
 }
 
 // Every EventMutationV094 variant below corresponds 1:1 to a `case` in the

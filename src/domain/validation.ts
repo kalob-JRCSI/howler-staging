@@ -235,6 +235,50 @@ export function validateProjectModel(model: ProjectModelV094): void {
     }
   }
 
+  if (model.projectProfile) {
+    const profile = model.projectProfile;
+    const scopeIds = new Set<string>();
+    for (const item of profile.baselineScope) {
+      if (!item.id)
+        throw new Error("Project profile scope item is missing an id");
+      if (scopeIds.has(item.id)) {
+        throw new Error(`Duplicate project profile scope item id: ${item.id}`);
+      }
+      scopeIds.add(item.id);
+      if (!item.label)
+        throw new Error(
+          `Project profile scope item ${item.id} is missing a label`,
+        );
+    }
+    if (profile.budget) {
+      if (
+        profile.budget.baseline !== undefined &&
+        (!Number.isFinite(profile.budget.baseline) ||
+          profile.budget.baseline < 0)
+      ) {
+        throw new Error(
+          "Project profile budget baseline must be a non-negative finite number",
+        );
+      }
+      if (
+        profile.budget.spent !== undefined &&
+        (!Number.isFinite(profile.budget.spent) || profile.budget.spent < 0)
+      ) {
+        throw new Error(
+          "Project profile budget spent must be a non-negative finite number",
+        );
+      }
+    }
+    if (
+      profile.genesisApprovedAt !== undefined &&
+      !Number.isFinite(Date.parse(profile.genesisApprovedAt))
+    ) {
+      throw new Error(
+        "Project profile genesisApprovedAt must be a valid ISO date-time",
+      );
+    }
+  }
+
   const eventIds = new Set<string>();
   for (const [eventIndex, event] of model.eventLedger.entries()) {
     if (eventIds.has(event.id))
