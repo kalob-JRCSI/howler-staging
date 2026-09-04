@@ -147,6 +147,28 @@ describe("required field experience", () => {
     expect(html).not.toMatch(/value="EVIDENCE_APPLY_SHADOW"[^>]*selected/);
   });
 
+  // 10b
+  // Phase 2 (product integration), requirement #4/#2: "Do not invent phases, dates, schedule
+  // detail, market info, weather, costs, or other fake dashboard content." The static page shell
+  // (never the per-project cards, which are rendered client-side from real canonical reads) must
+  // carry none of this -- proves no hardcoded placeholder content was added while wiring up
+  // Facts/Commitments/Unknowns and forecast/movement.
+  it("the static page shell contains no hardcoded weather/market/cost placeholder content", async () => {
+    const html = await (
+      await worker.fetch(plainRequest("GET", "/admin/field"), env)
+    ).text();
+    for (const term of [
+      "weather",
+      "forecast: sunny",
+      "market conditions",
+      "material cost index",
+      "budget overrun",
+      "\\$\\d",
+    ]) {
+      expect(html.toLowerCase()).not.toMatch(new RegExp(term, "i"));
+    }
+  });
+
   // 11
   it("declares a responsive viewport and an html lang attribute", async () => {
     const html = await (
