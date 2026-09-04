@@ -1037,6 +1037,58 @@ describe("selecting a portfolio row opens that project's Index Card", () => {
   });
 });
 
+// Phase 2 (product integration), requirement #8 (board resilience): a reasoning/clarification
+// problem or a stuck request for one project must never freeze another project's workspace.
+// conversationInFlight and the query/evidence inFlight set are both keyed strictly by projectId
+// (see submitConversationalTurn/submitAction above) -- this proves that in practice, at the DOM
+// level a pilot user actually interacts with.
+describe("board resilience: one project's stuck conversation never blocks another project's reads", () => {
+  it("proj-b's Refresh completes normally while proj-a's conversational turn is still in flight", async () => {
+    const { fetchFn, calls, pending } = makeDeferredFetch();
+    const rest = mountWithFetch(fetchFn, {
+      trackedProjects: ["proj-a", "proj-b"],
+    });
+    const h = { ...rest, fetchCalls: calls };
+
+    el(h, "fp-0-conv-input").value = "Foundation walls started today";
+    el(h, "fp-0-conv-send").trigger("click");
+    await flush();
+    expect(el(h, "fp-0-conv-response").textContent).toBe("Working…");
+    expect(
+      pending.some((entry) => entry.call.path.includes("proj-a")),
+    ).toBe(true);
+
+    el(h, "fp-1-refresh").trigger("click");
+    await flush();
+
+    for (const kind of [
+      "FORECAST_QUERY",
+      "FORECAST_HEALTH_QUERY",
+      "RECOVERY_QUERY",
+    ]) {
+      resolvePending(pending, byProjectAndKind("proj-b", kind), {
+        ok: true,
+        status: 200,
+        bodyText: json(
+          submissionBody({
+            output: kind === "FORECAST_HEALTH_QUERY" ? HEALTH_OUTPUT : undefined,
+          }),
+        ),
+      });
+    }
+    await flush();
+
+    expect(el(h, "fp-1-status").textContent).toContain("2026-09-10");
+    expect(el(h, "fp-1-card-status").textContent).toBe("Ready.");
+    // proj-a's conversation is still genuinely unresolved throughout -- it never errored out and
+    // never blocked proj-b's own reads from completing.
+    expect(el(h, "fp-0-conv-response").textContent).toBe("Working…");
+    expect(
+      pending.some((entry) => entry.call.path.includes("proj-a")),
+    ).toBe(true);
+  });
+});
+
 // -----------------------------------------------------------------------------------------------
 // TASK 16B CORRECTION: state and workflow ownership must be keyed by stable projectId (+ action
 // kind), never by mutable render index -- a card's index shifts whenever an earlier project is
