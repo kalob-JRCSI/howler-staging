@@ -571,6 +571,31 @@ describe("pure logic: mapOutcomeToDisplay", () => {
     expect(succeeded.showResume).toBe(false);
   });
 
+  it("surfaces the problem code separately from the JSON-stringified problem, for PROJECT_NOT_FOUND handling", () => {
+    const { testHooks } = mount(() => jsonResponse(202, {}));
+    const display = testHooks.mapOutcomeToDisplay({
+      run: { workflowId: "w1", state: "FAILED" },
+      result: {
+        status: "FAILED",
+        problem: {
+          code: "PROJECT_NOT_FOUND",
+          category: "INTERNAL",
+          message: "no such project",
+        },
+      },
+    });
+    expect(display.problemCode).toBe("PROJECT_NOT_FOUND");
+  });
+
+  it("problemCode is null when there is no problem", () => {
+    const { testHooks } = mount(() => jsonResponse(202, {}));
+    const display = testHooks.mapOutcomeToDisplay({
+      run: { workflowId: "w1", state: "SUCCEEDED" },
+      result: { status: "SUCCEEDED" },
+    });
+    expect(display.problemCode).toBeNull();
+  });
+
   it("never echoes any field beyond run/result — no secret/stack leakage even if the body carries one", () => {
     const { testHooks } = mount(() => jsonResponse(202, {}));
     const display = testHooks.mapOutcomeToDisplay({

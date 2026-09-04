@@ -462,6 +462,7 @@ export interface SubmissionKernel {
   mapOutcomeToDisplay: (body: unknown) => Record<string, unknown>;
   mapHealthToDisplay: (body: unknown) => Record<string, unknown>;
   mapRecoveryToDisplay: (body: unknown) => Record<string, unknown>;
+  mapForecastToDisplay: (body: unknown) => Record<string, unknown>;
   recommendNextMove: (
     health: Record<string, unknown> | null,
     recovery: Record<string, unknown> | null,
@@ -709,6 +710,7 @@ export function createSubmissionKernel(): SubmissionKernel {
       resultStatus: (result && asString(result.status)) ?? EM_DASH,
       persisted: result ? String(result.persisted) : EM_DASH,
       problem: problem ? JSON.stringify(problem) : EM_DASH,
+      problemCode: (problem && asString(problem.code)) ?? null,
       revisionConflict: isRevisionConflict
         ? JSON.stringify(problem.details ?? {})
         : EM_DASH,
@@ -798,6 +800,51 @@ export function createSubmissionKernel(): SubmissionKernel {
   }
 
   /**
+   * Maps an IntentSubmissionResponseV1 body carrying a FORECAST result output to a Facts /
+   * Commitments / Unknowns breakdown, purely by grouping the forecast engine's own already-
+   * computed per-activity `truthState` (src/engine/solver.ts) -- no new analysis, no invented
+   * schedule content. SATISFIED activities (an actual start/finish is already recorded) are
+   * facts; COMMITTED activities (schedule-locked) are commitments; everything else is still only
+   * FORECASTED, i.e. an unknown -- not yet either. `available: false` when this response is not a
+   * forecast result (query hasn't run yet, or failed) or carries no snapshot to read.
+   */
+  function mapForecastToDisplay(body: unknown): Record<string, unknown> {
+    const record = (body ?? {}) as Record<string, unknown>;
+    const result = record.result as Record<string, unknown> | undefined;
+    const output = result?.output as Record<string, unknown> | undefined;
+    if (!output || output.type !== "FORECAST") {
+      return { available: false };
+    }
+    const data = (output.data ?? {}) as Record<string, unknown>;
+    const latest = data.latest as Record<string, unknown> | null | undefined;
+    if (!latest) {
+      return { available: false };
+    }
+    const activityForecasts = (latest.activityForecasts ?? {}) as Record<
+      string,
+      Record<string, unknown>
+    >;
+    const facts: string[] = [];
+    const commitments: string[] = [];
+    const unknowns: string[] = [];
+    for (const forecast of Object.values(activityForecasts)) {
+      const name = asString(forecast.activityName) ?? asString(forecast.activityId) ?? "activity";
+      if (forecast.truthState === "SATISFIED") facts.push(name);
+      else if (forecast.truthState === "COMMITTED") commitments.push(name);
+      else unknowns.push(name);
+    }
+    return {
+      available: true,
+      factsCount: facts.length,
+      factsSample: facts.slice(0, 3),
+      commitmentsCount: commitments.length,
+      commitmentsSample: commitments.slice(0, 3),
+      unknownsCount: unknowns.length,
+      unknownsSample: unknowns.slice(0, 3),
+    };
+  }
+
+  /**
    * A deterministic, rule-based "what should the PM do next" derived only from counts already
    * surfaced by `mapHealthToDisplay`/`mapRecoveryToDisplay` -- not a new forecasting or predictive
    * algorithm. Checked in a fixed priority order: blocked constraints (hard-blocking) outrank
@@ -877,6 +924,7 @@ export function createSubmissionKernel(): SubmissionKernel {
     mapOutcomeToDisplay,
     mapHealthToDisplay,
     mapRecoveryToDisplay,
+    mapForecastToDisplay,
     recommendNextMove,
     callApi,
     describeError,
@@ -1195,6 +1243,10 @@ export function operatorPanelPage(): Response {
  * tree-building is needed. */
 export interface FieldDashboardElement extends OperatorPanelElement {
   innerHTML: string;
+  /** Optional: real DOM elements have this natively. Used only to bring a selected portfolio
+   * project's Index Card into view (openProjectWorkspace) -- purely cosmetic, never load-bearing,
+   * so existing minimal test fakes that omit it remain valid. */
+  scrollIntoView?: (options?: { behavior?: string; block?: string }) => void;
 }
 
 export interface FieldDashboardDocument {
@@ -1256,6 +1308,7 @@ export function fieldDashboardClientScript(
     mapOutcomeToDisplay,
     mapHealthToDisplay,
     mapRecoveryToDisplay,
+    mapForecastToDisplay,
     recommendNextMove,
     callApi,
     describeError,
@@ -1304,11 +1357,15 @@ export function fieldDashboardClientScript(
         <h2 id="fp-${String(index)}-title">${safeId}</h2>
         <button type="button" id="fp-${String(index)}-remove">Remove</button>
       </div>
+      <div id="fp-${String(index)}-unavailable" class="project-unavailable" hidden>Not activated in this environment ${EM_DASH} this project has not yet been created in staging D1.</div>
       <div class="project-grid">
         <div><h3>Current status</h3><p id="fp-${String(index)}-status">${EM_DASH}</p></div>
-        <div><h3>Priority actions</h3><p id="fp-${String(index)}-priority-actions">${EM_DASH}</p></div>
+        <div><h3>Priority actions / next actions</h3><p id="fp-${String(index)}-priority-actions">${EM_DASH}</p></div>
         <div class="cell-risk"><h3>Top risks / blockers</h3><p id="fp-${String(index)}-risks">${EM_DASH}</p></div>
-        <div><h3>Upcoming forecast</h3><p id="fp-${String(index)}-forecast">${EM_DASH}</p></div>
+        <div><h3>Upcoming forecast / movement</h3><p id="fp-${String(index)}-forecast">${EM_DASH}</p></div>
+        <div><h3>Facts (actual known state)</h3><p id="fp-${String(index)}-facts">${EM_DASH}</p></div>
+        <div><h3>Commitments (expected work)</h3><p id="fp-${String(index)}-commitments">${EM_DASH}</p></div>
+        <div><h3>Unknowns</h3><p id="fp-${String(index)}-unknowns">${EM_DASH}</p></div>
       </div>
       <p><strong>Recommended next move:</strong> <span id="fp-${String(index)}-recommendation">Run Refresh to load project intelligence.</span></p>
       <section class="active-workflows">
@@ -1399,6 +1456,12 @@ export function fieldDashboardClientScript(
   }
   const healthByProject = new Map<string, Record<string, unknown> | null>();
   const recoveryByProject = new Map<string, Record<string, unknown> | null>();
+  const forecastByProject = new Map<string, Record<string, unknown> | null>();
+  /** Pilot activation (missing-project honesty): projects for which the most recent canonical
+   * read came back PROJECT_NOT_FOUND -- the browser's tracked-project roster is never proof a
+   * project exists in D1, so this is shown as an explicit unavailable state rather than left as
+   * stale placeholder dashes. Cleared the moment any read for that project succeeds again. */
+  const notActivatedByProject = new Set<string>();
   const actionStateByKey = new Map<string, ActionState>();
   const inFlight = new Set<string>();
   /** Pilot activation: one ConversationSession per project, opaque to this client -- it only ever
@@ -1479,6 +1542,8 @@ export function fieldDashboardClientScript(
     if (!isProjectSafeToPurge(projectId)) return;
     healthByProject.delete(projectId);
     recoveryByProject.delete(projectId);
+    forecastByProject.delete(projectId);
+    notActivatedByProject.delete(projectId);
     for (const kind of ACTION_KINDS) {
       actionStateByKey.delete(`${projectId}:${kind}`);
       sessionStorage.removeItem?.(`howler_field_pending_${projectId}_${kind}`);
@@ -1561,6 +1626,24 @@ export function fieldDashboardClientScript(
         healthAvailable ? health : null,
         recoveryAvailable ? recovery : null,
       );
+
+    const forecast = forecastByProject.get(projectId) ?? null;
+    const forecastAvailable = forecast ? forecast.available === true : false;
+    document.getElementById(`fp-${String(index)}-facts`).textContent =
+      forecastAvailable
+        ? `${String(forecast?.factsCount)} ${EM_DASH} ${((forecast?.factsSample as string[] | undefined) ?? []).join(", ") || "none"}`
+        : EM_DASH;
+    document.getElementById(`fp-${String(index)}-commitments`).textContent =
+      forecastAvailable
+        ? `${String(forecast?.commitmentsCount)} ${EM_DASH} ${((forecast?.commitmentsSample as string[] | undefined) ?? []).join(", ") || "none"}`
+        : EM_DASH;
+    document.getElementById(`fp-${String(index)}-unknowns`).textContent =
+      forecastAvailable
+        ? `${String(forecast?.unknownsCount)} ${EM_DASH} ${((forecast?.unknownsSample as string[] | undefined) ?? []).join(", ") || "none"}`
+        : EM_DASH;
+
+    document.getElementById(`fp-${String(index)}-unavailable`).hidden =
+      !notActivatedByProject.has(projectId);
   }
 
   function isNoteworthy(state: ActionState | undefined): boolean {
@@ -1662,6 +1745,16 @@ export function fieldDashboardClientScript(
     }
     if (kind === "RECOVERY_QUERY") {
       recoveryByProject.set(projectId, mapRecoveryToDisplay(result.body));
+    }
+    if (kind === "FORECAST_QUERY") {
+      forecastByProject.set(projectId, mapForecastToDisplay(result.body));
+    }
+    if (QUERY_KINDS.includes(kind)) {
+      if (display.problemCode === "PROJECT_NOT_FOUND") {
+        notActivatedByProject.add(projectId);
+      } else if (display.workflowState === "SUCCEEDED") {
+        notActivatedByProject.delete(projectId);
+      }
     }
 
     const index = indexOfProject(projectId);
@@ -2156,7 +2249,7 @@ export function fieldDashboardClientScript(
 
   /** One compact portfolio row (signal / PROJECT / STATUS / FINISH / HEALTH) -- deliberately not
    * the full project card: that detail still lives in the admin drawer below, unchanged. */
-  function portfolioRowHtml(projectId: string): string {
+  function portfolioRowHtml(projectId: string, index: number): string {
     const safeId = escapeHtml(projectId);
     const signal = projectSignal(projectId);
     const statusLabel =
@@ -2167,13 +2260,26 @@ export function fieldDashboardClientScript(
           : signal === "ok"
             ? "On track"
             : "Awaiting refresh";
-    return `<div class="ph-row" data-signal="${signal}">
+    return `<button type="button" id="ph-row-${String(index)}" class="ph-row" data-signal="${signal}" data-project-id="${safeId}" aria-label="Open ${safeId} workspace">
       <span class="ph-row-signal" aria-hidden="true"></span>
       <span class="ph-row-name">${safeId}</span>
       <span class="ph-row-status">${statusLabel}</span>
       <span class="ph-row-finish">${escapeHtml(projectFinishLine(projectId))}</span>
       <span class="ph-row-health">${escapeHtml(projectHealthScore(projectId))}</span>
-    </div>`;
+    </button>`;
+  }
+
+  /** Selecting a visible portfolio row opens that project's already-rendered Index Card by
+   * scrolling it into view (every card renders unconditionally in the always-visible
+   * "Project workspace" section now -- see requirement #2 -- so "opening" a project never needs a
+   * separate route or a hidden-until-clicked drawer). A no-op for a project that somehow is not
+   * (or is no longer) tracked. */
+  function openProjectWorkspace(projectId: string): void {
+    const index = indexOfProject(projectId);
+    if (index === -1) return;
+    document
+      .getElementById(`fp-${String(index)}-title`)
+      .scrollIntoView?.({ behavior: "smooth", block: "start" });
   }
 
   /** Count of currently noteworthy project+action items -- the same underlying signal
@@ -2345,8 +2451,15 @@ export function fieldDashboardClientScript(
   function renderPortfolioOverview(): void {
     document.getElementById("ph-portfolio-rows").innerHTML =
       trackedProjects.length
-        ? trackedProjects.map((id) => portfolioRowHtml(id)).join("")
+        ? trackedProjects.map((id, i) => portfolioRowHtml(id, i)).join("")
         : `<p class="ph-empty">No tracked projects yet ${EM_DASH} add one in Admin &amp; diagnostics below.</p>`;
+    trackedProjects.forEach((id, i) => {
+      document
+        .getElementById(`ph-row-${String(i)}`)
+        .addEventListener("click", () => {
+          openProjectWorkspace(id);
+        });
+    });
 
     const severity = prioritySeverityOverall();
     const prioritiesSection = document.getElementById("ph-priorities-section");
@@ -2403,6 +2516,23 @@ export function fieldDashboardClientScript(
   });
 
   els.refreshAllButton.addEventListener("click", () => {
+    trackedProjects.forEach((id) => {
+      runProjectQueries(id);
+    });
+  });
+
+  /** Requirement #3 (automatic canonical reads): opening Penthouse must load real canonical
+   * project data without the pilot user ever visiting Admin & diagnostics -- but a Worker route
+   * genuinely cannot be read before an admin key exists, so "automatic" means "the moment a key is
+   * available", not "before". Fires once per distinct non-empty key value (not on every keystroke,
+   * and not repeatedly for the same key), on the input's `change` event (fires on blur/Enter,
+   * exactly like a real browser commits a credential field) -- never on `input`, which would fire
+   * mid-paste/mid-type against a key that isn't finished yet. */
+  let lastAutoLoadedAdminKey = "";
+  els.adminKey.addEventListener("change", () => {
+    const key = adminKeyValue();
+    if (!key || key === lastAutoLoadedAdminKey) return;
+    lastAutoLoadedAdminKey = key;
     trackedProjects.forEach((id) => {
       runProjectQueries(id);
     });
@@ -2650,6 +2780,9 @@ ${PENTHOUSE_TOKENS}
       display: grid; grid-template-columns: 8px 1.3fr 1fr 0.8fr 0.6fr; align-items: center;
       gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--hw-border); font-size: 13px;
     }
+    button.ph-row { cursor: pointer; width: 100%; background: none; border: none; border-bottom: 1px solid var(--hw-border); text-align: left; font-family: inherit; color: inherit; min-height: 0; }
+    button.ph-row:hover { background: var(--hw-surface); }
+    button.ph-row:focus-visible { outline: 2px solid var(--hw-focus); outline-offset: -2px; }
     .ph-row-labels {
       font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--hw-ink-faint);
     }
@@ -2678,6 +2811,15 @@ ${PENTHOUSE_TOKENS}
     .ph-alert-project { display: block; font-weight: 600; color: var(--hw-ink); margin-bottom: 2px; }
     .ph-alert-detail { color: var(--hw-ink-muted); word-break: break-word; }
 
+    .ph-connect { margin-bottom: 20px; }
+    .ph-connect input { max-width: 420px; }
+    .ph-connect .hw-sub { margin: 8px 0 0; }
+    .ph-workspace { margin-bottom: 22px; }
+    .ph-workspace .hw-sub { margin-bottom: 10px; }
+    .project-unavailable {
+      background: var(--hw-warn-bg); border: 1px solid var(--hw-warn); border-radius: var(--hw-radius-sm);
+      padding: 10px 12px; margin-bottom: 12px; font-size: 13px; color: var(--hw-warn);
+    }
     .ph-bottom-band { display: grid; grid-template-columns: 1fr; gap: 20px; margin-bottom: 22px; }
     .ph-movement, .ph-intelligence {
       min-width: 0; border: 1px solid var(--hw-border); border-radius: var(--hw-radius);
@@ -2811,6 +2953,11 @@ ${PENTHOUSE_TOKENS}
     <button type="button" class="ph-nav-item" aria-disabled="true" title="Coming soon">Activity</button>
   </nav>
 <main class="ph-shell">
+  <section class="ph-connect card" aria-labelledby="ph-connect-heading">
+    <label id="ph-connect-heading" for="admin-key">HOWLER_ADMIN_KEY</label>
+    <input id="admin-key" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Paste the staging admin key to load the portfolio">
+    <p class="hw-sub">Kept in memory for this tab only -- never written to sessionStorage/localStorage. Entering it automatically loads every tracked project below.</p>
+  </section>
   <div class="ph-arrival">
     <div class="ph-atmosphere">
       <div id="env-banner" role="status" class="ph-env-banner">STAGING &middot; SHADOW &middot; NO LIVE SYSTEMS</div>
@@ -2870,14 +3017,14 @@ ${PENTHOUSE_TOKENS}
     </section>
   </div>
 
+  <section class="ph-workspace" aria-labelledby="ph-workspace-heading">
+    <p class="ph-eyebrow-label" id="ph-workspace-heading">Project workspace</p>
+    <p class="hw-sub">Read-only forecast/health/recovery intelligence and explicit staging-only evidence actions, one project at a time. This page submits requests only; all forecasting, revision, retry, and mutation logic runs server-side.</p>
+    <div id="projects-container"></div>
+  </section>
+
   <details class="ph-admin-drawer">
     <summary>Admin &amp; diagnostics</summary>
-    <p class="hw-sub">Read-only forecast/health/recovery intelligence and explicit staging-only evidence actions, one project at a time. This page submits requests only; all forecasting, revision, retry, and mutation logic runs server-side.</p>
-
-    <section class="card">
-      <label for="admin-key">HOWLER_ADMIN_KEY</label>
-      <input id="admin-key" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Paste the staging admin key">
-    </section>
 
     <section class="card">
       <label for="new-project-id">Add project</label>
@@ -2885,8 +3032,6 @@ ${PENTHOUSE_TOKENS}
       <button id="add-project" type="button">Add project</button>
       <button id="refresh-all" type="button">Refresh all</button>
     </section>
-
-    <div id="projects-container"></div>
   </details>
 </main>
 </div>

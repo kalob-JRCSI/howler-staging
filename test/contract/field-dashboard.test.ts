@@ -159,6 +159,45 @@ describe("required field experience", () => {
   });
 });
 
+// Phase 2 (product integration), requirement #2/#3: the visible project workspace (the Index
+// Cards, and the admin key needed to load them) must never live inside the collapsed "Admin &
+// diagnostics" drawer -- a normal pilot user must not need to know or use it for normal operation.
+describe("Phase 2: project workspace and admin key are outside the collapsed admin drawer", () => {
+  function drawerInnerHtml(html: string): string {
+    const match = /<details class="ph-admin-drawer">([\s\S]*?)<\/details>/.exec(
+      html,
+    );
+    expect(match, "expected an ph-admin-drawer <details> block").toBeDefined();
+    return match?.[1] ?? "";
+  }
+
+  it("the admin key field is not inside the admin drawer", async () => {
+    const html = await (
+      await worker.fetch(plainRequest("GET", "/admin/field"), env)
+    ).text();
+    expect(drawerInnerHtml(html)).not.toContain('id="admin-key"');
+    expect(html).toMatch(/id="admin-key"[^>]*type="password"/);
+  });
+
+  it("the projects-container (Index Cards) is not inside the admin drawer", async () => {
+    const html = await (
+      await worker.fetch(plainRequest("GET", "/admin/field"), env)
+    ).text();
+    expect(drawerInnerHtml(html)).not.toContain('id="projects-container"');
+    expect(html).toContain('id="projects-container"');
+  });
+
+  it("the admin drawer still exists, retaining Add project / Refresh all as supplementary controls", async () => {
+    const html = await (
+      await worker.fetch(plainRequest("GET", "/admin/field"), env)
+    ).text();
+    const drawer = drawerInnerHtml(html);
+    expect(drawer).toContain('id="new-project-id"');
+    expect(drawer).toContain('id="add-project"');
+    expect(drawer).toContain('id="refresh-all"');
+  });
+});
+
 // 12
 describe("embedded client script closure safety", () => {
   it("every module-level constant createSubmissionKernel needs is declared inside its own embedded text", async () => {

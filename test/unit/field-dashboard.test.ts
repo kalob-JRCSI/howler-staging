@@ -856,6 +856,187 @@ describe("admin key handling", () => {
   });
 });
 
+// Phase 2 (product integration), requirement #3: opening Penthouse must load real canonical
+// project data automatically -- a Worker route genuinely cannot be read before an admin key
+// exists, so "automatic" means the moment a key is entered, never requiring a manual visit to
+// Admin & diagnostics or a manual Refresh-all click first.
+describe("automatic canonical reads once an admin key is entered", () => {
+  it("entering the admin key (change event) automatically queries every tracked project, without clicking Refresh all", async () => {
+    const h = mount(() => ({ ok: true, status: 200, bodyText: "{}" }), {
+      trackedProjects: ["proj-a", "proj-b"],
+    });
+    expect(h.fetchCalls).toHaveLength(0);
+    el(h, "admin-key").value = "my-key";
+    el(h, "admin-key").trigger("change");
+    await flush();
+    const kinds = h.fetchCalls.map((c) => callBody(c).kind).sort();
+    expect(kinds).toEqual(
+      ["FORECAST_QUERY", "FORECAST_HEALTH_QUERY", "RECOVERY_QUERY"]
+        .concat(["FORECAST_QUERY", "FORECAST_HEALTH_QUERY", "RECOVERY_QUERY"])
+        .sort(),
+    );
+    expect(
+      h.fetchCalls.some((c) => callBody(c).projectId === "proj-a"),
+    ).toBe(true);
+    expect(
+      h.fetchCalls.some((c) => callBody(c).projectId === "proj-b"),
+    ).toBe(true);
+  });
+
+  it("does not re-fire for the same admin key value on a second change event", async () => {
+    const h = mount(() => ({ ok: true, status: 200, bodyText: "{}" }), {
+      trackedProjects: ["proj-a"],
+    });
+    el(h, "admin-key").value = "my-key";
+    el(h, "admin-key").trigger("change");
+    await flush();
+    const firstCount = h.fetchCalls.length;
+    el(h, "admin-key").trigger("change");
+    await flush();
+    expect(h.fetchCalls).toHaveLength(firstCount);
+  });
+
+  it("an empty admin key never triggers a query", async () => {
+    const h = mount(() => ({ ok: true, status: 200, bodyText: "{}" }), {
+      trackedProjects: ["proj-a"],
+    });
+    el(h, "admin-key").trigger("change");
+    await flush();
+    expect(h.fetchCalls).toHaveLength(0);
+  });
+});
+
+// Phase 2 (product integration), requirement #3: the browser's tracked-project roster is never
+// proof a project exists in D1 -- a PROJECT_NOT_FOUND read must render an explicit, honest
+// unavailable state, never stale placeholder dashes or fabricated data.
+describe("missing-project honesty (PROJECT_NOT_FOUND)", () => {
+  const PROJECT_NOT_FOUND_PROBLEM = {
+    code: "PROJECT_NOT_FOUND",
+    category: "INTERNAL",
+    message: "no such project",
+    retryable: false,
+  };
+
+  it("shows the explicit unavailable banner when a canonical read comes back PROJECT_NOT_FOUND", async () => {
+    const h = mount(() => ({
+      ok: true,
+      status: 200,
+      bodyText: json(
+        submissionBody({
+          run: runBlock({ state: "FAILED" }),
+          resultStatus: "FAILED",
+          problem: PROJECT_NOT_FOUND_PROBLEM,
+        }),
+      ),
+    }));
+    expect(el(h, "fp-0-unavailable").hidden).toBe(true);
+    el(h, "fp-0-refresh").trigger("click");
+    await flush();
+    expect(el(h, "fp-0-unavailable").hidden).toBe(false);
+  });
+
+  it("clears the unavailable banner once a later read for the same project succeeds", async () => {
+    let shouldFail = true;
+    const h = mount(() => ({
+      ok: true,
+      status: 200,
+      bodyText: json(
+        shouldFail
+          ? submissionBody({
+              run: runBlock({ state: "FAILED" }),
+              resultStatus: "FAILED",
+              problem: PROJECT_NOT_FOUND_PROBLEM,
+            })
+          : submissionBody({}),
+      ),
+    }));
+    el(h, "fp-0-refresh").trigger("click");
+    await flush();
+    expect(el(h, "fp-0-unavailable").hidden).toBe(false);
+    shouldFail = false;
+    el(h, "fp-0-refresh").trigger("click");
+    await flush();
+    expect(el(h, "fp-0-unavailable").hidden).toBe(true);
+  });
+});
+
+// Phase 2 (product integration), requirement #2: Facts (actual known state) / Commitments
+// (expected work) / Unknowns, derived only from the forecast engine's own already-computed
+// per-activity truthState (src/engine/solver.ts) -- never invented schedule content.
+describe("Facts / Commitments / Unknowns, derived from the real FORECAST_QUERY response", () => {
+  const FORECAST_OUTPUT = {
+    type: "FORECAST",
+    data: {
+      modelRevision: 3,
+      latest: {
+        activityForecasts: {
+          "act-1": { activityId: "act-1", activityName: "Foundation", truthState: "SATISFIED" },
+          "act-2": { activityId: "act-2", activityName: "Framing", truthState: "COMMITTED" },
+          "act-3": { activityId: "act-3", activityName: "Roofing", truthState: "FORECASTED" },
+        },
+      },
+    },
+  };
+
+  it("groups activities by truthState into Facts/Commitments/Unknowns counts and names", async () => {
+    const h = mount((call) => ({
+      ok: true,
+      status: 200,
+      bodyText: json(
+        submissionBody({
+          output:
+            callBody(call).kind === "FORECAST_QUERY" ? FORECAST_OUTPUT : undefined,
+        }),
+      ),
+    }));
+    el(h, "fp-0-refresh").trigger("click");
+    await flush();
+    expect(el(h, "fp-0-facts").textContent).toContain("1");
+    expect(el(h, "fp-0-facts").textContent).toContain("Foundation");
+    expect(el(h, "fp-0-commitments").textContent).toContain("1");
+    expect(el(h, "fp-0-commitments").textContent).toContain("Framing");
+    expect(el(h, "fp-0-unknowns").textContent).toContain("1");
+    expect(el(h, "fp-0-unknowns").textContent).toContain("Roofing");
+  });
+
+  it("never fabricates a breakdown before any forecast has been read", () => {
+    const h = mount(() => ({ ok: true, status: 200, bodyText: "{}" }));
+    expect(el(h, "fp-0-facts").textContent).toBe(String.fromCharCode(8212));
+    expect(el(h, "fp-0-commitments").textContent).toBe(
+      String.fromCharCode(8212),
+    );
+    expect(el(h, "fp-0-unknowns").textContent).toBe(String.fromCharCode(8212));
+  });
+});
+
+// Phase 2 (product integration), requirement #2: "Selecting a visible portfolio project must
+// open a real usable Index Card/workspace." Every card already renders unconditionally in the
+// always-visible workspace section (see the contract-level drawer-placement tests), so "opening"
+// a project is scrolling its already-rendered card into view.
+describe("selecting a portfolio row opens that project's Index Card", () => {
+  it("clicking a portfolio row scrolls the matching project card's title into view", () => {
+    const h = mount(() => ({ ok: true, status: 200, bodyText: "{}" }), {
+      trackedProjects: ["proj-a", "proj-b"],
+    });
+    const scrollSpy: { calls: number } = { calls: 0 };
+    (el(h, "fp-1-title") as unknown as { scrollIntoView: () => void }).scrollIntoView =
+      () => {
+        scrollSpy.calls += 1;
+      };
+    el(h, "ph-row-1").trigger("click");
+    expect(scrollSpy.calls).toBe(1);
+  });
+
+  it("does nothing for a row whose project is no longer tracked", () => {
+    const h = mount(() => ({ ok: true, status: 200, bodyText: "{}" }), {
+      trackedProjects: ["proj-a"],
+    });
+    expect(() => {
+      el(h, "ph-row-0").trigger("click");
+    }).not.toThrow();
+  });
+});
+
 // -----------------------------------------------------------------------------------------------
 // TASK 16B CORRECTION: state and workflow ownership must be keyed by stable projectId (+ action
 // kind), never by mutable render index -- a card's index shifts whenever an earlier project is
