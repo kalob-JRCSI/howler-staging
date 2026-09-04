@@ -7,9 +7,26 @@ import {
   type ConfirmedClaimMutation,
   type FieldVoiceBridge,
 } from "../../src/worker/voice-transport";
-import type { PendingVoiceConfirmation } from "../../src/worker/voice-transport";
+import type {
+  ClaimPreviewOutcome,
+  PendingVoiceConfirmation,
+} from "../../src/worker/voice-transport";
 import type { ProjectEventV094 } from "../../src/domain/types";
 import type { ForecastDeltaV094 } from "../../src/engine/solver";
+
+/** Narrows a `ClaimPreviewOutcome` to its PREVIEWED branch, failing the test loudly if the
+ * preview did not actually succeed — every existing test in this file expects a successful
+ * preview, so a PREVIEW_FAILED outcome here is a real test failure, never silently ignored. */
+function expectPreviewed(
+  outcome: ClaimPreviewOutcome,
+): Extract<ClaimPreviewOutcome, { outcome: "PREVIEWED" }> {
+  if (outcome.outcome !== "PREVIEWED") {
+    throw new Error(
+      `expected a PREVIEWED outcome, got ${outcome.outcome} (${outcome.previewResult.workflowState})`,
+    );
+  }
+  return outcome;
+}
 
 function fakeEvent(id: string): ProjectEventV094 {
   return {
@@ -74,11 +91,8 @@ describe("conversational claim gateway: preview never auto-applies", () => {
       () => "confirmation-1",
       () => 1_000,
     );
-    const outcome = await previewClaim(
-      fakeMutation(),
-      "deboard-v091",
-      1,
-      "capture-1",
+    const outcome = expectPreviewed(
+      await previewClaim(fakeMutation(), "deboard-v091", 1, "capture-1"),
     );
     expect(outcome.previewResult.workflowState).toBe("SUCCEEDED");
     expect(outcome.confirmation.state).toBe("PENDING");
@@ -94,11 +108,8 @@ describe("conversational claim gateway: preview never auto-applies", () => {
         () => "confirmation-1",
         () => 1_000,
       );
-    const preview = await previewClaim(
-      fakeMutation(),
-      "deboard-v091",
-      1,
-      "capture-1",
+    const preview = expectPreviewed(
+      await previewClaim(fakeMutation(), "deboard-v091", 1, "capture-1"),
     );
     expect(applyCalls).toHaveLength(0);
 
@@ -119,11 +130,8 @@ describe("conversational claim gateway: preview never auto-applies", () => {
         () => "confirmation-1",
         () => 1_000,
       );
-    const preview = await previewClaim(
-      fakeMutation(),
-      "deboard-v091",
-      1,
-      "capture-1",
+    const preview = expectPreviewed(
+      await previewClaim(fakeMutation(), "deboard-v091", 1, "capture-1"),
     );
     const outcome = await respondToPendingClaim(
       preview.confirmation.confirmationId,
@@ -160,11 +168,8 @@ describe("conversational claim gateway: preview never auto-applies", () => {
         () => "confirmation-1",
         () => 1_000,
       );
-    const preview = await previewClaim(
-      fakeMutation(),
-      "deboard-v091",
-      1,
-      "capture-1",
+    const preview = expectPreviewed(
+      await previewClaim(fakeMutation(), "deboard-v091", 1, "capture-1"),
     );
     expect(order).toEqual(["PREVIEW"]);
     await respondToPendingClaim(preview.confirmation.confirmationId, {
@@ -181,11 +186,8 @@ describe("conversational claim gateway: preview never auto-applies", () => {
         () => "confirmation-1",
         () => 1_000,
       );
-    const preview = await previewClaim(
-      fakeMutation(),
-      "deboard-v091",
-      1,
-      "capture-1",
+    const preview = expectPreviewed(
+      await previewClaim(fakeMutation(), "deboard-v091", 1, "capture-1"),
     );
     const first = await respondToPendingClaim(
       preview.confirmation.confirmationId,
@@ -209,8 +211,12 @@ describe("conversational claim gateway: preview never auto-applies", () => {
       () => 1_000,
     );
     const mutation = fakeMutation();
-    const first = await previewClaim(mutation, "deboard-v091", 1, "capture-1");
-    const second = await previewClaim(mutation, "deboard-v091", 1, "capture-1");
+    const first = expectPreviewed(
+      await previewClaim(mutation, "deboard-v091", 1, "capture-1"),
+    );
+    const second = expectPreviewed(
+      await previewClaim(mutation, "deboard-v091", 1, "capture-1"),
+    );
     expect(first.confirmation.confirmationId).toBe(
       second.confirmation.confirmationId,
     );
@@ -246,11 +252,8 @@ describe("conversational claim gateway: preview never auto-applies", () => {
     await expect(
       previewClaim(mutation, "deboard-v091", 1, "capture-1"),
     ).rejects.toThrow("transient network failure");
-    const retried = await previewClaim(
-      mutation,
-      "deboard-v091",
-      1,
-      "capture-1",
+    const retried = expectPreviewed(
+      await previewClaim(mutation, "deboard-v091", 1, "capture-1"),
     );
     expect(retried.previewResult.workflowState).toBe("SUCCEEDED");
     expect(attempt).toBe(2);
@@ -265,17 +268,21 @@ describe("conversational claim gateway: preview never auto-applies", () => {
         () => `confirmation-${String((confirmationSequence += 1))}`,
         () => 1_000,
       );
-    const previewA = await previewClaim(
-      fakeMutation("event-a"),
-      "deboard-v091",
-      1,
-      "capture-a",
+    const previewA = expectPreviewed(
+      await previewClaim(
+        fakeMutation("event-a"),
+        "deboard-v091",
+        1,
+        "capture-a",
+      ),
     );
-    const previewB = await previewClaim(
-      fakeMutation("event-b"),
-      "deboard-v091",
-      2,
-      "capture-b",
+    const previewB = expectPreviewed(
+      await previewClaim(
+        fakeMutation("event-b"),
+        "deboard-v091",
+        2,
+        "capture-b",
+      ),
     );
     await respondToPendingClaim(previewA.confirmation.confirmationId, {
       affirmative: true,
@@ -323,16 +330,158 @@ describe("conversational claim gateway: preview never auto-applies", () => {
         () => "confirmation-1",
         () => 1_000,
       );
-    const preview = await previewClaim(
-      fakeMutation(),
-      "deboard-v091",
-      1,
-      "capture-1",
+    const preview = expectPreviewed(
+      await previewClaim(fakeMutation(), "deboard-v091", 1, "capture-1"),
     );
     await respondToPendingClaim(preview.confirmation.confirmationId, {
       affirmative: true,
     });
     expect(otherCallCount).toBe(0);
+  });
+});
+
+/** A bridge whose submitPreview always reports the given non-SUCCEEDED (or malformed) preview
+ * workflowState — used to prove blocker 1: a confirmation may only ever be created from a
+ * genuinely SUCCEEDED preview. */
+function bridgeWithPreviewResult(workflowState: string): {
+  bridge: FieldVoiceBridge;
+  applyCalls: unknown[];
+} {
+  const applyCalls: unknown[] = [];
+  const bridge: FieldVoiceBridge = {
+    listProjectIds: () => [],
+    listResumableWorkflows: () => [],
+    getEvidenceFields: () => null,
+    submitQuery: () => Promise.resolve({ workflowState: "SUCCEEDED" }),
+    submitPreview: () => Promise.resolve({ workflowState }),
+    submitApply: (confirmation) => {
+      applyCalls.push(confirmation);
+      return Promise.resolve({ workflowState: "SUCCEEDED" });
+    },
+    resumeWorkflow: () => Promise.resolve({ workflowState: "SUCCEEDED" }),
+    submitConversationalTurn: () =>
+      Promise.reject(new Error("not used by this gateway")),
+    submitConversationalConfirm: () =>
+      Promise.reject(new Error("not used by this gateway")),
+  };
+  return { bridge, applyCalls };
+}
+
+describe("safety repair blocker 1: preview must fail closed", () => {
+  it.each([
+    ["BLOCKED"],
+    ["FAILED"],
+    ["INTERRUPTED"],
+    ["SOMETHING_UNEXPECTED"], // malformed/unrecognized workflowState
+  ])(
+    "a %s preview never produces an actionable confirmation",
+    async (workflowState) => {
+      const { bridge, applyCalls } = bridgeWithPreviewResult(workflowState);
+      const { previewClaim } = createConversationalClaimGateway(
+        bridge,
+        () => "confirmation-1",
+        () => 1_000,
+      );
+      const outcome = await previewClaim(
+        fakeMutation(),
+        "deboard-v091",
+        1,
+        "capture-1",
+      );
+      expect(outcome.outcome).toBe("PREVIEW_FAILED");
+      if (outcome.outcome === "PREVIEW_FAILED") {
+        expect(outcome.previewResult.workflowState).toBe(workflowState);
+      }
+      expect(
+        (outcome as { confirmation?: unknown }).confirmation,
+      ).toBeUndefined();
+      expect(applyCalls).toHaveLength(0);
+    },
+  );
+
+  it("a later retry of the same claim after a BLOCKED preview gets a fresh attempt, not the same failure replayed forever", async () => {
+    let attempt = 0;
+    const bridge: FieldVoiceBridge = {
+      listProjectIds: () => [],
+      listResumableWorkflows: () => [],
+      getEvidenceFields: () => null,
+      submitQuery: () => Promise.resolve({ workflowState: "SUCCEEDED" }),
+      submitPreview: () => {
+        attempt += 1;
+        return Promise.resolve({
+          workflowState: attempt === 1 ? "BLOCKED" : "SUCCEEDED",
+        });
+      },
+      submitApply: () => Promise.resolve({ workflowState: "SUCCEEDED" }),
+      resumeWorkflow: () => Promise.resolve({ workflowState: "SUCCEEDED" }),
+      submitConversationalTurn: () =>
+        Promise.reject(new Error("not used by this gateway")),
+      submitConversationalConfirm: () =>
+        Promise.reject(new Error("not used by this gateway")),
+    };
+    const { previewClaim } = createConversationalClaimGateway(
+      bridge,
+      () => "confirmation-1",
+      () => 1_000,
+    );
+    const mutation = fakeMutation();
+    const first = await previewClaim(mutation, "deboard-v091", 1, "capture-1");
+    expect(first.outcome).toBe("PREVIEW_FAILED");
+    const second = expectPreviewed(
+      await previewClaim(mutation, "deboard-v091", 1, "capture-1"),
+    );
+    expect(second.previewResult.workflowState).toBe("SUCCEEDED");
+    expect(attempt).toBe(2);
+  });
+});
+
+describe("safety repair blocker 3: Apply result truth", () => {
+  it.each([
+    ["BLOCKED"],
+    ["FAILED"],
+    ["INTERRUPTED"],
+    ["SOMETHING_UNEXPECTED"], // malformed/unrecognized workflowState -> reported as FAILED
+  ])("a %s Apply is never reported as APPLIED", async (workflowState) => {
+    const { bridge } = fakeBridge();
+    bridge.submitApply = () => Promise.resolve({ workflowState });
+    const { previewClaim, respondToPendingClaim } =
+      createConversationalClaimGateway(
+        bridge,
+        () => "confirmation-1",
+        () => 1_000,
+      );
+    const preview = expectPreviewed(
+      await previewClaim(fakeMutation(), "deboard-v091", 1, "capture-1"),
+    );
+    const outcome = await respondToPendingClaim(
+      preview.confirmation.confirmationId,
+      { affirmative: true },
+    );
+    expect(outcome.outcome).not.toBe("APPLIED");
+    if (workflowState === "BLOCKED" || workflowState === "INTERRUPTED") {
+      expect(outcome.outcome).toBe(workflowState);
+    } else {
+      // FAILED, and any malformed/unrecognized workflowState, is reported as FAILED.
+      expect(outcome.outcome).toBe("FAILED");
+    }
+  });
+
+  it("a SUCCEEDED Apply is reported as APPLIED", async () => {
+    const { bridge } = fakeBridge();
+    const { previewClaim, respondToPendingClaim } =
+      createConversationalClaimGateway(
+        bridge,
+        () => "confirmation-1",
+        () => 1_000,
+      );
+    const preview = expectPreviewed(
+      await previewClaim(fakeMutation(), "deboard-v091", 1, "capture-1"),
+    );
+    const outcome = await respondToPendingClaim(
+      preview.confirmation.confirmationId,
+      { affirmative: true },
+    );
+    expect(outcome.outcome).toBe("APPLIED");
   });
 });
 
@@ -414,11 +563,8 @@ describe("timing", () => {
         () => (tick += 15),
         (sample) => samples.push(sample),
       );
-    const preview = await previewClaim(
-      fakeMutation(),
-      "deboard-v091",
-      1,
-      "capture-1",
+    const preview = expectPreviewed(
+      await previewClaim(fakeMutation(), "deboard-v091", 1, "capture-1"),
     );
     await respondToPendingClaim(preview.confirmation.confirmationId, {
       affirmative: true,
@@ -438,11 +584,8 @@ describe("timing", () => {
         () => "confirmation-1",
         () => 1_000,
       );
-    const preview = await previewClaim(
-      fakeMutation(),
-      "deboard-v091",
-      1,
-      "capture-1",
+    const preview = expectPreviewed(
+      await previewClaim(fakeMutation(), "deboard-v091", 1, "capture-1"),
     );
     const outcome = await respondToPendingClaim(
       preview.confirmation.confirmationId,

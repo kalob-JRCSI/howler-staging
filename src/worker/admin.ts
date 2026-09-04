@@ -1799,7 +1799,8 @@ export function fieldDashboardClientScript(
     confirmation: PendingVoiceConfirmation,
     affirmative: boolean,
   ): Promise<{
-    outcome: "APPLIED" | "CANCELLED" | "NOOP";
+    outcome:
+      "APPLIED" | "BLOCKED" | "FAILED" | "INTERRUPTED" | "CANCELLED" | "NOOP";
     workflowState?: string;
   }> {
     if (conversationInFlight.has(projectId)) {
@@ -1838,8 +1839,24 @@ export function fieldDashboardClientScript(
         conversationByProject.set(projectId, body.session ?? null);
         const outcome = body.confirm.outcome;
         const workflowState = body.confirm.result?.workflowState;
-        const resolvedOutcome: "APPLIED" | "CANCELLED" | "NOOP" =
-          outcome === "APPLIED" || outcome === "CANCELLED" ? outcome : "NOOP";
+        // Safety repair (blocker 3 — Apply result truth): BLOCKED/FAILED/INTERRUPTED are their
+        // own distinct outcomes, never silently folded into NOOP (which would misleadingly read
+        // as "already resolved/nothing to see" instead of "this Apply did not succeed"). Only a
+        // real, recognized outcome value is trusted; anything else falls back to NOOP.
+        const resolvedOutcome:
+          | "APPLIED"
+          | "BLOCKED"
+          | "FAILED"
+          | "INTERRUPTED"
+          | "CANCELLED"
+          | "NOOP" =
+          outcome === "APPLIED" ||
+          outcome === "BLOCKED" ||
+          outcome === "FAILED" ||
+          outcome === "INTERRUPTED" ||
+          outcome === "CANCELLED"
+            ? outcome
+            : "NOOP";
         return workflowState !== undefined
           ? { outcome: resolvedOutcome, workflowState }
           : { outcome: resolvedOutcome };
@@ -1911,14 +1928,33 @@ export function fieldDashboardClientScript(
         pendingConversationalConfirmation.delete(projectId);
         document.getElementById(`fp-${String(index)}-conv-confirm`).hidden =
           true;
+        // Safety repair (blocker 3 — Apply result truth): "Recorded." is shown for a genuine
+        // APPLIED outcome only. BLOCKED/FAILED/INTERRUPTED each get their own honest message --
+        // never "Recorded.", and never folded into the generic "no longer pending" line (which
+        // would misleadingly suggest nothing needs attention).
+        let message: string;
+        switch (outcome.outcome) {
+          case "APPLIED":
+            message = "Recorded.";
+            break;
+          case "CANCELLED":
+            message = "Cancelled.";
+            break;
+          case "BLOCKED":
+            message = "Not recorded — it touches an unresolved block.";
+            break;
+          case "FAILED":
+            message = "Not recorded — the apply failed.";
+            break;
+          case "INTERRUPTED":
+            message = "Not recorded — the apply was interrupted.";
+            break;
+          default:
+            message = "That update is no longer pending.";
+        }
         document.getElementById(
           `fp-${String(index)}-conv-response`,
-        ).textContent =
-          outcome.outcome === "APPLIED"
-            ? "Recorded."
-            : outcome.outcome === "CANCELLED"
-              ? "Cancelled."
-              : "That update is no longer pending.";
+        ).textContent = message;
         renderActiveWorkflows(projectId);
       })
       .catch((error: unknown) => {

@@ -183,7 +183,12 @@ describe("resolveConversationalTurn", () => {
     expect(result.kind).toBe("AWAITING_CONFIRMATION");
   });
 
-  it("an utterance naming no known project and no active session project clarifies — never guesses, never loads a model", async () => {
+  // Safety repair blocker 4: with more than one known project in scope, an utterance naming none
+  // of them and no active session project genuinely stays ambiguous and must still clarify --
+  // resolveClaimProject's new "default to the sole known project" behavior only ever applies when
+  // there is exactly one project to default to (see conversation.test.ts's own dedicated coverage
+  // for that single-project case).
+  it("with two known projects in scope, an utterance naming neither and no active session project clarifies — never guesses, never loads a model", async () => {
     const { bridge } = fakeBridge();
     let loadCalled = false;
     const loadProjectModel = () => {
@@ -215,7 +220,10 @@ describe("resolveConversationalTurn", () => {
       {
         callModel,
         loadProjectModel,
-        vocabulary: { projectIds: ["deboard-v091"], aliases: [] },
+        vocabulary: {
+          projectIds: ["deboard-v091", "carver-001"],
+          aliases: [],
+        },
         gateway,
         captureSessionId: "capture-1",
       },

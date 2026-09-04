@@ -11,7 +11,7 @@ import { RevisionConflictError } from "../engine/storage";
 import { createDeboardSeed } from "./deboard-seed";
 import { adminPage, operatorPanelPage, fieldDashboardPage } from "./admin";
 import { buildHealthReport, projectHealth } from "./health";
-import { sha256Hex } from "./hash";
+import { sha256Hex, hmacSha256Hex } from "./hash";
 import { json, readJson, HttpError, requireAdmin } from "./http";
 import { D1HowlerRepository } from "./repository";
 import { validateUnderstandingProposal } from "./understanding";
@@ -36,6 +36,7 @@ import {
 } from "../operator/conversation";
 import type { ConversationSession } from "../operator/conversation";
 import {
+  claimApplyOutcomeFromResult,
   createConversationalClaimGateway,
   respondToVoiceConfirmation,
 } from "./voice-transport";
@@ -43,6 +44,10 @@ import type {
   FieldVoiceBridge,
   PendingVoiceConfirmation,
 } from "./voice-transport";
+import type {
+  ConversationalTurnResult,
+  PendingConversationalClaim,
+} from "../operator/conversation-turn";
 import {
   buildFieldTestCallModel,
   fieldTestAliasesFor,
@@ -582,9 +587,9 @@ function parseConversationSession(raw: unknown): ConversationSession | null {
   return record as unknown as ConversationSession;
 }
 
-/** Structural validation only, matching `parseConversationSession`'s own fail-closed convention --
- * this confirmation carries no security authority (see the confirm-handling block above), but a
- * malformed one is still refused outright rather than silently coerced. */
+/** Structural validation only. A `serverMac` field is now required structurally (see
+ * `signConfirmationMac`/`verifyConfirmationMac` below) -- the field that actually carries this
+ * confirmation's security authority, verified separately before any Apply proceeds. */
 function parsePendingConfirmation(raw: unknown): PendingVoiceConfirmation {
   if (!raw || typeof raw !== "object") {
     throw new HttpError(
@@ -603,6 +608,7 @@ function parsePendingConfirmation(raw: unknown): PendingVoiceConfirmation {
     !("immutableSnapshot" in record) ||
     typeof record.snapshotFingerprint !== "string" ||
     typeof record.captureSessionId !== "string" ||
+    typeof record.serverMac !== "string" ||
     (record.state !== "PENDING" &&
       record.state !== "CONSUMED" &&
       record.state !== "CANCELLED" &&
@@ -611,6 +617,90 @@ function parsePendingConfirmation(raw: unknown): PendingVoiceConfirmation {
     throw new HttpError(400, "confirm.confirmation is malformed");
   }
   return record as unknown as PendingVoiceConfirmation;
+}
+
+/**
+ * Safety repair (blocker 2 — server-bound confirmation): the exact security-relevant surface a
+ * confirmation is bound to — confirmationId (identity: prevents swapping which confirmation an
+ * Apply is derived from), projectId (route binding), expectedProjectRevision, the full
+ * canonicalEvidence content (the real integrity check — `snapshotFingerprint` alone is a simple,
+ * non-cryptographic hash and not collision-resistant enough to stand in for one, so it is signed
+ * alongside the real content rather than instead of it), and createdAt/expiresAt so the
+ * confirmation's own expiry window can't be silently extended by editing it.
+ * `immutableSnapshot`/`state`/`captureSessionId` are deliberately excluded: the first is always
+ * identical content to canonicalEvidence, the second is expected to legitimately transition
+ * (PENDING -> CONSUMED/CANCELLED), and the third carries no security meaning.
+ */
+function confirmationSignaturePayload(
+  confirmation: PendingVoiceConfirmation,
+): Record<string, unknown> {
+  return {
+    confirmationId: confirmation.confirmationId,
+    projectId: confirmation.projectId,
+    expectedProjectRevision: confirmation.expectedProjectRevision ?? null,
+    canonicalEvidence: confirmation.canonicalEvidence,
+    snapshotFingerprint: confirmation.snapshotFingerprint,
+    createdAt: confirmation.createdAt,
+    expiresAt: confirmation.expiresAt,
+  };
+}
+
+/** Signs a freshly-created (server-side, genuinely SUCCEEDED-previewed) confirmation before it
+ * ever reaches the client — the one and only place `serverMac` is ever computed. */
+async function signConfirmationMac(
+  secret: string,
+  confirmation: PendingVoiceConfirmation,
+): Promise<string> {
+  return hmacSha256Hex(secret, confirmationSignaturePayload(confirmation));
+}
+
+/**
+ * Safety repair (blocker 2): verifies a client-round-tripped confirmation was genuinely issued by
+ * this server for this exact security-relevant content, and belongs to this route's own project.
+ * If the client altered projectId, canonicalEvidence, expectedProjectRevision, confirmationId, or
+ * the expiry window, the recomputed mac will not match the round-tripped `serverMac` — Apply is
+ * refused. If the confirmation is valid but was issued for a *different* project than this
+ * route's own `:id`, it is refused too — the route's project is always authoritative, regardless
+ * of what a validly-signed confirmation for another project claims.
+ */
+async function verifyConfirmationBinding(
+  secret: string,
+  confirmation: PendingVoiceConfirmation,
+  routeProjectId: string,
+): Promise<void> {
+  if (confirmation.projectId !== routeProjectId) {
+    throw new HttpError(
+      400,
+      `confirmation belongs to project "${confirmation.projectId}", not this endpoint's project "${routeProjectId}"`,
+    );
+  }
+  const expectedMac = await signConfirmationMac(secret, confirmation);
+  if (expectedMac !== confirmation.serverMac) {
+    throw new HttpError(
+      400,
+      "confirmation has been altered and can no longer be applied",
+    );
+  }
+}
+
+/** Signs every pending confirmation a fresh conversation-turn result carries, in place, before
+ * the response ever reaches the client — covers both AWAITING_CONFIRMATION's `pending` array and
+ * CORRECTED's optional single `pending` item; every other result kind carries no confirmation. */
+async function signPendingConfirmations(
+  secret: string,
+  result: ConversationalTurnResult,
+): Promise<void> {
+  async function sign(pending: PendingConversationalClaim): Promise<void> {
+    pending.confirmation.serverMac = await signConfirmationMac(
+      secret,
+      pending.confirmation,
+    );
+  }
+  if (result.kind === "AWAITING_CONFIRMATION") {
+    await Promise.all(result.pending.map(sign));
+  } else if (result.kind === "CORRECTED" && result.pending) {
+    await sign(result.pending);
+  }
 }
 
 /**
@@ -704,6 +794,11 @@ async function handle(request: Request, env: Env): Promise<Response> {
 
   if (parts[0] !== "v1") throw new HttpError(404, "Not found");
   await requireAdmin(request, env.HOWLER_ADMIN_KEY);
+  // requireAdmin above already throws (500) when this is unset -- adminKey is a real, non-empty
+  // string for the rest of this handler. Named locally (rather than re-reading env.HOWLER_ADMIN_KEY,
+  // typed `string | undefined`) so the conversation/turn route's confirmation-signing calls below
+  // don't need a second, redundant guard.
+  const adminKey: string = env.HOWLER_ADMIN_KEY ?? "";
 
   if (request.method === "POST" && parts.join("/") === "v1/admin/init-db") {
     const result = await initializeSchema(env.HOWLER_DB);
@@ -1093,14 +1188,19 @@ async function handle(request: Request, env: Env): Promise<Response> {
       // hold the confirmation a previous, separate HTTP request created -- this reconstructs it
       // from what the client round-tripped instead (the exact confirmation object the turn
       // response returned), and calls the real, unmodified respondToVoiceConfirmation state
-      // machine directly. That confirmation carries no security authority of its own: applying it
-      // still goes through buildServerFieldVoiceBridge's submitApply -> the same canonical
-      // executeWorkflow every other route uses, with its own revision-check/oversight-gate/
-      // idempotency-key protections independently re-validating everything. A deterministic
-      // idempotencyKey derived from confirmationId (see buildServerFieldVoiceBridge) is what
-      // actually makes a genuine duplicate confirmation replay instead of re-applying -- not
-      // memory of having seen this confirmationId before.
+      // machine directly. A deterministic idempotencyKey derived from confirmationId (see
+      // buildServerFieldVoiceBridge) is what makes a genuine duplicate confirmation replay instead
+      // of re-applying.
+      //
+      // Safety repair (blocker 2 — server-bound confirmation): unlike the field-readiness fix's
+      // original assumption, this confirmation DOES need to be treated as untrusted client input
+      // before it drives anything: verifyConfirmationBinding checks it was genuinely issued by
+      // this server (serverMac, computed only from a real, previously-SUCCEEDED preview) for this
+      // exact project/evidence/revision, and that its own claimed projectId matches this route's
+      // own :id. Any alteration to project, evidence, hash, or revision is refused before ever
+      // reaching respondToVoiceConfirmation/submitApply.
       const confirmation = parsePendingConfirmation(body.confirm.confirmation);
+      await verifyConfirmationBinding(adminKey, confirmation, projectId);
       const affirmative = body.confirm.affirmative;
       if (typeof affirmative !== "boolean") {
         throw new HttpError(400, "confirm.affirmative must be a boolean");
@@ -1141,12 +1241,20 @@ async function handle(request: Request, env: Env): Promise<Response> {
         stage: "EVIDENCE_APPLY_SHADOW",
         durationMs: Date.now() - applyStartedAt,
       });
-      const sessionAfterApply = resolvedClaimId
-        ? confirmClaim(session, resolvedClaimId)
-        : session;
+      // Safety repair (blocker 3 — Apply result truth): only ever report APPLIED when the
+      // canonical Apply itself reached SUCCEEDED; BLOCKED/FAILED/INTERRUPTED (and anything
+      // unrecognized, folded into FAILED) are reported as themselves, never silently claimed as
+      // success. The claim's session bookkeeping is only advanced to CONFIRMED on a genuine
+      // success too -- a BLOCKED/FAILED/INTERRUPTED Apply leaves it AWAITING_CONFIRMATION so it
+      // is never silently dropped from tracking after nothing was actually recorded.
+      const applyOutcome = claimApplyOutcomeFromResult(result);
+      const sessionAfterApply =
+        applyOutcome.outcome === "APPLIED" && resolvedClaimId
+          ? confirmClaim(session, resolvedClaimId)
+          : session;
       return json({
         session: "kind" in sessionAfterApply ? session : sessionAfterApply,
-        confirm: { outcome: "APPLIED", result },
+        confirm: applyOutcome,
         timing,
       });
     }
@@ -1159,6 +1267,12 @@ async function handle(request: Request, env: Env): Promise<Response> {
       session,
       deps,
     );
+    // Safety repair (blocker 2): every pending confirmation this turn produced is signed here,
+    // server-side, before it ever reaches the client -- the one and only place a serverMac is
+    // ever computed. Each one was created only from a genuinely SUCCEEDED preview (blocker 1),
+    // so a signature only ever exists for a confirmation that is real and untampered at the
+    // moment of issuance.
+    await signPendingConfirmations(adminKey, result);
     return json({ session: nextSession, turn: result, timing });
   }
 

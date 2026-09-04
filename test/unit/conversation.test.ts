@@ -331,6 +331,48 @@ describe("resolve project", () => {
   });
 });
 
+// Safety repair blocker 4: "the route project is authoritative context" for
+// POST /v1/projects/:id/conversation/turn, whose vocabulary is always exactly [routeProjectId] --
+// a card-local utterance that never names the project by id/alias must resolve to it directly,
+// never ask "Which project do you mean?", and never be redirectable into a different project.
+describe("resolve project: route-project-scoped vocabulary (blocker 4)", () => {
+  const soleProjectId = ["deboard-v091"];
+
+  it("an utterance that never names the project resolves to the sole known (route) project, not a clarification", () => {
+    const session = createSession("t");
+    const claim = validClaim({ projectRef: "Foundation walls started today." });
+    const result = resolveClaimProject(claim, session, soleProjectId, []);
+    expect(result).toBe("deboard-v091");
+  });
+
+  it("an utterance that DOES name the sole known project by alias still resolves to it", () => {
+    const session = createSession("t");
+    const claim = validClaim({
+      projectRef: "DeBoard foundation started today.",
+    });
+    const result = resolveClaimProject(claim, session, soleProjectId, [
+      { alias: "deboard", projectId: "deboard-v091" },
+    ]);
+    expect(result).toBe("deboard-v091");
+  });
+
+  it("with only one known project, an utterance can never be redirected into a different project — there is no other candidate to redirect to", () => {
+    const session = createSession("t");
+    const claim = validClaim({
+      projectRef: "Some completely different project started today.",
+    });
+    const result = resolveClaimProject(claim, session, soleProjectId, []);
+    expect(result).toBe("deboard-v091");
+  });
+
+  it("an empty projectRef with a sole known project and no active session project still resolves to it, never a clarification", () => {
+    const session = createSession("t");
+    const claim = validClaim({ projectRef: "" });
+    const result = resolveClaimProject(claim, session, soleProjectId, []);
+    expect(result).toBe("deboard-v091");
+  });
+});
+
 describe("resolve entity", () => {
   it("resolves an entity phrase matching one activity via tags", () => {
     const model = testProjectModel();

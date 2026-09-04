@@ -332,9 +332,19 @@ describe("POST /v1/projects/:id/conversation/turn — real HTTP boundary", () =>
     // first call happened. respondToVoiceConfirmation itself will transition PENDING -> CONSUMED
     // both times (it has no memory either), but buildServerFieldVoiceBridge derives a
     // deterministic idempotencyKey from confirmation.confirmationId, so the second submitApply
-    // call is recognized by executeWorkflow's own existing idempotency mechanism as a replay of
-    // the same logical intent and returns the cached result rather than re-executing -- the real
-    // invariant is the project revision only ever advancing once, checked below.
+    // call is recognized by executeWorkflow's own existing idempotency mechanism as a genuine
+    // duplicate -- the real invariant is the project revision only ever advancing once, checked
+    // below.
+    //
+    // Safety repair (blocker 3 — Apply result truth): executeWorkflow classifies a genuine
+    // intentId/idempotencyKey reuse as its own distinct outcome (IDEMPOTENCY_KEY_REUSE /
+    // INTENT_ID_REUSE), which workflowStateFromOutcome — this codebase's one existing, shared
+    // outcome-to-status mapping, used by every mutating route, not something this fix invents —
+    // has always reported as "FAILED", never as a "SUCCEEDED" replay. The route's own confirm
+    // branch previously hardcoded `outcome: "APPLIED"` regardless of the real result, silently
+    // masking this; now that it reports the real workflowState truthfully, the second identical
+    // confirmation is honestly reported as FAILED (this exact request applied nothing new), while
+    // the safety-critical invariant — exactly one real Apply, ever — still holds underneath.
     const confirmOnce = await worker.fetch(
       jsonRequest("POST", "/v1/projects/deboard-v091/conversation/turn", {
         session: firstBody.session,
@@ -353,14 +363,15 @@ describe("POST /v1/projects/:id/conversation/turn — real HTTP boundary", () =>
       adminEnv(),
     );
     const confirmTwiceBody = await jsonBody<TurnResponse>(confirmTwice);
-    expect(confirmTwiceBody.confirm?.outcome).toBe("APPLIED");
+    expect(confirmTwiceBody.confirm?.outcome).toBe("FAILED");
 
     const row = await env.HOWLER_DB.prepare(
       "SELECT revision FROM projects WHERE project_id = ?",
     )
       .bind("deboard-v091")
       .first<{ revision: number }>();
-    // Started at revision 1; exactly one apply advances it to 2, never further.
+    // Started at revision 1; exactly one apply advances it to 2, never further -- this is the
+    // actual safety invariant, independent of how the duplicate attempt's outcome is labeled.
     expect(row?.revision).toBe(2);
   });
 
@@ -418,5 +429,220 @@ describe("POST /v1/projects/:id/conversation/turn — real HTTP boundary", () =>
     // Still the exact same canonical route logic: an unknown workflow id 404s, proving this
     // route was never shadowed or reimplemented by the new conversation/turn route.
     expect(response.status).toBe(404);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Safety repair (HOWLER FIELD-READINESS REPAIR — SAFETY / TRANSPORT LANE): adversarial coverage
+// for blockers 2 (server-bound confirmation), 3 (Apply result truth), 4 (project-scoped
+// conversation), and 6 (non-blocking) through the real HTTP boundary.
+// ---------------------------------------------------------------------------------------------
+
+/** Runs a real turn that previews a real, applyable DeBoard claim and returns the exact
+ * session/confirmation the server issued -- a genuinely signed, untampered confirmation each
+ * adversarial test below mutates one field of. */
+async function realDeboardConfirmation(): Promise<{
+  session: unknown;
+  confirmation: Record<string, unknown>;
+}> {
+  await seedDeboard();
+  const response = await worker.fetch(
+    jsonRequest("POST", "/v1/projects/deboard-v091/conversation/turn", {
+      text: "DeBoard foundation started today",
+    }),
+    adminEnv(),
+  );
+  const body = await jsonBody<TurnResponse>(response);
+  const confirmation = body.turn?.pending?.[0]?.confirmation;
+  if (!confirmation) throw new Error("expected a real pending confirmation");
+  return { session: body.session, confirmation };
+}
+
+async function confirmWith(
+  session: unknown,
+  confirmation: unknown,
+): Promise<{ status: number; body: TurnResponse }> {
+  const response = await worker.fetch(
+    jsonRequest("POST", "/v1/projects/deboard-v091/conversation/turn", {
+      session,
+      confirm: { confirmation, affirmative: true },
+    }),
+    adminEnv(),
+  );
+  return {
+    status: response.status,
+    body: await jsonBody<TurnResponse>(response),
+  };
+}
+
+describe("safety repair blocker 2: server-bound confirmation — client tampering is refused, never applied", () => {
+  it("a forged confirmation.projectId (redirected to a different project) is rejected with 400, and nothing is applied", async () => {
+    const { session, confirmation } = await realDeboardConfirmation();
+    const forged = { ...confirmation, projectId: "some-other-project" };
+    const { status } = await confirmWith(session, forged);
+    expect(status).toBe(400);
+    const model = await loadDeboardModel();
+    expect(model.activities.masonry?.actualStart).toBeUndefined();
+  });
+
+  it("altered canonicalEvidence is rejected with 400, and nothing is applied", async () => {
+    const { session, confirmation } = await realDeboardConfirmation();
+    const originalEvidence = confirmation.canonicalEvidence as Record<
+      string,
+      unknown
+    >;
+    const forged = {
+      ...confirmation,
+      canonicalEvidence: {
+        ...originalEvidence,
+        mutations: [
+          {
+            op: "SET_ACTUAL_FINISH",
+            activityId: "masonry",
+            date: "2026-09-03",
+          },
+        ],
+      },
+    };
+    const { status } = await confirmWith(session, forged);
+    expect(status).toBe(400);
+    const model = await loadDeboardModel();
+    expect(model.activities.masonry?.actualStart).toBeUndefined();
+    expect(model.activities.masonry?.state).toBe("NOT_STARTED");
+  });
+
+  it("an altered snapshotFingerprint (stale/mismatched against the real evidence) is rejected with 400, and nothing is applied", async () => {
+    const { session, confirmation } = await realDeboardConfirmation();
+    const forged = {
+      ...confirmation,
+      snapshotFingerprint:
+        "0000000000000000000000000000000000000000000000000000000000000000",
+    };
+    const { status } = await confirmWith(session, forged);
+    expect(status).toBe(400);
+    const model = await loadDeboardModel();
+    expect(model.activities.masonry?.actualStart).toBeUndefined();
+  });
+
+  it("a stale/forged expectedProjectRevision is rejected with 400, and nothing is applied", async () => {
+    const { session, confirmation } = await realDeboardConfirmation();
+    const forged = {
+      ...confirmation,
+      expectedProjectRevision: 999,
+    };
+    const { status } = await confirmWith(session, forged);
+    expect(status).toBe(400);
+    const model = await loadDeboardModel();
+    expect(model.activities.masonry?.actualStart).toBeUndefined();
+  });
+
+  it("a confirmation missing serverMac entirely (never issued by this server) is rejected with 400", async () => {
+    const { session, confirmation } = await realDeboardConfirmation();
+    const withoutMac = { ...confirmation };
+    delete withoutMac.serverMac;
+    const { status } = await confirmWith(session, withoutMac);
+    expect(status).toBe(400);
+    const model = await loadDeboardModel();
+    expect(model.activities.masonry?.actualStart).toBeUndefined();
+  });
+
+  it("an untampered, genuinely-issued confirmation still applies normally", async () => {
+    const { session, confirmation } = await realDeboardConfirmation();
+    const { status, body } = await confirmWith(session, confirmation);
+    expect(status).toBe(200);
+    expect(body.confirm?.outcome).toBe("APPLIED");
+    const model = await loadDeboardModel();
+    // The route's real callModel resolves "today" against the real wall clock, not a fixed test
+    // date -- assert against today's own real date, not a hardcoded one.
+    expect(model.activities.masonry?.actualStart).toBe(
+      new Date().toISOString().slice(0, 10),
+    );
+  });
+});
+
+describe("safety repair blocker 4: the route project is authoritative context", () => {
+  it("a DeBoard-card utterance that never names the project resolves against DeBoard directly, never asking 'Which project do you mean?'", async () => {
+    await seedDeboard();
+    // Deliberately "Foundation started today." (not "Foundation walls started today.") -- DeBoard's
+    // real seed also has an activity named "Walls and subfloor package delivery", so adding "walls"
+    // here would trigger a real, separate, *correct* entity-level ambiguity (already proven
+    // elsewhere) that has nothing to do with this test's actual subject: project-level resolution.
+    const response = await worker.fetch(
+      jsonRequest("POST", "/v1/projects/deboard-v091/conversation/turn", {
+        text: "Foundation started today.",
+      }),
+      adminEnv(),
+    );
+    expect(response.status).toBe(200);
+    const body = await jsonBody<TurnResponse>(response);
+    expect(body.turn?.kind).toBe("AWAITING_CONFIRMATION");
+    const message = body.turn?.clarifications?.[0]?.message ?? "";
+    expect(message).not.toContain("Which project");
+  });
+});
+
+describe("safety repair blocker 6: a reasoning/clarification failure on one project never blocks another", () => {
+  it("an unrecognized utterance on one project and a real, successful turn on another project resolve independently when run concurrently", async () => {
+    await seedDeboard();
+    const carverImport = await worker.fetch(
+      jsonRequest("POST", "/v1/projects/carver-v1/import", {
+        project: {
+          projectId: "carver-v1",
+          revision: 0,
+          name: "Carver",
+          projectType: "PILOT",
+          timezone: "UTC",
+          forecastAnchorDate: "2026-09-03",
+          calendar: { workingWeekdays: [1, 2, 3, 4, 5], holidays: [] },
+          sources: {},
+          activities: {
+            trim_install: {
+              id: "trim_install",
+              name: "Trim install",
+              phase: "Finish",
+              state: "NOT_STARTED",
+              duration: {
+                optimistic: 1,
+                likely: 1,
+                conservative: 2,
+                sourceIds: [],
+              },
+              constraintIds: [],
+              sourceIds: [],
+            },
+          },
+          constraints: {},
+          dependencies: {},
+          eventLedger: [],
+        },
+        provenance: {
+          trim_install: { sourceId: "test-intake", section: "test fixture" },
+        },
+      }),
+      adminEnv(),
+    );
+    expect(carverImport.status).toBe(201);
+
+    const [failing, succeeding] = await Promise.all([
+      worker.fetch(
+        jsonRequest("POST", "/v1/projects/deboard-v091/conversation/turn", {
+          text: "asdkfjasldkfj nonsense utterance",
+        }),
+        adminEnv(),
+      ),
+      worker.fetch(
+        jsonRequest("POST", "/v1/projects/carver-v1/conversation/turn", {
+          text: "Trim install started today",
+        }),
+        adminEnv(),
+      ),
+    ]);
+    expect(failing.status).toBe(200);
+    const failingBody = await jsonBody<TurnResponse>(failing);
+    expect(failingBody.turn?.kind).toBe("CLARIFICATION");
+
+    expect(succeeding.status).toBe(200);
+    const succeedingBody = await jsonBody<TurnResponse>(succeeding);
+    expect(succeedingBody.turn?.kind).toBe("AWAITING_CONFIRMATION");
   });
 });

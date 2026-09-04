@@ -232,6 +232,17 @@ export interface PendingVoiceConfirmation {
   snapshotFingerprint: string;
   captureSessionId: string;
   state: "PENDING" | "CONSUMED" | "CANCELLED" | "EXPIRED";
+  /**
+   * Safety repair (blocker 2 — server-bound confirmation): optional server-computed integrity
+   * signature over the security-relevant fields (confirmationId, projectId, canonicalEvidence,
+   * expectedProjectRevision, createdAt, expiresAt), verified against a server-only secret before
+   * any Apply. Computed and verified entirely in src/worker/index.ts (the only place a secret is
+   * ever in scope) — this field is never set, read, or trusted by this file itself, or by the
+   * purely client-side Task 18 voice flow (createPendingVoiceConfirmation never sets it), which
+   * never crosses a stateless-request boundary and so never needs it. Absent here means "not
+   * signed" — a caller that requires server-bound confirmations must check for its presence.
+   */
+  serverMac?: string;
 }
 
 export function stableSerialize(value: unknown): string {
@@ -515,15 +526,20 @@ export interface FieldVoiceBridge {
     projectId: string,
     text: string,
   ): Promise<{ result: ConversationalTurnResultSummary }>;
-  /** Responds to a conversational PM confirmation created by `submitConversationalTurn` --
+  /**
+   * Responds to a conversational PM confirmation created by `submitConversationalTurn` --
    * exactly one real POST to the same route with `{ confirm: { confirmation, affirmative } }`,
-   * never a second apply path. */
+   * never a second apply path. Safety repair (blocker 3 — Apply result truth): the outcome is
+   * BLOCKED/FAILED/INTERRUPTED whenever the canonical Apply itself did not reach SUCCEEDED --
+   * `APPLIED` is reserved for a genuine success, never a stand-in for "something happened".
+   */
   submitConversationalConfirm(
     projectId: string,
     confirmation: PendingVoiceConfirmation,
     affirmative: boolean,
   ): Promise<{
-    outcome: "APPLIED" | "CANCELLED" | "NOOP";
+    outcome:
+      "APPLIED" | "BLOCKED" | "FAILED" | "INTERRUPTED" | "CANCELLED" | "NOOP";
     workflowState?: string;
   }>;
 }
@@ -664,15 +680,58 @@ export interface TimingSample {
 }
 export type RecordTiming = (sample: TimingSample) => void;
 
-export interface ClaimPreviewOutcome {
-  previewResult: { workflowState: string };
-  confirmation: PendingVoiceConfirmation;
-}
+/**
+ * Safety repair (blocker 1 — preview must fail closed): a confirmation may only ever be created
+ * from a genuinely `SUCCEEDED` preview. `submitPreview` reports the real terminal workflow state
+ * the canonical operator executor produced (BLOCKED/FAILED/INTERRUPTED are all real, legitimate
+ * outcomes — an oversight block, a validation failure, a resumable interruption), never only "it
+ * ran" — so `PREVIEW_FAILED` is the outcome for every one of those, and for any value this switch
+ * does not recognize (a malformed/future/unexpected workflowState string), which fails closed
+ * rather than defaulting to success. No `PendingVoiceConfirmation` is constructed in that case:
+ * nothing actionable is ever produced from a non-SUCCEEDED preview.
+ */
+export type ClaimPreviewOutcome =
+  | {
+      outcome: "PREVIEWED";
+      previewResult: { workflowState: "SUCCEEDED" };
+      confirmation: PendingVoiceConfirmation;
+    }
+  | { outcome: "PREVIEW_FAILED"; previewResult: { workflowState: string } };
 
+/**
+ * Safety repair (blocker 3 — Apply result truth): only ever `APPLIED` when the canonical Apply
+ * itself reaches `SUCCEEDED`. `BLOCKED`/`FAILED`/`INTERRUPTED` are reported as themselves, exactly
+ * as the canonical operator executor classified them — never silently folded into `APPLIED`. Any
+ * workflowState this switch does not recognize (malformed/unexpected) is reported as `FAILED`,
+ * never `APPLIED`: an uncertain result must never claim success.
+ */
 export type ClaimApplyOutcome =
-  | { outcome: "APPLIED"; result: { workflowState: string } }
+  | { outcome: "APPLIED"; result: { workflowState: "SUCCEEDED" } }
+  | { outcome: "BLOCKED"; result: { workflowState: string } }
+  | { outcome: "FAILED"; result: { workflowState: string } }
+  | { outcome: "INTERRUPTED"; result: { workflowState: string } }
   | { outcome: "CANCELLED" }
   | { outcome: "NOOP"; reason: string };
+
+/** The one place a real `{ workflowState }` result becomes a truthful `ClaimApplyOutcome` —
+ * shared by `respondToPendingClaim` below and the HTTP route's own confirm branch in
+ * src/worker/index.ts, so both report Apply results the same, honest way. */
+export function claimApplyOutcomeFromResult(result: {
+  workflowState: string;
+}): ClaimApplyOutcome {
+  switch (result.workflowState) {
+    case "SUCCEEDED":
+      return { outcome: "APPLIED", result: { workflowState: "SUCCEEDED" } };
+    case "BLOCKED":
+      return { outcome: "BLOCKED", result };
+    case "INTERRUPTED":
+      return { outcome: "INTERRUPTED", result };
+    default:
+      // Includes "FAILED" and any malformed/unrecognized value — an uncertain result is always
+      // reported as FAILED, never as APPLIED.
+      return { outcome: "FAILED", result };
+  }
+}
 
 export function createConversationalClaimGateway(
   bridge: FieldVoiceBridge,
@@ -716,6 +775,15 @@ export function createConversationalClaimGateway(
             durationMs: now() - previewStartedAt,
           });
         }
+        // Safety repair (blocker 1): a confirmation is only ever created from a genuinely
+        // SUCCEEDED preview — BLOCKED/FAILED/INTERRUPTED/anything unrecognized must never produce
+        // an actionable confirmation.
+        if (previewResult.workflowState !== "SUCCEEDED") {
+          return {
+            outcome: "PREVIEW_FAILED" as const,
+            previewResult,
+          };
+        }
         const confirmation = createPendingVoiceConfirmation({
           confirmationId: makeId(),
           projectId,
@@ -725,12 +793,23 @@ export function createConversationalClaimGateway(
           expectedProjectRevision,
         });
         pendingByConfirmationId.set(confirmation.confirmationId, confirmation);
-        return { previewResult, confirmation };
+        return {
+          outcome: "PREVIEWED" as const,
+          previewResult: { workflowState: "SUCCEEDED" as const },
+          confirmation,
+        };
       });
     previewCache.set(key, promise);
-    promise.catch(() => {
-      previewCache.delete(key);
-    });
+    // Neither a rejected promise nor a resolved-but-PREVIEW_FAILED outcome is cached forever — a
+    // real retry (e.g. once the reason the preview failed is resolved) gets a fresh attempt, not
+    // the same stale failure replayed indefinitely.
+    promise
+      .then((outcome) => {
+        if (outcome.outcome === "PREVIEW_FAILED") previewCache.delete(key);
+      })
+      .catch(() => {
+        previewCache.delete(key);
+      });
     return promise;
   }
 
@@ -761,7 +840,9 @@ export function createConversationalClaimGateway(
             durationMs: now() - applyStartedAt,
           });
         }
-        return { outcome: "APPLIED" as const, result };
+        // Safety repair (blocker 3): only ever report APPLIED when the canonical Apply itself
+        // reaches SUCCEEDED — BLOCKED/FAILED/INTERRUPTED are reported as themselves.
+        return claimApplyOutcomeFromResult(result);
       });
     }
     if (outcome.outcome === "CANCELLED") {
@@ -931,6 +1012,10 @@ export function voiceBrowserClient(
             responseKind === "AFFIRMATIVE",
           )
           .then((outcome) => {
+            // Safety repair (blocker 3 — Apply result truth): BLOCKED/FAILED/INTERRUPTED are
+            // spoken/shown as themselves via the existing safe-template
+            // classifyWorkflowStateForVoice/createVoicePresentation path — never silently folded
+            // into "RESULT" (which speakOutcome would otherwise report as success).
             if (outcome.outcome === "APPLIED") {
               status.textContent = "RESULT";
               speakOutcome(
@@ -938,6 +1023,13 @@ export function voiceBrowserClient(
                 projectId,
                 "CONVERSATION_TURN",
               );
+            } else if (
+              outcome.outcome === "BLOCKED" ||
+              outcome.outcome === "FAILED" ||
+              outcome.outcome === "INTERRUPTED"
+            ) {
+              status.textContent = "ERROR";
+              speakOutcome(outcome.outcome, projectId, "CONVERSATION_TURN");
             } else if (outcome.outcome === "CANCELLED") {
               status.textContent = "CANCELLED";
             } else {

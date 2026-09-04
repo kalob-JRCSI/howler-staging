@@ -107,6 +107,19 @@ function eventIdFor(claimId: string): string {
   return `voice-conversation-${claimId}`;
 }
 
+/** Safety repair (blocker 1): a safe, honest, category-classified message for a preview that did
+ * not reach SUCCEEDED — never a raw error dump, never implying anything was recorded. */
+function describePreviewFailure(workflowState: string): string {
+  switch (workflowState) {
+    case "BLOCKED":
+      return "I can't record that yet — it touches an unresolved block.";
+    case "INTERRUPTED":
+      return "That preview was interrupted before it could finish — nothing was recorded.";
+    default:
+      return "I couldn't preview that change, so nothing was recorded.";
+  }
+}
+
 type ClaimResolutionOutcome =
   | {
       session: ConversationSession;
@@ -216,6 +229,24 @@ async function resolveAndPreviewClaim(
     deps.captureSessionId,
   );
   stage(deps.recordTiming, "preview", clock() - previewStartedAt);
+
+  // Safety repair (blocker 1 — preview must fail closed): a BLOCKED/FAILED/INTERRUPTED/malformed
+  // preview never becomes an AWAITING_CONFIRMATION result. The claim is never stored into
+  // session.pendingClaims and lastReferencedEntity never advances for it — there is nothing
+  // pending to correct, defer, or confirm, so nothing should look like there is.
+  if (previewOutcome.outcome === "PREVIEW_FAILED") {
+    stage(deps.recordTiming, "verification", clock() - previewStartedAt);
+    return {
+      session: workingSession,
+      kind: "CLARIFICATION",
+      clarification: {
+        kind: "CLARIFICATION",
+        message: describePreviewFailure(
+          previewOutcome.previewResult.workflowState,
+        ),
+      },
+    };
+  }
 
   const entityResult = resolveClaimEntity(claimForCompile, model);
   const lastReferencedEntity =

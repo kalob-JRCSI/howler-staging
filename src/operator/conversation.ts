@@ -320,6 +320,15 @@ function tokenize(text: string): string[] {
  * resolution decision. An explicit, non-empty `claim.projectRef` is never overridden by
  * `session.activeProjectId` — the active project only ever fills in for a claim that names no
  * project at all.
+ *
+ * Safety repair (blocker 4 — project-scoped conversation): when the caller's own vocabulary is
+ * scoped to exactly one known project (e.g. `POST /v1/projects/:id/conversation/turn`, whose
+ * vocabulary is always `[routeProjectId]` — that route's project is authoritative context), an
+ * utterance that does not happen to name that project by id/alias defaults to it rather than
+ * asking "Which project do you mean?". This never lets an utterance redirect the operation into
+ * *another* project: `projectMention` above already had first refusal, and it can only ever
+ * resolve to a project actually present in `knownProjectIds` — with exactly one candidate in
+ * scope, there is no other project it could redirect to.
  */
 export function resolveClaimProject(
   claim: ConversationClaim,
@@ -327,9 +336,12 @@ export function resolveClaimProject(
   knownProjectIds: string[],
   aliases: { alias: string; projectId: string }[],
 ): string | Clarification {
+  const soleKnownProjectId =
+    knownProjectIds.length === 1 ? knownProjectIds[0] : undefined;
   const explicit = claim.projectRef.trim();
   if (explicit.length === 0) {
     if (session.activeProjectId) return session.activeProjectId;
+    if (soleKnownProjectId) return soleKnownProjectId;
     return { kind: "CLARIFICATION", message: "Which project do you mean?" };
   }
   const match = projectMention(explicit, {
@@ -337,6 +349,7 @@ export function resolveClaimProject(
     aliases,
   });
   if (match) return match;
+  if (soleKnownProjectId) return soleKnownProjectId;
 
   // Candidate list purely for the clarification message — the resolve/no-resolve decision
   // itself belongs entirely to projectMention above, unchanged.
