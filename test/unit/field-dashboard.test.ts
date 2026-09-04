@@ -804,7 +804,7 @@ describe("accessibility semantics", () => {
 });
 
 describe("admin key handling", () => {
-  it("preloads a previously saved admin key from sessionStorage", () => {
+  it("never preloads a previously saved admin key from sessionStorage", () => {
     const { document, elements } = makeFakeDocument([
       "admin-key",
       "new-project-id",
@@ -828,7 +828,7 @@ describe("admin key handling", () => {
       bodyText: "{}",
     }));
     fieldDashboardClientScript(document, storage, fetchFn, makeCrypto([]));
-    expect(elements.get("admin-key")?.value).toBe("saved-key");
+    expect(elements.get("admin-key")?.value).not.toBe("saved-key");
   });
 
   it("sends the admin key as an Authorization Bearer header on every request", async () => {
@@ -841,6 +841,18 @@ describe("admin key handling", () => {
     el(h, "fp-0-refresh").trigger("click");
     await flush();
     expect(h.fetchCalls[0]?.headers.get("Authorization")).toBe("Bearer my-key");
+  });
+
+  it("never writes the admin key to sessionStorage/localStorage after use", async () => {
+    const h = mount(() => ({
+      ok: true,
+      status: 200,
+      bodyText: json(submissionBody({})),
+    }));
+    el(h, "admin-key").value = "my-secret-key";
+    el(h, "fp-0-refresh").trigger("click");
+    await flush();
+    expect(h.storage.getItem("howler_admin_key")).toBeNull();
   });
 });
 

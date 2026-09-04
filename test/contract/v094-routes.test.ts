@@ -106,24 +106,41 @@ describe("v0.9.4 route inventory", () => {
   });
 });
 
-describe("GET / and GET /admin", () => {
-  it("are public and return the admin HTML page with the frozen security headers", async () => {
-    for (const path of ["/", "/admin"]) {
-      const response = await worker.fetch(
-        plainRequest("GET", path, false),
-        adminEnv(),
-      );
-      expect(response.status).toBe(200);
-      expect(response.headers.get("content-type")).toBe(
-        "text/html; charset=utf-8",
-      );
-      expect(response.headers.get("cache-control")).toBe("no-store");
-      expect(response.headers.get("content-security-policy")).toBe(
-        "default-src 'none'; connect-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
-      );
-      expect(response.headers.get("x-content-type-options")).toBe("nosniff");
-      expect(response.headers.get("referrer-policy")).toBe("no-referrer");
-    }
+describe("GET /admin", () => {
+  it("is public and returns the legacy admin HTML page with the frozen security headers", async () => {
+    const response = await worker.fetch(
+      plainRequest("GET", "/admin", false),
+      adminEnv(),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe(
+      "text/html; charset=utf-8",
+    );
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("content-security-policy")).toBe(
+      "default-src 'none'; connect-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'",
+    );
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
+  });
+});
+
+// Phase 2 (product integration): GET / now serves Howler Penthouse (the same page as
+// /admin/field), which carries an additional img-src directive the legacy admin console does
+// not. See test/contract/admin-ui.test.ts for dedicated root-routing coverage.
+describe("GET /", () => {
+  it("is public and returns Howler Penthouse with security headers", async () => {
+    const response = await worker.fetch(
+      plainRequest("GET", "/", false),
+      adminEnv(),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe(
+      "text/html; charset=utf-8",
+    );
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
   });
 });
 

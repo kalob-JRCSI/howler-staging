@@ -49,12 +49,20 @@ describe("GET /admin/field: additive route, existing routes unchanged", () => {
   });
 
   // 3
-  it("leaves GET /admin and GET / byte-for-byte unchanged (frozen v0.9.4 fixture hash)", async () => {
-    for (const path of ["/admin", "/"]) {
-      const response = await worker.fetch(plainRequest("GET", path), env);
-      const body = await response.text();
-      expect(await sha256Hex(body)).toBe(FROZEN_ADMIN_BODY_SHA256);
-    }
+  it("leaves GET /admin byte-for-byte unchanged (frozen v0.9.4 fixture hash)", async () => {
+    const response = await worker.fetch(plainRequest("GET", "/admin"), env);
+    const body = await response.text();
+    expect(await sha256Hex(body)).toBe(FROZEN_ADMIN_BODY_SHA256);
+  });
+
+  // 3b
+  // Phase 2 (product integration): GET / now serves Howler Penthouse -- the same page as
+  // /admin/field -- instead of the legacy admin console this test previously froze alongside
+  // GET /admin. See test/contract/admin-ui.test.ts for the dedicated root-routing coverage.
+  it("serves Howler Penthouse at GET /, not the frozen legacy admin console", async () => {
+    const response = await worker.fetch(plainRequest("GET", "/"), env);
+    const body = await response.text();
+    expect(await sha256Hex(body)).not.toBe(FROZEN_ADMIN_BODY_SHA256);
   });
 
   // 4
@@ -162,7 +170,6 @@ describe("embedded client script closure safety", () => {
     const script = scriptMatch?.[1] ?? "";
     for (const name of [
       "PENDING_KEY",
-      "ADMIN_KEY_STORAGE_KEY",
       "EM_DASH",
       "EVIDENCE_KINDS",
       "REUSE_OR_CONFLICT_CODES",

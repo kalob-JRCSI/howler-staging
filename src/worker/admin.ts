@@ -493,7 +493,6 @@ export interface SubmissionKernel {
  */
 export function createSubmissionKernel(): SubmissionKernel {
   const PENDING_KEY = "howler_operator_pending_submission";
-  const ADMIN_KEY_STORAGE_KEY = "howler_admin_key";
   const EM_DASH = String.fromCharCode(8212);
   const EVIDENCE_KINDS = new Set(["EVIDENCE_PREVIEW", "EVIDENCE_APPLY_SHADOW"]);
   /** The Task 15 structured 409 outcomes that carry no `run` object of their own. */
@@ -839,12 +838,15 @@ export function createSubmissionKernel(): SubmissionKernel {
 
   function callApi(
     fetch: OperatorPanelFetch,
-    sessionStorage: OperatorPanelStorage,
+    // Phase 2 (product integration): the admin key is never persisted to sessionStorage/
+    // localStorage any more -- this parameter is kept only so callApi's signature (and every one
+    // of its many existing call sites across both the operator panel and Penthouse) does not need
+    // to change; it is genuinely unused now.
+    _sessionStorage: OperatorPanelStorage,
     adminKey: string,
     path: string,
     options: { method: string; body?: string },
   ): Promise<{ ok: boolean; status: number; body: unknown }> {
-    if (adminKey) sessionStorage.setItem(ADMIN_KEY_STORAGE_KEY, adminKey);
     const headers = new Headers();
     headers.set("Accept", "application/json");
     headers.set("Authorization", `Bearer ${adminKey}`);
@@ -900,7 +902,6 @@ export function operatorPanelClientScript(
   // Local, not module-level: see the note on createSubmissionKernel -- `.toString()`-embedding
   // only captures this function's own source text, so any identifier it needs must be declared
   // inside it.
-  const ADMIN_KEY_STORAGE_KEY = "howler_admin_key";
   const EM_DASH = String.fromCharCode(8212);
   const EVIDENCE_KINDS = new Set(["EVIDENCE_PREVIEW", "EVIDENCE_APPLY_SHADOW"]);
 
@@ -948,8 +949,9 @@ export function operatorPanelClientScript(
     outRevisionConflict: document.getElementById("out-revision-conflict"),
   };
 
-  const savedKey = sessionStorage.getItem(ADMIN_KEY_STORAGE_KEY);
-  if (savedKey) els.adminKey.value = savedKey;
+  // Phase 2 (product integration): the admin key is never persisted to sessionStorage/
+  // localStorage, and so is never preloaded on mount either -- the operator re-enters it fresh
+  // each page load, kept in memory (the input field's own value) only for the life of the tab.
 
   let currentWorkflowId: string | null = null;
   let requestInFlight = false;
@@ -1220,7 +1222,6 @@ export function fieldDashboardClientScript(
   crypto: OperatorPanelCrypto,
   testHooks?: FieldDashboardTestHooks,
 ): FieldVoiceBridge {
-  const ADMIN_KEY_STORAGE_KEY = "howler_admin_key";
   const EM_DASH = String.fromCharCode(8212);
   const TRACKED_PROJECTS_KEY = "howler_field_tracked_projects";
   // Pilot activation: the initial 7-project pilot roster ("KF Live PM Intelligence Dashboard --
@@ -1360,8 +1361,9 @@ export function fieldDashboardClientScript(
     projectsContainer: document.getElementById("projects-container"),
   };
 
-  const savedKey = sessionStorage.getItem(ADMIN_KEY_STORAGE_KEY);
-  if (savedKey) els.adminKey.value = savedKey;
+  // Phase 2 (product integration): the admin key is never persisted to sessionStorage/
+  // localStorage, and so is never preloaded on mount either -- the pilot user re-enters it fresh
+  // each page load, kept in memory (the input field's own value) only for the life of the tab.
 
   function adminKeyValue(): string {
     return els.adminKey.value.trim();

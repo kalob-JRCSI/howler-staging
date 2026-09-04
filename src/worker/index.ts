@@ -769,10 +769,16 @@ async function handle(request: Request, env: Env): Promise<Response> {
   // baseline's own `env.HOWLER_MODE ?? "shadow"` fallback) rather than assumed to be one literal.
   const mode = (env.HOWLER_MODE as string | undefined) ?? "shadow";
 
-  if (
-    request.method === "GET" &&
-    (url.pathname === "/" || url.pathname === "/admin")
-  ) {
+  // Phase 2 (product integration): GET / is now the real product surface -- Howler Penthouse
+  // (the same page /admin/field already serves) -- so a normal pilot user never needs to know or
+  // type "/admin/field". GET /admin keeps serving the legacy "Howler Staging Control" diagnostics
+  // console completely unchanged (still frozen byte-for-byte -- see
+  // test/contract/admin-ui.test.ts); this only adds a new root route, it never modifies /admin.
+  if (request.method === "GET" && url.pathname === "/") {
+    return fieldDashboardPage();
+  }
+
+  if (request.method === "GET" && url.pathname === "/admin") {
     return adminPage(SERVICE_VERSION);
   }
 
@@ -781,8 +787,9 @@ async function handle(request: Request, env: Env): Promise<Response> {
     return operatorPanelPage();
   }
 
-  // Task 16B: a third, independent same-origin page — does not replace or modify / or
-  // /admin/operator above.
+  // Task 16B: a third, independent same-origin page — /admin/field remains available for
+  // compatibility (identical content to the new GET / route above), but a normal pilot user
+  // never needs to know or use this path.
   if (request.method === "GET" && url.pathname === "/admin/field") {
     return fieldDashboardPage();
   }

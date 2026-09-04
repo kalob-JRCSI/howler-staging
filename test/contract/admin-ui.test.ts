@@ -52,11 +52,36 @@ describe("GET /admin/operator: coexists with, and never modifies, the existing P
     const body = await response.text();
     expect(await sha256Hex(body)).toBe(FROZEN_ADMIN_BODY_SHA256);
   });
+});
 
-  it("leaves GET / byte-for-byte unchanged too", async () => {
+// Phase 2 (product integration): GET / now serves Howler Penthouse -- the real, usable product
+// surface -- instead of the legacy "Howler Staging Control" diagnostics console this test
+// previously froze at the same hash as GET /admin. GET /admin itself is completely untouched
+// (see the frozen-hash test above); this is a new, additive root route, not a replacement of it.
+describe("GET /: Howler Penthouse (Phase 2 root routing)", () => {
+  it("is no longer the legacy admin console", async () => {
     const response = await worker.fetch(plainRequest("GET", "/"), env);
+    expect(response.status).toBe(200);
     const body = await response.text();
-    expect(await sha256Hex(body)).toBe(FROZEN_ADMIN_BODY_SHA256);
+    expect(await sha256Hex(body)).not.toBe(FROZEN_ADMIN_BODY_SHA256);
+  });
+
+  it("serves the same Penthouse page /admin/field already serves", async () => {
+    const rootResponse = await worker.fetch(plainRequest("GET", "/"), env);
+    const fieldResponse = await worker.fetch(
+      plainRequest("GET", "/admin/field"),
+      env,
+    );
+    const rootBody = await rootResponse.text();
+    const fieldBody = await fieldResponse.text();
+    expect(await sha256Hex(rootBody)).toBe(await sha256Hex(fieldBody));
+  });
+
+  it("carries the same security headers as the other admin-family pages", async () => {
+    const response = await worker.fetch(plainRequest("GET", "/"), env);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(response.headers.get("referrer-policy")).toBe("no-referrer");
   });
 });
 

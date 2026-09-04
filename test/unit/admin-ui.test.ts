@@ -834,16 +834,16 @@ describe("DOM wiring: resume", () => {
 });
 
 describe("admin key handling", () => {
-  it("persists the admin key to sessionStorage on submit, never to a URL", async () => {
+  it("never persists the admin key to sessionStorage on submit, and never to a URL", async () => {
     const { els, storage, fetchCalls } = mount(() => jsonResponse(202, {}));
     els.adminKey.value = "my-secret-key";
     els.form.trigger("submit", { preventDefault: () => undefined });
     await Promise.resolve();
-    expect(storage.getItem("howler_admin_key")).toBe("my-secret-key");
+    expect(storage.getItem("howler_admin_key")).toBeNull();
     expect(fetchCalls[0]?.path).not.toContain("my-secret-key");
   });
 
-  it("preloads a previously-stored session admin key into the input on mount", () => {
+  it("does not preload a previously-stored session admin key into the input on mount", () => {
     const storage = makeStorage();
     storage.setItem("howler_admin_key", "restored-key");
     const els = {
@@ -902,7 +902,7 @@ describe("admin key handling", () => {
       makeCrypto([]),
       undefined,
     );
-    expect(els.adminKey.value).toBe("restored-key");
+    expect(els.adminKey.value).not.toBe("restored-key");
   });
 });
 
