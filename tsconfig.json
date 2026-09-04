@@ -10,5 +10,5 @@
     "strict": true,
     "target": "ES2024"
   },
-  "include": ["src/**/*.ts", "scripts/**/*.ts", "worker-configuration.d.ts"]
+  "include": ["src/**/*.ts", "worker-configuration.d.ts"]
 }
