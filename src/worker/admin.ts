@@ -828,7 +828,10 @@ export function createSubmissionKernel(): SubmissionKernel {
     const commitments: string[] = [];
     const unknowns: string[] = [];
     for (const forecast of Object.values(activityForecasts)) {
-      const name = asString(forecast.activityName) ?? asString(forecast.activityId) ?? "activity";
+      const name =
+        asString(forecast.activityName) ??
+        asString(forecast.activityId) ??
+        "activity";
       if (forecast.truthState === "SATISFIED") facts.push(name);
       else if (forecast.truthState === "COMMITTED") commitments.push(name);
       else unknowns.push(name);

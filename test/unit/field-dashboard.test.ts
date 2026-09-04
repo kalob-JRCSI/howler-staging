@@ -875,12 +875,12 @@ describe("automatic canonical reads once an admin key is entered", () => {
         .concat(["FORECAST_QUERY", "FORECAST_HEALTH_QUERY", "RECOVERY_QUERY"])
         .sort(),
     );
-    expect(
-      h.fetchCalls.some((c) => callBody(c).projectId === "proj-a"),
-    ).toBe(true);
-    expect(
-      h.fetchCalls.some((c) => callBody(c).projectId === "proj-b"),
-    ).toBe(true);
+    expect(h.fetchCalls.some((c) => callBody(c).projectId === "proj-a")).toBe(
+      true,
+    );
+    expect(h.fetchCalls.some((c) => callBody(c).projectId === "proj-b")).toBe(
+      true,
+    );
   });
 
   it("does not re-fire for the same admin key value on a second change event", async () => {
@@ -970,9 +970,21 @@ describe("Facts / Commitments / Unknowns, derived from the real FORECAST_QUERY r
       modelRevision: 3,
       latest: {
         activityForecasts: {
-          "act-1": { activityId: "act-1", activityName: "Foundation", truthState: "SATISFIED" },
-          "act-2": { activityId: "act-2", activityName: "Framing", truthState: "COMMITTED" },
-          "act-3": { activityId: "act-3", activityName: "Roofing", truthState: "FORECASTED" },
+          "act-1": {
+            activityId: "act-1",
+            activityName: "Foundation",
+            truthState: "SATISFIED",
+          },
+          "act-2": {
+            activityId: "act-2",
+            activityName: "Framing",
+            truthState: "COMMITTED",
+          },
+          "act-3": {
+            activityId: "act-3",
+            activityName: "Roofing",
+            truthState: "FORECASTED",
+          },
         },
       },
     },
@@ -985,7 +997,9 @@ describe("Facts / Commitments / Unknowns, derived from the real FORECAST_QUERY r
       bodyText: json(
         submissionBody({
           output:
-            callBody(call).kind === "FORECAST_QUERY" ? FORECAST_OUTPUT : undefined,
+            callBody(call).kind === "FORECAST_QUERY"
+              ? FORECAST_OUTPUT
+              : undefined,
         }),
       ),
     }));
@@ -1019,10 +1033,11 @@ describe("selecting a portfolio row opens that project's Index Card", () => {
       trackedProjects: ["proj-a", "proj-b"],
     });
     const scrollSpy: { calls: number } = { calls: 0 };
-    (el(h, "fp-1-title") as unknown as { scrollIntoView: () => void }).scrollIntoView =
-      () => {
-        scrollSpy.calls += 1;
-      };
+    (
+      el(h, "fp-1-title") as unknown as { scrollIntoView: () => void }
+    ).scrollIntoView = () => {
+      scrollSpy.calls += 1;
+    };
     el(h, "ph-row-1").trigger("click");
     expect(scrollSpy.calls).toBe(1);
   });
@@ -1054,9 +1069,9 @@ describe("board resilience: one project's stuck conversation never blocks anothe
     el(h, "fp-0-conv-send").trigger("click");
     await flush();
     expect(el(h, "fp-0-conv-response").textContent).toBe("Working…");
-    expect(
-      pending.some((entry) => entry.call.path.includes("proj-a")),
-    ).toBe(true);
+    expect(pending.some((entry) => entry.call.path.includes("proj-a"))).toBe(
+      true,
+    );
 
     el(h, "fp-1-refresh").trigger("click");
     await flush();
@@ -1071,7 +1086,8 @@ describe("board resilience: one project's stuck conversation never blocks anothe
         status: 200,
         bodyText: json(
           submissionBody({
-            output: kind === "FORECAST_HEALTH_QUERY" ? HEALTH_OUTPUT : undefined,
+            output:
+              kind === "FORECAST_HEALTH_QUERY" ? HEALTH_OUTPUT : undefined,
           }),
         ),
       });
@@ -1083,9 +1099,9 @@ describe("board resilience: one project's stuck conversation never blocks anothe
     // proj-a's conversation is still genuinely unresolved throughout -- it never errored out and
     // never blocked proj-b's own reads from completing.
     expect(el(h, "fp-0-conv-response").textContent).toBe("Working…");
-    expect(
-      pending.some((entry) => entry.call.path.includes("proj-a")),
-    ).toBe(true);
+    expect(pending.some((entry) => entry.call.path.includes("proj-a"))).toBe(
+      true,
+    );
   });
 });
 
