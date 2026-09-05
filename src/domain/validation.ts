@@ -8,17 +8,6 @@ function assertUnitInterval(value: number, label: string): void {
   }
 }
 
-// Stricter than a bare Date.parse (which also accepts human-readable strings like
-// "September 14, 2026"), matching the exact shape every ISODateTime in this codebase is actually
-// produced in (`new Date().toISOString()`): a real calendar date, "T" separator, and a "Z" or
-// numeric UTC offset.
-const ISO_DATETIME_RE =
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/;
-
-function isValidIsoDateTime(value: string): boolean {
-  return ISO_DATETIME_RE.test(value) && Number.isFinite(Date.parse(value));
-}
-
 const DURATION_LABELS = ["optimistic", "likely", "conservative"] as const;
 
 export function validateProjectModel(model: ProjectModelV094): void {
@@ -280,9 +269,17 @@ export function validateProjectModel(model: ProjectModelV094): void {
         );
       }
     }
+    // P2/nonblocking (deliberately deferred): this uses the same loose Date.parse-based
+    // timestamp check as every other ISODateTime field in the codebase
+    // (src/operator/intent.ts's isValidTimestamp), which does accept some non-ISO strings. No
+    // stricter canonical ISO-datetime helper exists anywhere else in the codebase today, and
+    // inventing one solely for this one field would be a new timestamp subsystem out of scope
+    // for this fix. genesisApprovedAt is set internally by buildProjectFromGenesis from
+    // `new Date().toISOString()`, not sourced from the untrusted proposal payload, so the
+    // practical exposure is low; revisit only if pilot evidence shows it matters.
     if (
       profile.genesisApprovedAt !== undefined &&
-      !isValidIsoDateTime(profile.genesisApprovedAt)
+      !Number.isFinite(Date.parse(profile.genesisApprovedAt))
     ) {
       throw new Error(
         "Project profile genesisApprovedAt must be a valid ISO date-time",

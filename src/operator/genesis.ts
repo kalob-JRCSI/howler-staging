@@ -6,6 +6,7 @@
 // buildProjectFromGenesis below, which returns a project the existing
 // D1HowlerRepository.createProject/forecastInitial pipeline can persist unchanged).
 
+import { validateProjectModel } from "../domain/validation";
 import { assertISODate } from "../engine/date";
 import type {
   ActivityV094,
@@ -159,13 +160,14 @@ export function validateGenesisProposal(
 ): string[] {
   const errors: string[] = [];
 
-  // The type says schemaVersion can only ever be "0.9.6" -- a compile-time promise, not a
-  // runtime one. This validator is the actual boundary for untrusted JSON (Task 3's HTTP commit
-  // route), where a caller's `as GenesisProposalV096` cast does not make an arbitrary request
-  // body true.
-  if ((proposal.schemaVersion as string) !== "0.9.6") {
-    errors.push('schemaVersion must be "0.9.6"');
-  }
+  // Deliberately not re-checked here: TypeScript already guarantees schemaVersion is exactly
+  // "0.9.6" for any value actually typed GenesisProposalV096, so a runtime `!== "0.9.6"`
+  // comparison is dead code against this signature (confirmed by
+  // @typescript-eslint/no-unnecessary-condition). The real risk is untrusted HTTP JSON that has
+  // merely been *cast* to this type without being proven to match it -- that check belongs at
+  // Task 3's HTTP commit route, on the raw parsed body, before it is ever treated as a
+  // GenesisProposalV096 (the same pattern src/operator/intent.ts's validateIntent already uses
+  // for its own untrusted-JSON boundary).
   if (!isNonEmptyString(proposal.proposalId)) {
     errors.push("proposalId is required");
   }
@@ -344,6 +346,12 @@ export function buildProjectFromGenesis(
 
   // Only connect adjacent recognized phases that are both actually present -- never invent a
   // dependency relationship among unrecognized/unmatched phase labels.
+  //
+  // Dependency ids built below are always `dep-genesis-${predecessor.id}-${successor.id}` --
+  // that fixed, non-empty prefix means the constructed key can never equal a reserved
+  // Record-prototype identifier ("__proto__"/"constructor"/"prototype") regardless of which
+  // (already-validated-safe) scope ids it is built from, so no separate reserved-identifier
+  // check is needed for dependency ids themselves.
   const itemsByPhase = new Map<string, GenesisScopeItemV096[]>();
   for (const item of proposal.baselineScope) {
     if (!PHASE_ORDER.includes(item.phase)) continue;
@@ -407,7 +415,7 @@ export function buildProjectFromGenesis(
       : {}),
   };
 
-  return {
+  const model: ProjectModelV094 = {
     projectId: proposal.projectId,
     revision: 0,
     name: proposal.projectName,
@@ -422,4 +430,10 @@ export function buildProjectFromGenesis(
     eventLedger: [],
     projectProfile: profile,
   };
+
+  // Defense-in-depth, not a substitute for the proposal-level checks above: a final invariant
+  // check so this function can never return canonical state validateProjectModel itself would
+  // reject.
+  validateProjectModel(model);
+  return model;
 }

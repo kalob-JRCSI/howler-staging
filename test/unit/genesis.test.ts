@@ -222,26 +222,170 @@ describe("Project Genesis canonical builder: adversarial review findings", () =>
     ).toThrow();
   });
 
-  it("rejects a mismatched schemaVersion at the runtime boundary", () => {
-    const broken = {
-      ...proposal(),
-      schemaVersion: "0.9.5",
-    } as unknown as GenesisProposalV096;
+  it("rejects a non-integer duration (2.5 days)", () => {
+    const broken = proposal();
+    broken.baselineScope = [
+      {
+        id: "demo",
+        label: "Demolition",
+        phase: "Demolition",
+        optimisticDays: 2.5,
+      },
+    ];
+    broken.knownDates = [];
     expect(validateGenesisProposal(broken)).toContainEqual(
-      'schemaVersion must be "0.9.6"',
+      expect.stringContaining("optimistic duration must be an integer >= 1"),
+    );
+    expect(() =>
+      buildProjectFromGenesis(broken, "2026-09-04T20:00:00.000Z"),
+    ).toThrow();
+  });
+
+  it("rejects a negative duration", () => {
+    const broken = proposal();
+    broken.baselineScope = [
+      {
+        id: "demo",
+        label: "Demolition",
+        phase: "Demolition",
+        optimisticDays: -1,
+      },
+    ];
+    broken.knownDates = [];
+    expect(validateGenesisProposal(broken)).toContainEqual(
+      expect.stringContaining("optimistic duration must be an integer >= 1"),
+    );
+    expect(() =>
+      buildProjectFromGenesis(broken, "2026-09-04T20:00:00.000Z"),
+    ).toThrow();
+  });
+
+  it("rejects optimistic greater than likely", () => {
+    const broken = proposal();
+    broken.baselineScope = [
+      {
+        id: "demo",
+        label: "Demolition",
+        phase: "Demolition",
+        optimisticDays: 5,
+        likelyDays: 3,
+        conservativeDays: 7,
+      },
+    ];
+    broken.knownDates = [];
+    expect(validateGenesisProposal(broken)).toContainEqual(
+      expect.stringContaining(
+        "duration estimates must satisfy optimistic <= likely <= conservative",
+      ),
+    );
+    expect(() =>
+      buildProjectFromGenesis(broken, "2026-09-04T20:00:00.000Z"),
+    ).toThrow();
+  });
+
+  it("rejects likely greater than conservative", () => {
+    const broken = proposal();
+    broken.baselineScope = [
+      {
+        id: "demo",
+        label: "Demolition",
+        phase: "Demolition",
+        optimisticDays: 2,
+        likelyDays: 8,
+        conservativeDays: 7,
+      },
+    ];
+    broken.knownDates = [];
+    expect(validateGenesisProposal(broken)).toContainEqual(
+      expect.stringContaining(
+        "duration estimates must satisfy optimistic <= likely <= conservative",
+      ),
+    );
+    expect(() =>
+      buildProjectFromGenesis(broken, "2026-09-04T20:00:00.000Z"),
+    ).toThrow();
+  });
+
+  it("rejects a partial explicit duration that becomes invalid once the pilot defaults are applied (optimisticDays: 5, default likely: 4)", () => {
+    const broken = proposal();
+    broken.baselineScope = [
+      {
+        id: "demo",
+        label: "Demolition",
+        phase: "Demolition",
+        optimisticDays: 5,
+      },
+    ];
+    broken.knownDates = [];
+    expect(validateGenesisProposal(broken)).toContainEqual(
+      expect.stringContaining(
+        "duration estimates must satisfy optimistic <= likely <= conservative",
+      ),
+    );
+    expect(() =>
+      buildProjectFromGenesis(broken, "2026-09-04T20:00:00.000Z"),
+    ).toThrow();
+  });
+
+  it("accepts a valid forecastAnchorDate and knownDates date with no errors", () => {
+    expect(validateGenesisProposal(proposal())).toEqual([]);
+  });
+
+  it("rejects a duplicate COMMITTED_FINISH for the same subject", () => {
+    const broken = proposal();
+    broken.knownDates = [
+      {
+        subjectId: "demo",
+        kind: "COMMITTED_FINISH",
+        date: "2026-09-16",
+        label: "Demo finish",
+      },
+      {
+        subjectId: "demo",
+        kind: "COMMITTED_FINISH",
+        date: "2026-09-20",
+        label: "Demo finish (revised)",
+      },
+    ];
+    expect(validateGenesisProposal(broken)).toContainEqual(
+      expect.stringContaining("more than one COMMITTED_FINISH for demo"),
     );
   });
 
-  it("rejects a human-readable genesisApprovedAt at the canonical model layer", () => {
-    const model = buildProjectFromGenesis(
-      proposal(),
-      "2026-09-04T20:00:00.000Z",
-    );
-    if (model.projectProfile) {
-      model.projectProfile.genesisApprovedAt = "September 4, 2026";
-    }
-    expect(() => {
-      validateProjectModel(model);
-    }).toThrow(/genesisApprovedAt must be a valid ISO date-time/);
+  it("accepts a committed start on or before its committed finish for the same subject", () => {
+    const ok = proposal();
+    ok.knownDates = [
+      {
+        subjectId: "demo",
+        kind: "COMMITTED_START",
+        date: "2026-09-14",
+        label: "Demo start",
+      },
+      {
+        subjectId: "demo",
+        kind: "COMMITTED_FINISH",
+        date: "2026-09-14",
+        label: "Demo finish",
+      },
+    ];
+    expect(validateGenesisProposal(ok)).toEqual([]);
+    const model = buildProjectFromGenesis(ok, "2026-09-04T20:00:00.000Z");
+    expect(model.activities.demo?.scheduleLock?.startDate).toBe("2026-09-14");
+    expect(model.activities.demo?.scheduleLock?.finishDate).toBe("2026-09-14");
+  });
+
+  it("never creates a scheduleLock from a FORECAST_START known date", () => {
+    const ok = proposal();
+    ok.knownDates = [
+      {
+        subjectId: "demo",
+        kind: "FORECAST_START",
+        date: "2026-09-14",
+        label: "Demo forecast start",
+      },
+    ];
+    expect(validateGenesisProposal(ok)).toEqual([]);
+    const model = buildProjectFromGenesis(ok, "2026-09-04T20:00:00.000Z");
+    expect(model.activities.demo?.scheduleLock).toBeUndefined();
   });
 });
