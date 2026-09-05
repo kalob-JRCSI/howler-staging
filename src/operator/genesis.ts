@@ -108,6 +108,22 @@ function isSafeIdentifier(value: string): boolean {
   return !RESERVED_IDENTIFIERS.has(value);
 }
 
+/**
+ * Deterministic, collision-free dependency id for an ordered (predecessorId, successorId) pair.
+ * Plain concatenation (`${predecessorId}-${successorId}`) is not collision-free: scope ids may
+ * themselves contain hyphens, so predecessor "a-b" + successor "c" and predecessor "a" +
+ * successor "b-c" both concatenate to the same literal string "a-b-c". Length-prefixing each
+ * component (`<len>:<value>`) makes the pair unambiguous for any string component, without
+ * forbidding hyphens (or any other character) in valid scope ids and without reaching for a hash
+ * or a second id subsystem.
+ */
+function genesisDependencyId(
+  predecessorId: string,
+  successorId: string,
+): string {
+  return `dep-genesis-${String(predecessorId.length)}:${predecessorId}-${String(successorId.length)}:${successorId}`;
+}
+
 interface EffectiveDuration {
   optimistic: number;
   likely: number;
@@ -347,11 +363,11 @@ export function buildProjectFromGenesis(
   // Only connect adjacent recognized phases that are both actually present -- never invent a
   // dependency relationship among unrecognized/unmatched phase labels.
   //
-  // Dependency ids built below are always `dep-genesis-${predecessor.id}-${successor.id}` --
-  // that fixed, non-empty prefix means the constructed key can never equal a reserved
-  // Record-prototype identifier ("__proto__"/"constructor"/"prototype") regardless of which
-  // (already-validated-safe) scope ids it is built from, so no separate reserved-identifier
-  // check is needed for dependency ids themselves.
+  // Dependency ids built below always carry the fixed, non-empty "dep-genesis-" prefix, so the
+  // constructed key can never equal a reserved Record-prototype identifier
+  // ("__proto__"/"constructor"/"prototype") regardless of which (already-validated-safe) scope
+  // ids it is built from -- no separate reserved-identifier check is needed for dependency ids
+  // themselves.
   const itemsByPhase = new Map<string, GenesisScopeItemV096[]>();
   for (const item of proposal.baselineScope) {
     if (!PHASE_ORDER.includes(item.phase)) continue;
@@ -372,7 +388,15 @@ export function buildProjectFromGenesis(
     if (!predecessors || !successors) continue;
     for (const predecessor of predecessors) {
       for (const successor of successors) {
-        const dependencyId = `dep-genesis-${predecessor.id}-${successor.id}`;
+        const dependencyId = genesisDependencyId(predecessor.id, successor.id);
+        // Defense-in-depth: genesisDependencyId is deterministic and collision-free for any
+        // ordered pair, so this should never actually fire -- but if it ever did, silently
+        // overwriting an existing relationship would be far worse than failing loudly.
+        if (dependencies[dependencyId]) {
+          throw new Error(
+            `Generated dependency id collision: ${dependencyId} (predecessor ${predecessor.id}, successor ${successor.id})`,
+          );
+        }
         dependencies[dependencyId] = {
           id: dependencyId,
           active: true,

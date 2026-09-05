@@ -3,6 +3,7 @@ import {
   buildProjectFromGenesis,
   validateGenesisProposal,
   type GenesisProposalV096,
+  type GenesisScopeItemV096,
 } from "../../src/operator/genesis";
 import { validateProjectModel } from "../../src/domain/validation";
 
@@ -387,5 +388,55 @@ describe("Project Genesis canonical builder: adversarial review findings", () =>
     expect(validateGenesisProposal(ok)).toEqual([]);
     const model = buildProjectFromGenesis(ok, "2026-09-04T20:00:00.000Z");
     expect(model.activities.demo?.scheduleLock).toBeUndefined();
+  });
+
+  // Independent review finding: naive string concatenation
+  // (`dep-genesis-${predecessor.id}-${successor.id}`) is not collision-free. "a-b" -> "c" and
+  // "a" -> "b-c" both concatenate to the literal string "a-b-c", so the second assignment
+  // silently overwrote the first in the dependencies Record.
+  function dependencyCollisionProposal(order: string[]): GenesisProposalV096 {
+    const itemsById: Record<string, GenesisScopeItemV096> = {
+      "a-b": { id: "a-b", label: "Demo scope a-b", phase: "Demolition" },
+      a: { id: "a", label: "Demo scope a", phase: "Demolition" },
+      c: { id: "c", label: "Foundation scope c", phase: "Foundation" },
+      "b-c": { id: "b-c", label: "Foundation scope b-c", phase: "Foundation" },
+    };
+    return {
+      ...proposal(),
+      baselineScope: order.map((id) => {
+        const item = itemsById[id];
+        if (!item) throw new Error(`no fixture item for id ${id}`);
+        return item;
+      }),
+      knownDates: [],
+    };
+  }
+
+  function assertAllFourDependencyRelationships(
+    model: ReturnType<typeof buildProjectFromGenesis>,
+  ): void {
+    const pairs = Object.values(model.dependencies).map(
+      (d) => `${d.predecessorId}->${d.successorId}`,
+    );
+    const ids = Object.values(model.dependencies).map((d) => d.id);
+    expect(Object.keys(model.dependencies)).toHaveLength(4);
+    expect(pairs).toEqual(
+      expect.arrayContaining(["a-b->c", "a-b->b-c", "a->c", "a->b-c"]),
+    );
+    expect(new Set(ids).size).toBe(ids.length);
+  }
+
+  it("generates all four distinct recognized-phase dependencies without id collision (a-b/a -> c/b-c)", () => {
+    const ok = dependencyCollisionProposal(["a-b", "a", "c", "b-c"]);
+    expect(validateGenesisProposal(ok)).toEqual([]);
+    const model = buildProjectFromGenesis(ok, "2026-09-04T20:00:00.000Z");
+    assertAllFourDependencyRelationships(model);
+  });
+
+  it("generates the same four dependencies regardless of baselineScope input order", () => {
+    const ok = dependencyCollisionProposal(["b-c", "a", "c", "a-b"]);
+    expect(validateGenesisProposal(ok)).toEqual([]);
+    const model = buildProjectFromGenesis(ok, "2026-09-04T20:00:00.000Z");
+    assertAllFourDependencyRelationships(model);
   });
 });
