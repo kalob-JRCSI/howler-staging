@@ -9,12 +9,16 @@
 // external commitment of any kind. "Consume first, interrogate second" -- when extraction is
 // uncertain or absent, this never fabricates a fact; it leaves the field unresolved and adds a
 // concise assumption/missingCritical item instead.
+//
+// synthesizeGenesisField throws if `now` is not a valid timestamp: `now` is a system input, not
+// project truth, and this function must never derive a malformed date (e.g. "NaN-09-14") from it.
 
 import type {
   GenesisKnownDateV096,
   GenesisProposalV096,
   GenesisScopeItemV096,
 } from "../operator/genesis";
+import { assertISODate } from "../engine/date";
 
 export type GenesisSynthesizer = (
   text: string,
@@ -78,6 +82,11 @@ const PROJECT_TYPE_KEYWORDS: { keyword: string; projectType: string }[] = [
   { keyword: "addition", projectType: "RESIDENTIAL_ADDITION" },
 ];
 
+// Excludes the common idiom "in addition to" (meaning "furthermore") from being read as a
+// home-addition project-type signal. A single named exclusion, not general semantic
+// classification.
+const ADDITION_IDIOM_RE = /\bin\s+addition\s+to\b/i;
+
 const MONTH_NAMES = [
   "January",
   "February",
@@ -93,7 +102,16 @@ const MONTH_NAMES = [
   "December",
 ];
 
+const MONTH_NAME_PATTERN = MONTH_NAMES.join("|");
+const MONTH_NAME_ANYWHERE_RE = new RegExp(`\\b(?:${MONTH_NAME_PATTERN})\\b`, "i");
+
 const DEFAULT_TIMEZONE = "America/New_York";
+
+// Fixed list of modal/hedge/forecast markers. Any sentence containing one of these is treated as
+// uncertain/planning language, never a direct commitment -- a fixed keyword list, not a general
+// NLP classifier.
+const HEDGE_MARKER_RE =
+  /\b(?:may|might|could|should|hope|hoping|plan|planning|forecast|forecasted|expect|expects|expected|potentially|likely|possibly|aim|aiming|intend|intending|anticipate|anticipating)\b/i;
 
 function splitSentences(text: string): string[] {
   return text
@@ -146,9 +164,14 @@ function findProjectType(sentences: string[]): {
   assumption?: string;
 } {
   for (const raw of sentences) {
-    const lower = raw.toLowerCase();
     for (const { keyword, projectType } of PROJECT_TYPE_KEYWORDS) {
-      if (lower.includes(keyword)) return { projectType };
+      const boundaryRe = new RegExp(
+        `\\b${keyword.replace(/\s+/g, "\\s+")}\\b`,
+        "i",
+      );
+      if (!boundaryRe.test(raw)) continue;
+      if (keyword === "addition" && ADDITION_IDIOM_RE.test(raw)) continue;
+      return { projectType };
     }
   }
   return {
@@ -163,20 +186,31 @@ function parseMoneyAmount(digits: string, hasKSuffix: boolean): number {
   return hasKSuffix ? numeric * 1000 : numeric;
 }
 
-const MONEY_RE = /\$?\s*([\d][\d,]*(?:\.\d+)?)\s*(k)?\b/i;
+// Leading group (1) and inner group (2) both detect a "-" before the digits, whether it precedes
+// or follows an optional "$" (e.g. "-$50,000" or "$-50,000"), so a negative statement is always
+// recognized rather than silently losing its sign.
+const MONEY_RE = /(-)?\s*\$?\s*(-)?\s*([\d][\d,]*(?:\.\d+)?)\s*(k)?\b/i;
 
-function findBudget(
-  sentences: string[],
-): { baseline: number; currency: string } | undefined {
+interface BudgetResult {
+  budget?: { baseline: number; currency: string };
+  assumption?: string;
+}
+
+function findBudget(sentences: string[]): BudgetResult {
   for (const raw of sentences) {
     if (!/budget/i.test(raw)) continue;
     const match = MONEY_RE.exec(raw);
-    if (!match?.[1]) continue;
-    const baseline = parseMoneyAmount(match[1], Boolean(match[2]));
+    if (!match?.[3]) continue;
+    if (match[1] || match[2]) {
+      return {
+        assumption: `Unresolved as of intake: a negative budget amount could not be accepted as a baseline: ${stripTrailingPunctuation(raw)}.`,
+      };
+    }
+    const baseline = parseMoneyAmount(match[3], Boolean(match[4]));
     if (!Number.isFinite(baseline) || baseline <= 0) continue;
-    return { baseline, currency: "USD" };
+    return { budget: { baseline, currency: "USD" } };
   }
-  return undefined;
+  return {};
 }
 
 function splitScopePhrases(sentence: string): string[] {
@@ -186,18 +220,34 @@ function splitScopePhrases(sentence: string): string[] {
     .filter((phrase) => phrase.length > 0);
 }
 
+function uniqueScopeId(baseId: string, usedIds: Set<string>): string {
+  if (!usedIds.has(baseId)) return baseId;
+  let suffix = 2;
+  while (usedIds.has(`${baseId}-${String(suffix)}`)) suffix += 1;
+  return `${baseId}-${String(suffix)}`;
+}
+
 function findScopeListItems(sentences: string[]): GenesisScopeItemV096[] {
   const items: GenesisScopeItemV096[] = [];
-  const seenIds = new Set<string>();
+  // Dedupes an exactly-repeated phrase (case-insensitive); distinct phrases that merely
+  // slugify to the same id are NOT deduped here -- see usedIds below.
+  const seenPhrases = new Set<string>();
+  // Guarantees unique ids: two distinct phrases that collide after slugification (e.g. "a-b"
+  // and "a b") each keep their own scope item, via a numeric suffix on the second.
+  const usedIds = new Set<string>();
   for (const raw of sentences) {
     const scopeMatch = /^scope\s*(?:is|:)\s*(.+)$/i.exec(
       stripTrailingPunctuation(raw),
     );
     if (!scopeMatch?.[1]) continue;
     for (const phrase of splitScopePhrases(scopeMatch[1])) {
-      const id = slugify(phrase);
-      if (!id || seenIds.has(id)) continue;
-      seenIds.add(id);
+      const normalizedPhrase = phrase.trim().toLowerCase();
+      if (!normalizedPhrase || seenPhrases.has(normalizedPhrase)) continue;
+      seenPhrases.add(normalizedPhrase);
+      const baseId = slugify(phrase);
+      if (!baseId) continue;
+      const id = uniqueScopeId(baseId, usedIds);
+      usedIds.add(id);
       items.push({
         id,
         label: capitalizeFirst(phrase),
@@ -213,49 +263,87 @@ interface ActivityStartResult {
   knownDate: GenesisKnownDateV096;
 }
 
-function monthDayToIsoDate(
+type IsoDateAttempt = { ok: true; date: string } | { ok: false };
+
+function tryBuildIsoDate(
   monthName: string,
   day: string,
   year: number,
-): string | undefined {
+): IsoDateAttempt {
   const monthIndex = MONTH_NAMES.findIndex(
     (m) => m.toLowerCase() === monthName.toLowerCase(),
   );
-  if (monthIndex === -1) return undefined;
+  if (monthIndex === -1) return { ok: false };
   const dayNumber = Number(day);
   if (!Number.isInteger(dayNumber) || dayNumber < 1 || dayNumber > 31) {
-    return undefined;
+    return { ok: false };
   }
   const month = String(monthIndex + 1).padStart(2, "0");
   const paddedDay = String(dayNumber).padStart(2, "0");
-  return `${String(year)}-${month}-${paddedDay}`;
+  const candidate = `${String(year)}-${month}-${paddedDay}`;
+  try {
+    assertISODate(candidate);
+  } catch {
+    return { ok: false };
+  }
+  return { ok: true, date: candidate };
 }
 
-const MONTH_NAME_PATTERN = MONTH_NAMES.join("|");
-const ACTIVITY_START_RE = new RegExp(
-  `\\b([A-Za-z][A-Za-z ]{0,40}?)\\s+starts?\\s+(${MONTH_NAME_PATTERN})\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b`,
-  "gi",
+// Anchored to the entire (punctuation-stripped) sentence: a conservative, sentence-level parser
+// rather than a broad regex search across the whole text. This intentionally only recognizes the
+// simplest direct-commitment shape ("<subject> start(s) <Month> <Day>"); anything with additional
+// words (hedges, modals, forecast/planning language) fails this match and is handled by the
+// hedge-language branch in findActivityStartDates instead of being coerced into a commitment.
+const DIRECT_ACTIVITY_START_RE = new RegExp(
+  `^([A-Za-z][A-Za-z ]{0,40}?)\\s+starts?\\s+(${MONTH_NAME_PATTERN})\\s+(\\d{1,2})(?:st|nd|rd|th)?$`,
+  "i",
 );
 
 function findActivityStartDates(
-  text: string,
+  sentences: string[],
   year: number,
   existingIds: Set<string>,
-): ActivityStartResult[] {
+): { results: ActivityStartResult[]; hedgeAssumptions: string[] } {
   const results: ActivityStartResult[] = [];
-  for (const match of text.matchAll(ACTIVITY_START_RE)) {
+  const hedgeAssumptions: string[] = [];
+
+  for (const raw of sentences) {
+    const sentence = stripTrailingPunctuation(raw);
+
+    // Hedged/forecast/planning language must never become a commitment, and must never
+    // fabricate a scope item from a modal word swallowed into the subject. Only note it as an
+    // assumption when the sentence actually looks like a date-related statement.
+    if (HEDGE_MARKER_RE.test(sentence)) {
+      if (MONTH_NAME_ANYWHERE_RE.test(sentence)) {
+        hedgeAssumptions.push(
+          `Forecast/uncertain start noted (not committed): ${sentence}.`,
+        );
+      }
+      continue;
+    }
+
+    const match = DIRECT_ACTIVITY_START_RE.exec(sentence);
+    if (!match) continue;
     const subjectPhrase = match[1]?.trim();
     const monthName = match[2];
     const day = match[3];
     if (!subjectPhrase || !monthName || !day) continue;
-    const date = monthDayToIsoDate(monthName, day, year);
-    if (!date) continue;
 
     const dictionaryEntry = SCOPE_DICTIONARY[subjectPhrase.toLowerCase()];
     const subjectId = dictionaryEntry?.id ?? slugify(subjectPhrase);
     const subjectLabel =
       dictionaryEntry?.label ?? capitalizeFirst(subjectPhrase);
     if (!subjectId) continue;
+
+    const dateResult = tryBuildIsoDate(monthName, day, year);
+    if (!dateResult.ok) {
+      // Never silently discard an explicit date-shaped statement, and never invent a
+      // corrected date -- surface why it could not be accepted instead.
+      hedgeAssumptions.push(
+        `Unresolved as of intake: stated start date for ${subjectLabel} (${monthName} ${day}) could not be accepted as a valid calendar date.`,
+      );
+      continue;
+    }
 
     const scopeItem = existingIds.has(subjectId)
       ? undefined
@@ -271,12 +359,12 @@ function findActivityStartDates(
       knownDate: {
         subjectId,
         kind: "COMMITTED_START",
-        date,
+        date: dateResult.date,
         label: `${subjectLabel} start`,
       },
     });
   }
-  return results;
+  return { results, hedgeAssumptions };
 }
 
 const VENDOR_SELECTION_RE = /\bselected\s+[A-Z][\w'&-]*\s+for\s+/i;
@@ -303,36 +391,84 @@ function findAssumptionSentences(sentences: string[]): string[] {
   return assumptions;
 }
 
+function parseNow(now: string): Date {
+  const parsed = new Date(now);
+  if (Number.isNaN(parsed.getTime())) {
+    throw new Error(
+      `synthesizeGenesisField: now must be a valid timestamp, received: ${now}`,
+    );
+  }
+  return parsed;
+}
+
+// Deterministic, simple, and free of raw unvalidated input: a compact form of the (already
+// validated by parseNow) timestamp, with characters that are awkward in identifiers/URLs
+// (":", ".") replaced. No hashing/crypto/random UUID subsystem.
+function compactTimestamp(date: Date): string {
+  return date.toISOString().replace(/[:.]/g, "-");
+}
+
+// Resolves canonical project identity. A caller-supplied preferredProjectId is normalized the
+// same conservative way as a name-derived slug (never trusted verbatim); if it normalizes to
+// nothing, falls back to the name-derived slug; if neither resolves, identity is left honestly
+// unresolved with a missingCritical note rather than manufacturing a random id.
+function resolveProjectId(
+  preferredProjectId: string | undefined,
+  projectName: string,
+  missingCritical: string[],
+): string {
+  if (preferredProjectId !== undefined) {
+    const normalized = slugify(preferredProjectId);
+    if (normalized) return normalized;
+  }
+  if (projectName) {
+    const nameSlug = slugify(projectName);
+    if (nameSlug) return nameSlug;
+  }
+  missingCritical.push(
+    "Project identifier could not be resolved from the intake; a PM-provided project ID is required.",
+  );
+  return "";
+}
+
 /**
  * Conservative pilot text synthesizer implementing the GenesisSynthesizer seam. Consumes first,
  * interrogates second: every field is either extracted from an explicit statement in `text` or
  * left honestly unresolved (empty string / undefined / omitted) with a concise assumption or
  * missingCritical note -- never fabricated. A real model can replace this function later without
- * changing the GenesisProposalV096 contract callers depend on.
+ * changing the GenesisProposalV096 contract callers depend on. Throws if `now` is not a valid
+ * timestamp (a system input, never project truth).
  */
 export const synthesizeGenesisField: GenesisSynthesizer = (
   text,
   now,
   preferredProjectId,
 ) => {
+  const nowDate = parseNow(now);
+  const year = nowDate.getUTCFullYear();
   const sentences = splitSentences(text);
-  const year = new Date(now).getUTCFullYear();
 
   const projectName = findProjectName(sentences);
   const { projectType, assumption: projectTypeAssumption } =
     findProjectType(sentences);
-  const budget = findBudget(sentences);
+  const { budget, assumption: budgetAssumption } = findBudget(sentences);
 
   const scopeItems = findScopeListItems(sentences);
   const existingIds = new Set(scopeItems.map((item) => item.id));
-  const activityStarts = findActivityStartDates(text, year, existingIds);
+  const { results: activityStarts, hedgeAssumptions } =
+    findActivityStartDates(sentences, year, existingIds);
   for (const { scopeItem } of activityStarts) {
     if (scopeItem) scopeItems.push(scopeItem);
   }
   const knownDates = activityStarts.map((result) => result.knownDate);
 
   const assumptions = findAssumptionSentences(sentences);
+  assumptions.push(...hedgeAssumptions);
   if (projectTypeAssumption) assumptions.push(projectTypeAssumption);
+  if (budgetAssumption) assumptions.push(budgetAssumption);
+  assumptions.push(
+    "Timezone defaulted to America/New_York for the pilot and needs PM confirmation.",
+  );
 
   const missingCritical: string[] = [];
   if (!projectName) {
@@ -344,17 +480,20 @@ export const synthesizeGenesisField: GenesisSynthesizer = (
     missingCritical.push("Activity durations need PM validation");
   }
 
-  const projectId =
-    preferredProjectId ?? (projectName ? slugify(projectName) : "");
+  const projectId = resolveProjectId(
+    preferredProjectId,
+    projectName,
+    missingCritical,
+  );
 
   return {
     schemaVersion: "0.9.6",
-    proposalId: `genesis-${projectId || "draft"}-${now}`,
+    proposalId: `genesis-${projectId || "draft"}-${compactTimestamp(nowDate)}`,
     projectId,
     projectName,
     projectType,
     timezone: DEFAULT_TIMEZONE,
-    forecastAnchorDate: now.slice(0, 10),
+    forecastAnchorDate: nowDate.toISOString().slice(0, 10),
     sourceText: text,
     baselineScope: scopeItems,
     knownDates,

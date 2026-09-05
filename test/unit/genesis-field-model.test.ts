@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { synthesizeGenesisField } from "../../src/worker/genesis-field-model";
+import {
+  validateGenesisProposal,
+  buildProjectFromGenesis,
+} from "../../src/operator/genesis";
 
 const NOW = "2026-09-04T20:00:00.000Z";
 
@@ -161,5 +165,289 @@ describe("synthesizeGenesisField: preferredProjectId", () => {
       "smith-v2",
     );
     expect(result.projectId).toBe("smith-v2");
+  });
+});
+
+describe("synthesizeGenesisField: hedged/forecast/planning language never becomes a commitment", () => {
+  const HEDGE_SENTENCES = [
+    "Demo may start September 14.",
+    "Demo might start September 14.",
+    "Demo could start September 14.",
+    "Demo should start September 14.",
+    "Demo is forecast for September 14.",
+    "Demo is expected to start September 14.",
+    "We hope to start Demo September 14.",
+    "We plan to start Demo September 14.",
+    "Demo could potentially start September 14.",
+  ];
+
+  it.each(HEDGE_SENTENCES)(
+    "creates no knownDate and fabricates no scope item for: %s",
+    (sentence) => {
+      const result = synthesizeGenesisField(
+        `Create X. Scope is flooring. ${sentence}`,
+        NOW,
+      );
+      expect(result.knownDates).toEqual([]);
+      expect(result.baselineScope).toHaveLength(1);
+      expect(result.baselineScope[0]?.id).toBe("flooring");
+    },
+  );
+
+  it.each(HEDGE_SENTENCES)(
+    "preserves the hedged statement as an assumption rather than discarding it: %s",
+    (sentence) => {
+      const result = synthesizeGenesisField(
+        `Create X. Scope is flooring. ${sentence}`,
+        NOW,
+      );
+      expect(result.assumptions.some((a) => a.includes("not committed"))).toBe(
+        true,
+      );
+    },
+  );
+
+  it("still creates a COMMITTED_START for an explicit direct start statement", () => {
+    const result = synthesizeGenesisField(
+      "Create X. Scope is flooring. Demo starts September 14.",
+      NOW,
+    );
+    expect(result.knownDates).toContainEqual(
+      expect.objectContaining({
+        subjectId: "demolition",
+        kind: "COMMITTED_START",
+        date: "2026-09-14",
+      }),
+    );
+  });
+
+  it("still creates a COMMITTED_START when the canonical activity name is used directly", () => {
+    const result = synthesizeGenesisField(
+      "Create X. Scope is flooring. Demolition starts September 14.",
+      NOW,
+    );
+    expect(result.knownDates).toContainEqual(
+      expect.objectContaining({
+        subjectId: "demolition",
+        kind: "COMMITTED_START",
+        date: "2026-09-14",
+      }),
+    );
+  });
+});
+
+describe("synthesizeGenesisField: preferredProjectId is normalized", () => {
+  it.each([
+    ["Smith Proj", "smith-proj"],
+    ["SMITH", "smith"],
+    ["a/b/c", "a-b-c"],
+  ])("normalizes preferredProjectId %s to %s", (input, expected) => {
+    const result = synthesizeGenesisField(
+      "Create Smith Residence. Scope is flooring.",
+      NOW,
+      input,
+    );
+    expect(result.projectId).toBe(expected);
+  });
+
+  it("normalizes a path-traversal-shaped id to a plain lowercase/hyphen slug", () => {
+    const result = synthesizeGenesisField(
+      "Create Smith Residence. Scope is flooring.",
+      NOW,
+      "smith/../etc",
+    );
+    expect(result.projectId).toMatch(/^[a-z0-9-]+$/);
+    expect(result.projectId).not.toContain("/");
+    expect(result.projectId).not.toContain(".");
+  });
+
+  it("normalizes __proto__ to a safe form, never the raw reserved string", () => {
+    const result = synthesizeGenesisField(
+      "Create Smith Residence. Scope is flooring.",
+      NOW,
+      "__proto__",
+    );
+    expect(result.projectId).not.toBe("__proto__");
+    expect(result.projectId).toMatch(/^[a-z0-9-]+$/);
+  });
+
+  it("falls back to the name-derived slug when preferredProjectId normalizes to empty", () => {
+    const result = synthesizeGenesisField(
+      "Create Smith Residence. Scope is flooring.",
+      NOW,
+      "!!!",
+    );
+    expect(result.projectId).toBe("smith-residence");
+  });
+
+  it("leaves identity unresolved with a missingCritical note when neither preferredProjectId nor name resolve", () => {
+    const result = synthesizeGenesisField("Scope is flooring.", NOW, "!!!");
+    expect(result.projectId).toBe("");
+    expect(
+      result.missingCritical.some((m) => /project identifier/i.test(m)),
+    ).toBe(true);
+  });
+});
+
+describe("synthesizeGenesisField: now must be a valid timestamp", () => {
+  it("throws a clear error for a malformed now instead of returning a malformed proposal", () => {
+    expect(() =>
+      synthesizeGenesisField("Create X. Scope is flooring.", "not-a-date"),
+    ).toThrow();
+  });
+
+  it("never emits a NaN-prefixed date because invalid now fails closed first", () => {
+    expect(() =>
+      synthesizeGenesisField(
+        "Create X. Scope is flooring. Demo starts September 14.",
+        "not-a-date",
+      ),
+    ).toThrow();
+  });
+
+  it("derives forecastAnchorDate from the parsed now, not raw string slicing", () => {
+    const result = synthesizeGenesisField("Create X. Scope is flooring.", NOW);
+    expect(result.forecastAnchorDate).toBe("2026-09-04");
+  });
+});
+
+describe("synthesizeGenesisField: calendar-invalid dates are never emitted", () => {
+  it("does not emit February 29 in a non-leap year, and notes it instead of discarding it", () => {
+    const result = synthesizeGenesisField(
+      "Create X. Scope is flooring. Demo starts February 29.",
+      NOW,
+    );
+    expect(result.knownDates).toEqual([]);
+    expect(result.assumptions.some((a) => /could not/i.test(a))).toBe(true);
+  });
+
+  it("accepts February 29 in a leap year", () => {
+    const result = synthesizeGenesisField(
+      "Create X. Scope is flooring. Demo starts February 29.",
+      "2028-01-01T00:00:00.000Z",
+    );
+    expect(result.knownDates).toContainEqual(
+      expect.objectContaining({ date: "2028-02-29" }),
+    );
+  });
+
+  it("does not emit February 30", () => {
+    const result = synthesizeGenesisField(
+      "Create X. Scope is flooring. Demo starts February 30.",
+      NOW,
+    );
+    expect(result.knownDates).toEqual([]);
+  });
+
+  it("does not emit December 32", () => {
+    const result = synthesizeGenesisField(
+      "Create X. Scope is flooring. Demo starts December 32.",
+      NOW,
+    );
+    expect(result.knownDates).toEqual([]);
+  });
+});
+
+describe("synthesizeGenesisField: negative budget never flips to positive", () => {
+  it("leaves budget unresolved for a negative amount instead of flipping the sign", () => {
+    const result = synthesizeGenesisField(
+      "Create X. Budget is -$50,000. Scope is flooring.",
+      NOW,
+    );
+    expect(result.budget).toBeUndefined();
+  });
+
+  it("still normalizes a valid positive dollar budget", () => {
+    const result = synthesizeGenesisField(
+      "Create X. Budget is $50,000. Scope is flooring.",
+      NOW,
+    );
+    expect(result.budget?.baseline).toBe(50000);
+  });
+
+  it("still normalizes a valid $400k budget", () => {
+    const result = synthesizeGenesisField(
+      "Create X. Budget is $400k. Scope is flooring.",
+      NOW,
+    );
+    expect(result.budget?.baseline).toBe(400000);
+  });
+});
+
+describe("synthesizeGenesisField: scope slug collisions never drop work", () => {
+  it("preserves two distinct phrases that collide after slugification with unique ids", () => {
+    const result = synthesizeGenesisField("Create X. Scope is a-b, a b.", NOW);
+    expect(result.baselineScope).toHaveLength(2);
+    const ids = result.baselineScope.map((item) => item.id);
+    expect(new Set(ids).size).toBe(2);
+    expect(result.baselineScope.map((item) => item.label)).toEqual(
+      expect.arrayContaining(["A-b", "A b"]),
+    );
+  });
+
+  it("still deduplicates an exactly-repeated phrase", () => {
+    const result = synthesizeGenesisField(
+      "Create X. Scope is kitchen, kitchen, flooring.",
+      NOW,
+    );
+    expect(result.baselineScope).toHaveLength(2);
+  });
+
+  it("produces a proposal that still passes validateGenesisProposal", () => {
+    const result = synthesizeGenesisField("Create X. Scope is a-b, a b.", NOW);
+    expect(validateGenesisProposal(result)).toEqual([]);
+  });
+});
+
+describe("synthesizeGenesisField: default timezone is disclosed, never silently assumed", () => {
+  it("adds an assumption naming America/New_York as a pilot default", () => {
+    const result = synthesizeGenesisField("Create X. Scope is flooring.", NOW);
+    expect(result.timezone).toBe("America/New_York");
+    expect(
+      result.assumptions.some(
+        (a) => /timezone/i.test(a) && a.includes("America/New_York"),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("synthesizeGenesisField: project type avoids substring false positives", () => {
+  it("does not classify 'in addition to' idiomatic text as an addition project", () => {
+    const result = synthesizeGenesisField(
+      "Create X. In addition to the kitchen, we will redo flooring. Scope is flooring.",
+      NOW,
+    );
+    expect(result.projectType).toBe("RESIDENTIAL");
+  });
+
+  it("still classifies an explicit addition project", () => {
+    const result = synthesizeGenesisField(
+      "Create X. This is an addition. Scope is flooring.",
+      NOW,
+    );
+    expect(result.projectType).toBe("RESIDENTIAL_ADDITION");
+  });
+});
+
+describe("synthesizeGenesisField: proposalId stays a safe, deterministic string", () => {
+  it("never contains NaN or raw whitespace/colons", () => {
+    const result = synthesizeGenesisField("Create X. Scope is flooring.", NOW);
+    expect(result.proposalId).not.toMatch(/NaN/);
+    expect(result.proposalId).not.toMatch(/\s/);
+    expect(result.proposalId).not.toContain(":");
+  });
+});
+
+describe("synthesizeGenesisField: full Task 1 compatibility for the Smith Residence intake", () => {
+  it("passes validateGenesisProposal with zero errors and builds a canonical project", () => {
+    const proposal = synthesizeGenesisField(SMITH_INTAKE, NOW);
+    const errors = validateGenesisProposal(proposal);
+    expect(errors).toEqual([]);
+    const model = buildProjectFromGenesis(proposal, NOW);
+    expect(model.name).toBe("Smith Residence");
+    expect(model.projectType).toBe("RESIDENTIAL_REMODEL");
+    expect(model.projectProfile?.budget?.baseline).toBe(310000);
+    expect(Object.keys(model.activities)).toHaveLength(7);
+    expect(model.activities.demolition).toBeDefined();
   });
 });
