@@ -52,6 +52,12 @@ import {
   buildFieldTestCallModel,
   fieldTestAliasesFor,
 } from "./conversation-field-model";
+import { synthesizeGenesisField } from "./genesis-field-model";
+import {
+  validateGenesisProposal,
+  buildProjectFromGenesis,
+} from "../operator/genesis";
+import type { GenesisProposalV096 } from "../operator/genesis";
 
 // Engine/admin-page compatibility version. Distinct from GET /health's own `version` field, which
 // buildHealthReport (src/worker/health.ts) now owns and reports as "0.9.5" with an additive
@@ -927,6 +933,110 @@ async function handle(request: Request, env: Env): Promise<Response> {
         publishable: false,
         stagingOnly: true,
         provenanceManifest: provenance,
+      },
+      201,
+    );
+  }
+
+  // Task 3 (Project Genesis, v0.9.6 design doc §"Project Genesis"/plan §"Task 3"): two global
+  // routes with no projectId in the URL. Preview is pure analysis (zero D1 writes -- it never
+  // touches `repo`). Commit is the one-time, revision-0 canonical creation path and reuses the
+  // exact same validateGenesisProposal/buildProjectFromGenesis/validateProjectModel/
+  // forecastInitial/repo.createProject machinery as the deboard-seed and :id/import routes above.
+  // No second creation engine, no direct D1 INSERT from this file.
+  if (
+    request.method === "POST" &&
+    parts.join("/") === "v1/projects/genesis/preview"
+  ) {
+    const raw = (await readJson(request)) as {
+      text?: unknown;
+      preferredProjectId?: unknown;
+    } | null;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      throw new HttpError(400, "genesis preview requires a JSON object body");
+    }
+    if (typeof raw.text !== "string" || raw.text.trim().length === 0) {
+      throw new HttpError(
+        400,
+        "genesis preview requires a non-empty text string",
+      );
+    }
+    if (
+      raw.preferredProjectId !== undefined &&
+      typeof raw.preferredProjectId !== "string"
+    ) {
+      throw new HttpError(
+        400,
+        "preferredProjectId must be a string when present",
+      );
+    }
+    const proposal = synthesizeGenesisField(
+      raw.text,
+      new Date().toISOString(),
+      raw.preferredProjectId,
+    );
+    return json({ schemaVersion: "0.9.6", preview: true, proposal });
+  }
+
+  if (
+    request.method === "POST" &&
+    parts.join("/") === "v1/projects/genesis/commit"
+  ) {
+    const raw = (await readJson(request)) as { proposal?: unknown } | null;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      throw new HttpError(400, "genesis commit requires a JSON object body");
+    }
+    const rawProposal = raw.proposal;
+    if (
+      !rawProposal ||
+      typeof rawProposal !== "object" ||
+      Array.isArray(rawProposal)
+    ) {
+      throw new HttpError(400, "genesis commit requires a proposal object");
+    }
+    // The raw HTTP boundary owns runtime discriminator validation for schemaVersion -- the
+    // approved resolution of Task 1's schemaVersion P2 deferral (see src/operator/genesis.ts).
+    // Never cast raw JSON straight to GenesisProposalV096 before this check.
+    const rawSchemaVersion = (rawProposal as Record<string, unknown>)
+      .schemaVersion;
+    if (rawSchemaVersion !== "0.9.6") {
+      throw new HttpError(
+        400,
+        `proposal.schemaVersion must be "0.9.6", received: ${JSON.stringify(rawSchemaVersion)}`,
+      );
+    }
+    const proposal = rawProposal as GenesisProposalV096;
+    const errors = validateGenesisProposal(proposal);
+    if (errors.length > 0) {
+      throw new HttpError(400, "Invalid Genesis proposal", { errors });
+    }
+    if (await repo.projectExists(proposal.projectId)) {
+      throw new HttpError(409, `Project ${proposal.projectId} already exists`);
+    }
+    const approvedAt = new Date().toISOString();
+    let model: ProjectModelV094;
+    try {
+      model = buildProjectFromGenesis(proposal, approvedAt);
+      validateProjectModel(model);
+    } catch (error) {
+      throw new HttpError(
+        400,
+        error instanceof Error ? error.message : "Invalid Genesis proposal",
+      );
+    }
+    const initial = forecastInitial(model, approvedAt, 1);
+    // Do not bypass oversight. A blocked commit remains WORKING, never force-labeled PUBLISHED --
+    // mirrors the existing deboard-v091/seed and :id/import handlers' own contract exactly.
+    await repo.createProject(model, initial.candidate, initial.oversight);
+    return json(
+      {
+        schemaVersion: "0.9.6",
+        projectId: model.projectId,
+        revision: model.revision,
+        forecastVersion: initial.candidate.version,
+        oversightDecision: initial.oversight.decision,
+        publishable: false,
+        stagingOnly: true,
       },
       201,
     );

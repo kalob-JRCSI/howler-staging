@@ -113,6 +113,16 @@ describe("release gate: no legacy mutation route (real repo)", () => {
     // constructs the same IntentV1 shape POST /v1/intents validates and executes it through the
     // exact same canonical executeWorkflow, via buildServerFieldVoiceBridge in src/worker/index.ts.
     "SEGMENTS(len=5){3=conversation,4=turn}",
+    // v0.9.6 Task 3 (Project Genesis): POST /v1/projects/genesis/preview is pure analysis (zero
+    // D1 writes -- it never constructs a repository instance) but is still a POST route guard, so
+    // the extractor (correctly) surfaces it here for deliberate acknowledgment.
+    "/v1/projects/genesis/preview",
+    // v0.9.6 Task 3 (Project Genesis): POST /v1/projects/genesis/commit is the one-time,
+    // revision-0 canonical creation path. Not a new mutation mechanism: it reuses
+    // validateGenesisProposal/buildProjectFromGenesis/validateProjectModel/forecastInitial/
+    // repo.createProject verbatim, the same machinery the deboard-v091/seed and :id/import routes
+    // above already use.
+    "/v1/projects/genesis/commit",
   ];
 
   it("extracts exactly the accepted mutation route set from the real source, nothing more, nothing less", () => {
