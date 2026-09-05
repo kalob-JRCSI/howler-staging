@@ -103,7 +103,10 @@ const MONTH_NAMES = [
 ];
 
 const MONTH_NAME_PATTERN = MONTH_NAMES.join("|");
-const MONTH_NAME_ANYWHERE_RE = new RegExp(`\\b(?:${MONTH_NAME_PATTERN})\\b`, "i");
+const MONTH_NAME_ANYWHERE_RE = new RegExp(
+  `\\b(?:${MONTH_NAME_PATTERN})\\b`,
+  "i",
+);
 
 const DEFAULT_TIMEZONE = "America/New_York";
 
@@ -619,8 +622,11 @@ export const synthesizeGenesisField: GenesisSynthesizer = (
 
   const scopeItems = findScopeListItems(sentences);
   const existingIds = new Set(scopeItems.map((item) => item.id));
-  const { results: activityStarts, hedgeAssumptions } =
-    findActivityStartDates(sentences, year, existingIds);
+  const { results: activityStarts, hedgeAssumptions } = findActivityStartDates(
+    sentences,
+    year,
+    existingIds,
+  );
   for (const { scopeItem } of activityStarts) {
     if (scopeItem) scopeItems.push(scopeItem);
   }

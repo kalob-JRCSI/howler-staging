@@ -741,7 +741,10 @@ describe("synthesizeGenesisField: explicit zero budget is preserved, not silentl
 
 describe("synthesizeGenesisField: Unicode scope phrases are never silently discarded", () => {
   it("preserves an unmatched Unicode phrase alongside a recognized ASCII phrase, with a safe fallback id", () => {
-    const result = synthesizeGenesisField("Create X. Scope is 東京, flooring.", NOW);
+    const result = synthesizeGenesisField(
+      "Create X. Scope is 東京, flooring.",
+      NOW,
+    );
     expect(result.baselineScope).toHaveLength(2);
     const labels = result.baselineScope.map((item) => item.label);
     expect(labels).toContain("東京");
@@ -752,7 +755,10 @@ describe("synthesizeGenesisField: Unicode scope phrases are never silently disca
   });
 
   it("gives distinct fallback ids to multiple Unicode-only phrases so they cannot collide", () => {
-    const result = synthesizeGenesisField("Create X. Scope is 東京, 大阪.", NOW);
+    const result = synthesizeGenesisField(
+      "Create X. Scope is 東京, 大阪.",
+      NOW,
+    );
     expect(result.baselineScope).toHaveLength(2);
     const ids = result.baselineScope.map((item) => item.id);
     expect(new Set(ids).size).toBe(2);
@@ -793,7 +799,11 @@ describe("synthesizeGenesisField: reserved preferredProjectId values are treated
   });
 
   it("leaves identity unresolved with a missingCritical note when a reserved id has no usable name to fall back to", () => {
-    const result = synthesizeGenesisField("Scope is flooring.", NOW, "constructor");
+    const result = synthesizeGenesisField(
+      "Scope is flooring.",
+      NOW,
+      "constructor",
+    );
     expect(result.projectId).toBe("");
     expect(
       result.missingCritical.some((m) => /project identifier/i.test(m)),
