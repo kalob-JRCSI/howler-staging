@@ -107,36 +107,76 @@ const MONTH_NAME_ANYWHERE_RE = new RegExp(`\\b(?:${MONTH_NAME_PATTERN})\\b`, "i"
 
 const DEFAULT_TIMEZONE = "America/New_York";
 
-// Checked ONLY against the captured subject of a direct-start match (never against the whole
-// sentence, and never against the separately-captured month), so a month named "May" can never be
-// mistaken for the modal word "may". Structural rejection, not a sentence-wide scan: this list can
-// grow without risk of colliding with a month name, because it only ever inspects text that was
-// captured as "the subject", which by construction ends right before the literal "start(s)" token
-// and therefore never contains the month/day tokens that follow it.
-const SUBJECT_UNCERTAINTY_RE = new RegExp(
-  [
-    "may",
-    "might",
-    "could",
-    "should",
-    "probably",
-    "maybe",
-    "tentatively",
-    "likely",
-    "possibly",
-    "potentially",
-    "expected\\s+to",
-    "supposed\\s+to",
-    "discussed\\s+to",
-    "planned\\s+to",
-    "planning\\s+to",
-    "forecast\\s+to",
-    "intended\\s+to",
-  ]
-    .map((w) => `\\b${w}\\b`)
-    .join("|"),
+// The pilot grammar for a direct COMMITTED_START is deliberately narrow: <SIMPLE ACTIVITY
+// SUBJECT> starts <Month> <Day>. A simple activity subject is a bare noun phrase (e.g. "Demo",
+// "Electrical service upgrade", "Cabinet install") -- it must never contain clause/auxiliary
+// language that turns the subject into a statement ("We expect Demo to...", "Demo is scheduled
+// to...", "Demo will..."). Checked ONLY against the captured subject of a direct-start match
+// (never against the whole sentence, and never against the separately-captured month), so a
+// month named "May" can never be mistaken for the modal word "may": this list can grow without
+// risk of colliding with a month name, because it only ever inspects text captured as "the
+// subject", which by construction ends right before the literal "start(s)" token.
+const CLAUSE_MARKER_RE = new RegExp(
+  "\\b(?:" +
+    [
+      "we",
+      "i",
+      "they",
+      "he",
+      "she",
+      "it",
+      "is",
+      "are",
+      "was",
+      "were",
+      "will",
+      "would",
+      "expect",
+      "expects",
+      "expected",
+      "hope",
+      "hoping",
+      "plan",
+      "planning",
+      "planned",
+      "intend",
+      "intending",
+      "intended",
+      "anticipate",
+      "anticipating",
+      "aim",
+      "aiming",
+      "scheduled",
+      "supposed",
+      "discussed",
+      "forecast",
+      "may",
+      "might",
+      "could",
+      "should",
+      "probably",
+      "maybe",
+      "tentatively",
+      "likely",
+      "possibly",
+      "potentially",
+    ].join("|") +
+    ")\\b",
   "i",
 );
+
+// A clause almost always ends in a dangling infinitive marker ("...to start"): the subject
+// capture for "We expect Demo to start September 14" is "We expect Demo to", which ends in a
+// standalone "to". Rejecting that shape catches constructions the fixed word list might miss,
+// without turning this into a general grammar parser.
+const ENDS_IN_STANDALONE_TO_RE = /\bto$/i;
+
+function isSimpleActivitySubject(subjectPhrase: string): boolean {
+  return (
+    !CLAUSE_MARKER_RE.test(subjectPhrase) &&
+    !ENDS_IN_STANDALONE_TO_RE.test(subjectPhrase)
+  );
+}
 
 // A separate, narrower marker list for constructions where the direct-start shape never matches at
 // all (e.g. "We hope to start Demo September 14" -- the month doesn't immediately follow "start").
@@ -255,30 +295,39 @@ function extractMoneyMatch(match: RegExpMatchArray): {
   return { isNegative, baseline };
 }
 
+// Ranks are evaluated across the WHOLE intake (all budget-mentioning sentences at once) before
+// ever falling to a lower-precedence rank -- not sentence-by-sentence. Two same-rank statements
+// with different amounts anywhere in the intake ("Budget is $400k. Budget is $425k.") are
+// genuinely ambiguous and must never be silently resolved to whichever sentence came first; a
+// higher-precedence phrase anywhere in the intake ("Total project budget is $425k.") correctly
+// overrides a lower-precedence figure regardless of sentence order.
 function findBudget(sentences: string[]): BudgetResult {
-  for (const raw of sentences) {
-    if (!/budget/i.test(raw)) continue;
-    for (const pattern of BUDGET_PATTERNS) {
-      const matches = [...raw.matchAll(pattern)];
-      if (matches.length === 0) continue;
-      const parsed = matches.map((m) => extractMoneyMatch(m));
-      if (parsed.some((p) => p.isNegative)) {
-        return {
-          assumption: `Unresolved as of intake: a negative budget amount could not be accepted as a baseline: ${stripTrailingPunctuation(raw)}.`,
-        };
-      }
-      const distinctBaselines = new Set(parsed.map((p) => p.baseline));
-      if (distinctBaselines.size > 1) {
-        return {
-          assumption: `Unresolved as of intake: multiple competing budget amounts were stated and could not be resolved to a single baseline: ${stripTrailingPunctuation(raw)}.`,
-        };
-      }
-      const baseline = parsed[0]?.baseline;
-      if (baseline === undefined || !Number.isFinite(baseline) || baseline < 0) {
-        continue;
-      }
-      return { budget: { baseline, currency: "USD" } };
+  const budgetSentences = sentences.filter((s) => /budget/i.test(s));
+  if (budgetSentences.length === 0) return {};
+
+  for (const pattern of BUDGET_PATTERNS) {
+    const parsed = budgetSentences.flatMap((raw) =>
+      [...raw.matchAll(pattern)].map((m) => extractMoneyMatch(m)),
+    );
+    if (parsed.length === 0) continue;
+    if (parsed.some((p) => p.isNegative)) {
+      return {
+        assumption:
+          "Unresolved as of intake: a negative budget amount could not be accepted as a baseline.",
+      };
     }
+    const distinctBaselines = new Set(parsed.map((p) => p.baseline));
+    if (distinctBaselines.size > 1) {
+      return {
+        assumption:
+          "Unresolved as of intake: multiple competing project budget amounts were stated and require PM resolution.",
+      };
+    }
+    const baseline = parsed[0]?.baseline;
+    if (baseline === undefined || !Number.isFinite(baseline) || baseline < 0) {
+      continue;
+    }
+    return { budget: { baseline, currency: "USD" } };
   }
   return {};
 }
@@ -428,8 +477,10 @@ function findActivityStartDates(
 
     // Structural rejection: checked only against the captured SUBJECT, never the whole
     // sentence and never the separately-captured month, so "Demo starts May 14" is unaffected
-    // while "Demo probably starts September 14" (subject captures "Demo probably") is rejected.
-    if (SUBJECT_UNCERTAINTY_RE.test(subjectPhrase)) {
+    // while "Demo probably starts September 14" (subject captures "Demo probably") and
+    // "We expect Demo to start September 14" (subject captures "We expect Demo to") are both
+    // rejected -- the subject is no longer a simple activity noun phrase, it's a clause.
+    if (!isSimpleActivitySubject(subjectPhrase)) {
       hedgeAssumptions.push(
         `Forecast/uncertain start noted (not committed): ${sentence}.`,
       );

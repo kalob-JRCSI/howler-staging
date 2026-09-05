@@ -283,6 +283,138 @@ describe("synthesizeGenesisField: uncertainty words swallowed into the subject a
   });
 });
 
+describe("synthesizeGenesisField: clause-shaped subjects never enter the direct-commit path", () => {
+  const CLAUSE_SHAPED_SENTENCES = [
+    "We expect Demo to start September 14.",
+    "We hope Demo will start September 14.",
+    "We plan Demo to start September 14.",
+    "Demo is scheduled to start September 14.",
+    "Demo will start September 14.",
+    "They expect Foundation to start May 1.",
+    "We anticipate Electrical to start October 3.",
+  ];
+
+  it.each(CLAUSE_SHAPED_SENTENCES)(
+    "creates no COMMITTED_START and no phantom activity for: %s",
+    (sentence) => {
+      const result = synthesizeGenesisField(
+        `Create X. Scope is flooring. ${sentence}`,
+        NOW,
+      );
+      expect(result.knownDates).toEqual([]);
+      expect(result.baselineScope).toHaveLength(1);
+      expect(result.baselineScope[0]?.id).toBe("flooring");
+    },
+  );
+
+  it.each(CLAUSE_SHAPED_SENTENCES)(
+    "preserves an uncertainty/review assumption rather than discarding it: %s",
+    (sentence) => {
+      const result = synthesizeGenesisField(
+        `Create X. Scope is flooring. ${sentence}`,
+        NOW,
+      );
+      expect(
+        result.assumptions.some(
+          (a) => a.includes("not committed") || /could not/i.test(a),
+        ),
+      ).toBe(true);
+    },
+  );
+});
+
+describe("synthesizeGenesisField: simple activity subjects still commit directly", () => {
+  it("commits Demo starts September 14", () => {
+    const result = synthesizeGenesisField(
+      "Create X. Scope is flooring. Demo starts September 14.",
+      NOW,
+    );
+    expect(result.knownDates).toEqual([
+      expect.objectContaining({
+        subjectId: "demolition",
+        kind: "COMMITTED_START",
+        date: "2026-09-14",
+      }),
+    ]);
+    expect(result.assumptions.some((a) => a.includes("not committed"))).toBe(
+      false,
+    );
+  });
+
+  it("commits Demolition starts September 14", () => {
+    const result = synthesizeGenesisField(
+      "Create X. Scope is flooring. Demolition starts September 14.",
+      NOW,
+    );
+    expect(result.knownDates).toEqual([
+      expect.objectContaining({
+        subjectId: "demolition",
+        kind: "COMMITTED_START",
+        date: "2026-09-14",
+      }),
+    ]);
+  });
+
+  it("commits Foundation starts May 1", () => {
+    const result = synthesizeGenesisField(
+      "Create X. Scope is flooring. Foundation starts May 1.",
+      NOW,
+    );
+    expect(result.knownDates).toEqual([
+      expect.objectContaining({
+        subjectId: "foundation",
+        kind: "COMMITTED_START",
+        date: "2026-05-01",
+      }),
+    ]);
+  });
+
+  it("commits Electrical service upgrade starts October 3", () => {
+    const result = synthesizeGenesisField(
+      "Create X. Scope is flooring. Electrical service upgrade starts October 3.",
+      NOW,
+    );
+    expect(result.knownDates).toEqual([
+      expect.objectContaining({
+        subjectId: "electrical-service-upgrade",
+        kind: "COMMITTED_START",
+        date: "2026-10-03",
+      }),
+    ]);
+  });
+
+  it("commits Cabinet install starts November 4", () => {
+    const result = synthesizeGenesisField(
+      "Create X. Scope is flooring. Cabinet install starts November 4.",
+      NOW,
+    );
+    expect(result.knownDates).toEqual([
+      expect.objectContaining({
+        subjectId: "cabinet-install",
+        kind: "COMMITTED_START",
+        date: "2026-11-04",
+      }),
+    ]);
+  });
+
+  it("commits Widget starts September 14 and creates its matching scope item", () => {
+    const result = synthesizeGenesisField(
+      "Create X. Scope is flooring. Widget starts September 14.",
+      NOW,
+    );
+    expect(result.knownDates).toEqual([
+      expect.objectContaining({
+        subjectId: "widget",
+        kind: "COMMITTED_START",
+        date: "2026-09-14",
+      }),
+    ]);
+    expect(result.baselineScope.map((item) => item.id)).toEqual(
+      expect.arrayContaining(["flooring", "widget"]),
+    );
+  });
+});
+
 describe("synthesizeGenesisField: month May must never be mistaken for modal may", () => {
   it("accepts an explicit direct start statement dated in May", () => {
     const result = synthesizeGenesisField(
@@ -666,5 +798,26 @@ describe("synthesizeGenesisField: reserved preferredProjectId values are treated
     expect(
       result.missingCritical.some((m) => /project identifier/i.test(m)),
     ).toBe(true);
+  });
+});
+
+describe("synthesizeGenesisField: conflicting budget statements across sentences require PM resolution", () => {
+  it("does not silently pick the first of two same-precedence conflicting budget statements", () => {
+    const result = synthesizeGenesisField(
+      "Budget is $400k. Budget is $425k.",
+      NOW,
+    );
+    expect(result.budget).toBeUndefined();
+    expect(
+      result.assumptions.some((a) => /competing/i.test(a) && /budget/i.test(a)),
+    ).toBe(true);
+  });
+
+  it("lets a higher-precedence explicit phrase resolve a lower-precedence conflicting figure", () => {
+    const result = synthesizeGenesisField(
+      "Budget is $400k. Total project budget is $425k.",
+      NOW,
+    );
+    expect(result.budget?.baseline).toBe(425000);
   });
 });
