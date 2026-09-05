@@ -6,6 +6,7 @@
 // buildProjectFromGenesis below, which returns a project the existing
 // D1HowlerRepository.createProject/forecastInitial pipeline can persist unchanged).
 
+import { assertISODate } from "../engine/date";
 import type {
   ActivityV094,
   DependencyV094,
@@ -80,8 +81,72 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+// Reuses the same canonical schedule-date rule the rest of the domain enforces
+// (src/engine/date.ts's assertISODate: strict YYYY-MM-DD, real calendar day) rather than the
+// far looser Date.parse, which also accepts human-readable strings like "September 14, 2026" and
+// silently normalizes invalid calendar dates like "2026-02-30".
 function isValidIsoDate(value: string): boolean {
-  return Number.isFinite(Date.parse(value));
+  try {
+    assertISODate(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Plain JS objects treat an own-property assignment keyed "__proto__" as a prototype
+// reassignment rather than a normal data property (obj["__proto__"] = x mutates obj's own
+// prototype instead of creating an entry), and "constructor"/"prototype" carry similar
+// footguns. A scope item id equal to one of these would silently vanish from
+// Object.keys(activities) once assigned in buildProjectFromGenesis. Reject them here, at the
+// single point every scope/known-date id is validated, rather than changing how the canonical
+// activities/dependencies/sources records are constructed everywhere.
+const RESERVED_IDENTIFIERS = new Set(["__proto__", "constructor", "prototype"]);
+
+function isSafeIdentifier(value: string): boolean {
+  return !RESERVED_IDENTIFIERS.has(value);
+}
+
+interface EffectiveDuration {
+  optimistic: number;
+  likely: number;
+  conservative: number;
+}
+
+function effectiveDuration(item: GenesisScopeItemV096): EffectiveDuration {
+  return {
+    optimistic: item.optimisticDays ?? PILOT_BASELINE_DURATION_DAYS.optimistic,
+    likely: item.likelyDays ?? PILOT_BASELINE_DURATION_DAYS.likely,
+    conservative:
+      item.conservativeDays ?? PILOT_BASELINE_DURATION_DAYS.conservative,
+  };
+}
+
+// Mirrors the exact invariant src/domain/validation.ts's validateProjectModel enforces on every
+// activity's duration (each estimate a positive integer, optimistic <= likely <= conservative) --
+// checked here, on the *effective* value (explicit or defaulted), so a malformed estimate is
+// reported as a clean Genesis proposal error instead of surfacing later as a generic
+// validateProjectModel throw.
+function validateEffectiveDuration(
+  item: GenesisScopeItemV096,
+  errors: string[],
+): void {
+  const duration = effectiveDuration(item);
+  for (const [label, value] of Object.entries(duration)) {
+    if (!Number.isInteger(value) || value < 1) {
+      errors.push(
+        `baselineScope item ${item.id} ${label} duration must be an integer >= 1`,
+      );
+    }
+  }
+  if (!(
+    duration.optimistic <= duration.likely &&
+    duration.likely <= duration.conservative
+  )) {
+    errors.push(
+      `baselineScope item ${item.id} duration estimates must satisfy optimistic <= likely <= conservative`,
+    );
+  }
 }
 
 /**
@@ -94,6 +159,13 @@ export function validateGenesisProposal(
 ): string[] {
   const errors: string[] = [];
 
+  // The type says schemaVersion can only ever be "0.9.6" -- a compile-time promise, not a
+  // runtime one. This validator is the actual boundary for untrusted JSON (Task 3's HTTP commit
+  // route), where a caller's `as GenesisProposalV096` cast does not make an arbitrary request
+  // body true.
+  if ((proposal.schemaVersion as string) !== "0.9.6") {
+    errors.push('schemaVersion must be "0.9.6"');
+  }
   if (!isNonEmptyString(proposal.proposalId)) {
     errors.push("proposalId is required");
   }
@@ -124,6 +196,10 @@ export function validateGenesisProposal(
       errors.push("baselineScope item is missing an id");
       continue;
     }
+    if (!isSafeIdentifier(item.id)) {
+      errors.push(`baselineScope item id is not allowed: ${item.id}`);
+      continue;
+    }
     if (scopeIds.has(item.id)) {
       errors.push(`baselineScope has a duplicate item id: ${item.id}`);
     }
@@ -134,8 +210,14 @@ export function validateGenesisProposal(
     if (!isNonEmptyString(item.phase)) {
       errors.push(`baselineScope item ${item.id} is missing a phase`);
     }
+    validateEffectiveDuration(item, errors);
   }
 
+  // Tracks each subject's committed dates so a duplicate kind (last-one-wins) or a
+  // start-after-finish contradiction is reported here, before buildProjectFromGenesis ever
+  // constructs a schedule lock validateProjectModel would separately reject.
+  const committedStartBySubject = new Map<string, string>();
+  const committedFinishBySubject = new Map<string, string>();
   for (const known of proposal.knownDates) {
     if (!scopeIds.has(known.subjectId)) {
       errors.push(
@@ -146,9 +228,31 @@ export function validateGenesisProposal(
       errors.push(
         `knownDates entry for ${known.subjectId} has an invalid date`,
       );
+    } else if (known.kind === "COMMITTED_START") {
+      if (committedStartBySubject.has(known.subjectId)) {
+        errors.push(
+          `knownDates has more than one COMMITTED_START for ${known.subjectId}`,
+        );
+      }
+      committedStartBySubject.set(known.subjectId, known.date);
+    } else if (known.kind === "COMMITTED_FINISH") {
+      if (committedFinishBySubject.has(known.subjectId)) {
+        errors.push(
+          `knownDates has more than one COMMITTED_FINISH for ${known.subjectId}`,
+        );
+      }
+      committedFinishBySubject.set(known.subjectId, known.date);
     }
     if (!isNonEmptyString(known.label)) {
       errors.push(`knownDates entry for ${known.subjectId} is missing a label`);
+    }
+  }
+  for (const [subjectId, start] of committedStartBySubject) {
+    const finish = committedFinishBySubject.get(subjectId);
+    if (finish !== undefined && finish < start) {
+      errors.push(
+        `knownDates for ${subjectId} has a committed finish before its committed start`,
+      );
     }
   }
 

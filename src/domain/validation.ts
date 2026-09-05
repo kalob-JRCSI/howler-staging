@@ -8,6 +8,17 @@ function assertUnitInterval(value: number, label: string): void {
   }
 }
 
+// Stricter than a bare Date.parse (which also accepts human-readable strings like
+// "September 14, 2026"), matching the exact shape every ISODateTime in this codebase is actually
+// produced in (`new Date().toISOString()`): a real calendar date, "T" separator, and a "Z" or
+// numeric UTC offset.
+const ISO_DATETIME_RE =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/;
+
+function isValidIsoDateTime(value: string): boolean {
+  return ISO_DATETIME_RE.test(value) && Number.isFinite(Date.parse(value));
+}
+
 const DURATION_LABELS = ["optimistic", "likely", "conservative"] as const;
 
 export function validateProjectModel(model: ProjectModelV094): void {
@@ -271,7 +282,7 @@ export function validateProjectModel(model: ProjectModelV094): void {
     }
     if (
       profile.genesisApprovedAt !== undefined &&
-      !Number.isFinite(Date.parse(profile.genesisApprovedAt))
+      !isValidIsoDateTime(profile.genesisApprovedAt)
     ) {
       throw new Error(
         "Project profile genesisApprovedAt must be a valid ISO date-time",
