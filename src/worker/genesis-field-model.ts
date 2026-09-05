@@ -107,11 +107,43 @@ const MONTH_NAME_ANYWHERE_RE = new RegExp(`\\b(?:${MONTH_NAME_PATTERN})\\b`, "i"
 
 const DEFAULT_TIMEZONE = "America/New_York";
 
-// Fixed list of modal/hedge/forecast markers. Any sentence containing one of these is treated as
-// uncertain/planning language, never a direct commitment -- a fixed keyword list, not a general
-// NLP classifier.
-const HEDGE_MARKER_RE =
-  /\b(?:may|might|could|should|hope|hoping|plan|planning|forecast|forecasted|expect|expects|expected|potentially|likely|possibly|aim|aiming|intend|intending|anticipate|anticipating)\b/i;
+// Checked ONLY against the captured subject of a direct-start match (never against the whole
+// sentence, and never against the separately-captured month), so a month named "May" can never be
+// mistaken for the modal word "may". Structural rejection, not a sentence-wide scan: this list can
+// grow without risk of colliding with a month name, because it only ever inspects text that was
+// captured as "the subject", which by construction ends right before the literal "start(s)" token
+// and therefore never contains the month/day tokens that follow it.
+const SUBJECT_UNCERTAINTY_RE = new RegExp(
+  [
+    "may",
+    "might",
+    "could",
+    "should",
+    "probably",
+    "maybe",
+    "tentatively",
+    "likely",
+    "possibly",
+    "potentially",
+    "expected\\s+to",
+    "supposed\\s+to",
+    "discussed\\s+to",
+    "planned\\s+to",
+    "planning\\s+to",
+    "forecast\\s+to",
+    "intended\\s+to",
+  ]
+    .map((w) => `\\b${w}\\b`)
+    .join("|"),
+  "i",
+);
+
+// A separate, narrower marker list for constructions where the direct-start shape never matches at
+// all (e.g. "We hope to start Demo September 14" -- the month doesn't immediately follow "start").
+// Deliberately excludes may/might/could/should/probably/etc: those are only ever relevant to the
+// subject-level check above, so this list can never misfire on a month name.
+const NON_DIRECT_FORECAST_RE =
+  /\b(?:hope|hoping|plan|planning|forecast|forecasted|expect|expects|expected|intend|intending|anticipate|anticipating|aim|aiming)\b/i;
 
 function splitSentences(text: string): string[] {
   return text
@@ -186,29 +218,67 @@ function parseMoneyAmount(digits: string, hasKSuffix: boolean): number {
   return hasKSuffix ? numeric * 1000 : numeric;
 }
 
-// Leading group (1) and inner group (2) both detect a "-" before the digits, whether it precedes
-// or follows an optional "$" (e.g. "-$50,000" or "$-50,000"), so a negative statement is always
-// recognized rather than silently losing its sign.
-const MONEY_RE = /(-)?\s*\$?\s*(-)?\s*([\d][\d,]*(?:\.\d+)?)\s*(k)?\b/i;
+// Each pattern shares the same 4-group scheme regardless of where the phrase falls relative to
+// the amount: (1) sign before "$", (2) sign after "$", (3) digits, (4) "k" suffix. Tried in
+// descending precedence so a sentence with multiple dollar figures binds to the phrase that
+// actually names the project budget, never just "the first number in the sentence".
+const TOTAL_PROJECT_BUDGET_RE =
+  /total\s+project\s+budget\s*(?:is|:)?\s*(-)?\s*\$?\s*(-)?\s*([\d][\d,]*(?:\.\d+)?)\s*(k)?/gi;
+const TOTAL_BUDGET_RE =
+  /total\s+budget\s*(?:is|:)?\s*(-)?\s*\$?\s*(-)?\s*([\d][\d,]*(?:\.\d+)?)\s*(k)?/gi;
+const PROJECT_BUDGET_RE =
+  /project\s+budget\s*(?:is|:)?\s*(-)?\s*\$?\s*(-)?\s*([\d][\d,]*(?:\.\d+)?)\s*(k)?/gi;
+const BUDGET_IS_RE =
+  /\bbudget\s*(?:is|:)\s*(-)?\s*\$?\s*(-)?\s*([\d][\d,]*(?:\.\d+)?)\s*(k)?/gi;
+const AMOUNT_BUDGET_RE =
+  /(-)?\s*\$?\s*(-)?\s*([\d][\d,]*(?:\.\d+)?)\s*(k)?\s*budget\b/gi;
+
+const BUDGET_PATTERNS = [
+  TOTAL_PROJECT_BUDGET_RE,
+  TOTAL_BUDGET_RE,
+  PROJECT_BUDGET_RE,
+  BUDGET_IS_RE,
+  AMOUNT_BUDGET_RE,
+];
 
 interface BudgetResult {
   budget?: { baseline: number; currency: string };
   assumption?: string;
 }
 
+function extractMoneyMatch(match: RegExpMatchArray): {
+  isNegative: boolean;
+  baseline: number;
+} {
+  const isNegative = Boolean(match[1] || match[2]);
+  const baseline = parseMoneyAmount(match[3] ?? "", Boolean(match[4]));
+  return { isNegative, baseline };
+}
+
 function findBudget(sentences: string[]): BudgetResult {
   for (const raw of sentences) {
     if (!/budget/i.test(raw)) continue;
-    const match = MONEY_RE.exec(raw);
-    if (!match?.[3]) continue;
-    if (match[1] || match[2]) {
-      return {
-        assumption: `Unresolved as of intake: a negative budget amount could not be accepted as a baseline: ${stripTrailingPunctuation(raw)}.`,
-      };
+    for (const pattern of BUDGET_PATTERNS) {
+      const matches = [...raw.matchAll(pattern)];
+      if (matches.length === 0) continue;
+      const parsed = matches.map((m) => extractMoneyMatch(m));
+      if (parsed.some((p) => p.isNegative)) {
+        return {
+          assumption: `Unresolved as of intake: a negative budget amount could not be accepted as a baseline: ${stripTrailingPunctuation(raw)}.`,
+        };
+      }
+      const distinctBaselines = new Set(parsed.map((p) => p.baseline));
+      if (distinctBaselines.size > 1) {
+        return {
+          assumption: `Unresolved as of intake: multiple competing budget amounts were stated and could not be resolved to a single baseline: ${stripTrailingPunctuation(raw)}.`,
+        };
+      }
+      const baseline = parsed[0]?.baseline;
+      if (baseline === undefined || !Number.isFinite(baseline) || baseline < 0) {
+        continue;
+      }
+      return { budget: { baseline, currency: "USD" } };
     }
-    const baseline = parseMoneyAmount(match[3], Boolean(match[4]));
-    if (!Number.isFinite(baseline) || baseline <= 0) continue;
-    return { budget: { baseline, currency: "USD" } };
   }
   return {};
 }
@@ -233,8 +303,13 @@ function findScopeListItems(sentences: string[]): GenesisScopeItemV096[] {
   // slugify to the same id are NOT deduped here -- see usedIds below.
   const seenPhrases = new Set<string>();
   // Guarantees unique ids: two distinct phrases that collide after slugification (e.g. "a-b"
-  // and "a b") each keep their own scope item, via a numeric suffix on the second.
+  // and "a b") each keep their own scope item, via a numeric suffix on the second. Also
+  // guarantees a Unicode-only phrase (which slugify strips to "") gets a deterministic
+  // "scope-item-N" fallback id instead of silently vanishing -- no transliteration/Unicode
+  // normalization dependency, just a plain incrementing counter fed through the same
+  // uniqueness logic as everything else.
   const usedIds = new Set<string>();
+  let fallbackCounter = 0;
   for (const raw of sentences) {
     const scopeMatch = /^scope\s*(?:is|:)\s*(.+)$/i.exec(
       stripTrailingPunctuation(raw),
@@ -244,8 +319,11 @@ function findScopeListItems(sentences: string[]): GenesisScopeItemV096[] {
       const normalizedPhrase = phrase.trim().toLowerCase();
       if (!normalizedPhrase || seenPhrases.has(normalizedPhrase)) continue;
       seenPhrases.add(normalizedPhrase);
-      const baseId = slugify(phrase);
-      if (!baseId) continue;
+      let baseId = slugify(phrase);
+      if (!baseId) {
+        fallbackCounter += 1;
+        baseId = `scope-item-${String(fallbackCounter)}`;
+      }
       const id = uniqueScopeId(baseId, usedIds);
       usedIds.add(id);
       items.push({
@@ -291,11 +369,22 @@ function tryBuildIsoDate(
 
 // Anchored to the entire (punctuation-stripped) sentence: a conservative, sentence-level parser
 // rather than a broad regex search across the whole text. This intentionally only recognizes the
-// simplest direct-commitment shape ("<subject> start(s) <Month> <Day>"); anything with additional
-// words (hedges, modals, forecast/planning language) fails this match and is handled by the
-// hedge-language branch in findActivityStartDates instead of being coerced into a commitment.
+// simplest direct-commitment shape ("<subject> start(s) <Month> <Day>"); the month and day are
+// captured in their OWN groups, separate from the subject, so a month name can never end up being
+// checked as if it were part of the subject. Anything with additional trailing words (an explicit
+// year, extra clauses) fails this exact-length match and is instead picked up by
+// LOOSE_ACTIVITY_START_RE below.
 const DIRECT_ACTIVITY_START_RE = new RegExp(
   `^([A-Za-z][A-Za-z ]{0,40}?)\\s+starts?\\s+(${MONTH_NAME_PATTERN})\\s+(\\d{1,2})(?:st|nd|rd|th)?$`,
+  "i",
+);
+
+// Unanchored version of the same shape, used ONLY to detect that a sentence looks like a
+// start-date statement in a form the pilot parser doesn't fully support (e.g. a trailing explicit
+// year: "Demo starts September 14, 2026."). Never used to construct a knownDate -- only to avoid
+// silently discarding the user's statement without a review note.
+const LOOSE_ACTIVITY_START_RE = new RegExp(
+  `\\b([A-Za-z][A-Za-z ]{0,40}?)\\s+starts?\\s+(${MONTH_NAME_PATTERN})\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b`,
   "i",
 );
 
@@ -309,12 +398,22 @@ function findActivityStartDates(
 
   for (const raw of sentences) {
     const sentence = stripTrailingPunctuation(raw);
+    const directMatch = DIRECT_ACTIVITY_START_RE.exec(sentence);
 
-    // Hedged/forecast/planning language must never become a commitment, and must never
-    // fabricate a scope item from a modal word swallowed into the subject. Only note it as an
-    // assumption when the sentence actually looks like a date-related statement.
-    if (HEDGE_MARKER_RE.test(sentence)) {
-      if (MONTH_NAME_ANYWHERE_RE.test(sentence)) {
+    if (!directMatch) {
+      // Doesn't fit the exact single-clause shape. Either it's a date-shaped statement in an
+      // unsupported format (trailing year, extra clause) -- surfaced as a parser-limitation
+      // note -- or it's a non-direct forecast/planning construction ("we hope to start...",
+      // "...is forecast for...") that never matched a start-date shape at all. Either way: no
+      // commitment, no phantom scope item.
+      if (LOOSE_ACTIVITY_START_RE.test(sentence)) {
+        hedgeAssumptions.push(
+          `Unresolved as of intake: stated start date could not be accepted by the pilot date parser: ${sentence}.`,
+        );
+      } else if (
+        NON_DIRECT_FORECAST_RE.test(sentence) &&
+        MONTH_NAME_ANYWHERE_RE.test(sentence)
+      ) {
         hedgeAssumptions.push(
           `Forecast/uncertain start noted (not committed): ${sentence}.`,
         );
@@ -322,12 +421,20 @@ function findActivityStartDates(
       continue;
     }
 
-    const match = DIRECT_ACTIVITY_START_RE.exec(sentence);
-    if (!match) continue;
-    const subjectPhrase = match[1]?.trim();
-    const monthName = match[2];
-    const day = match[3];
+    const subjectPhrase = directMatch[1]?.trim();
+    const monthName = directMatch[2];
+    const day = directMatch[3];
     if (!subjectPhrase || !monthName || !day) continue;
+
+    // Structural rejection: checked only against the captured SUBJECT, never the whole
+    // sentence and never the separately-captured month, so "Demo starts May 14" is unaffected
+    // while "Demo probably starts September 14" (subject captures "Demo probably") is rejected.
+    if (SUBJECT_UNCERTAINTY_RE.test(subjectPhrase)) {
+      hedgeAssumptions.push(
+        `Forecast/uncertain start noted (not committed): ${sentence}.`,
+      );
+      continue;
+    }
 
     const dictionaryEntry = SCOPE_DICTIONARY[subjectPhrase.toLowerCase()];
     const subjectId = dictionaryEntry?.id ?? slugify(subjectPhrase);
@@ -408,10 +515,16 @@ function compactTimestamp(date: Date): string {
   return date.toISOString().replace(/[:.]/g, "-");
 }
 
+// Mirrors Task 1's own reserved-identifier guard (src/operator/genesis.ts's RESERVED_IDENTIFIERS)
+// for this one field, without importing a shared subsystem: a caller-supplied preferredProjectId
+// must never resolve to one of these, even after normalization.
+const RESERVED_PROJECT_IDS = new Set(["__proto__", "prototype", "constructor"]);
+
 // Resolves canonical project identity. A caller-supplied preferredProjectId is normalized the
 // same conservative way as a name-derived slug (never trusted verbatim); if it normalizes to
-// nothing, falls back to the name-derived slug; if neither resolves, identity is left honestly
-// unresolved with a missingCritical note rather than manufacturing a random id.
+// nothing OR to a reserved identifier, falls back to the name-derived slug; if neither resolves,
+// identity is left honestly unresolved with a missingCritical note rather than manufacturing a
+// random id.
 function resolveProjectId(
   preferredProjectId: string | undefined,
   projectName: string,
@@ -419,7 +532,7 @@ function resolveProjectId(
 ): string {
   if (preferredProjectId !== undefined) {
     const normalized = slugify(preferredProjectId);
-    if (normalized) return normalized;
+    if (normalized && !RESERVED_PROJECT_IDS.has(normalized)) return normalized;
   }
   if (projectName) {
     const nameSlug = slugify(projectName);
