@@ -2872,22 +2872,29 @@ export function fieldDashboardClientScript(
     /** Rebuilds baselineScope from the edited textarea, one visible line per scope item -- every
      * non-empty line survives (never silently discarded). Two-pass identity resolution, never
      * plain label-text equality alone (which broke identity the moment a label was edited) and
-     * never plain position alone (which mis-attributes a REMOVED row's identity onto whichever
-     * row now happens to shift into its old line number):
+     * never "pair the Nth remaining unmatched line with the Nth remaining unmatched original"
+     * (which can silently transfer an existing canonical id -- and its knownDate -- onto a
+     * completely unrelated new row the moment a removal and an addition happen in the same edit;
+     * see the breaker review's "remove + add" / "remove + rename" cases):
      *
      * Pass 1 claims by exact (case-insensitive) label match against still-unclaimed original
      * items, in line order -- an unrenamed or merely reordered row always keeps its own identity
-     * this way, which is what lets Pass 2 correctly tell "renamed" apart from "removed".
+     * this way, regardless of position.
      *
-     * Pass 2 pairs each STILL-unmatched line, in order, with whichever original item is still
-     * unclaimed, in order -- this is what preserves a renamed row's stable id (its new text
-     * matches no original label, so it falls through to here and claims the one original item
-     * pass 1 couldn't otherwise place).
+     * Pass 2 is positional fallback by TRUE original array index (line N can only ever claim
+     * original[N], never "whichever original happens to still be unclaimed") -- and it is only
+     * even attempted when the total row count is UNCHANGED (`lines.length === original.length`).
+     * The moment a row is added or removed, every later original index shifts relative to the
+     * edited line indexes, so "line N" no longer reliably corresponds to "original row N"; this is
+     * exactly the ambiguity that must never be guessed. Only a pure in-place edit -- same count,
+     * nothing added or removed -- is safe to resolve this way, which is what lets a genuinely
+     * renamed row (its new text matches no original label) keep its original id while a more
+     * ambiguous compound edit (a simultaneous add/remove, or remove/rename) is left unresolved and
+     * correctly surfaces as a removal instead.
      *
-     * Any original item left unclaimed after both passes is reported in `removed`: no line in the
-     * edited textarea refers to it any more, by either its original label or positional fallback.
-     * A line beyond what any original item (claimed or fallback) can cover is genuinely NEW and
-     * gets its own deterministic slug id. */
+     * Any original item left unclaimed after both passes is reported in `removed`. A line beyond
+     * what any original item (claimed or fallback) can cover is genuinely NEW and gets its own
+     * deterministic slug id. */
     function rebuildScope(
       rawText: string,
       original: GenesisScopeItemLike[],
@@ -2897,33 +2904,39 @@ export function fieldDashboardClientScript(
         .map((line) => line.trim())
         .filter((line) => line.length > 0);
 
-      const unclaimed = [...original];
+      const claimedOriginalIndexes = new Set<number>();
       const claimedByLine = new Map<number, GenesisScopeItemLike>();
-      lines.forEach((label, index) => {
-        const matchIndex = unclaimed.findIndex(
-          (item) => item.label.toLowerCase() === label.toLowerCase(),
+
+      lines.forEach((label, lineIndex) => {
+        const originalIndex = original.findIndex(
+          (item, idx) =>
+            !claimedOriginalIndexes.has(idx) &&
+            item.label.toLowerCase() === label.toLowerCase(),
         );
-        if (matchIndex === -1) return;
-        const [matched] = unclaimed.splice(matchIndex, 1);
-        if (matched) claimedByLine.set(index, matched);
+        if (originalIndex === -1) return;
+        claimedOriginalIndexes.add(originalIndex);
+        const item = original[originalIndex];
+        if (item) claimedByLine.set(lineIndex, item);
       });
 
-      const unmatchedLineIndexes = lines
-        .map((_, index) => index)
-        .filter((index) => !claimedByLine.has(index));
-      unmatchedLineIndexes.forEach((lineIndex, fallbackIndex) => {
-        const fallback = unclaimed[fallbackIndex];
-        if (fallback) claimedByLine.set(lineIndex, fallback);
-      });
-      const consumedByFallback = Math.min(
-        unmatchedLineIndexes.length,
-        unclaimed.length,
+      if (lines.length === original.length) {
+        lines.forEach((_, lineIndex) => {
+          if (claimedByLine.has(lineIndex)) return;
+          if (claimedOriginalIndexes.has(lineIndex)) return;
+          const candidate = original[lineIndex];
+          if (!candidate) return;
+          claimedOriginalIndexes.add(lineIndex);
+          claimedByLine.set(lineIndex, candidate);
+        });
+      }
+
+      const removed = original.filter(
+        (_, idx) => !claimedOriginalIndexes.has(idx),
       );
-      const removed = unclaimed.slice(consumedByFallback);
 
       const usedIds = new Set<string>();
-      const scope = lines.map((label, index) => {
-        const claimed = claimedByLine.get(index);
+      const scope = lines.map((label, lineIndex) => {
+        const claimed = claimedByLine.get(lineIndex);
         let baseId = claimed ? claimed.id : genesisSlugify(label);
         if (!baseId) baseId = "scope-item";
         let id = baseId;

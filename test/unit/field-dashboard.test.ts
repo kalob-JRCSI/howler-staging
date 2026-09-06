@@ -2363,6 +2363,112 @@ describe("Project Genesis: editing the proposal before approval", () => {
     ) as string[];
     expect(tracked).not.toContain("smith-residence");
   });
+
+  // Breaker review, residual P1: rebuildScope's positional fallback previously paired "the Nth
+  // remaining unmatched line" with "the Nth remaining unmatched original" in whatever order they
+  // happened to survive pass 1 -- that can silently transfer an existing canonical id (and its
+  // knownDate) onto a completely unrelated new row. SAMPLE_PROPOSAL's baseline is:
+  //   Demolition [id=demolition, has the committed knownDate]
+  //   Kitchen    [id=kitchen, no knownDate]
+  // Cases A-E below exercise the exact adversarial matrix the review specified.
+
+  it("A (remove + add): removing the knownDate-bound row while adding an unrelated new row never transfers its id, and blocks approval", async () => {
+    const h = mount(genesisRespond(), { trackedProjects: [] });
+    el(h, "new-project-open").trigger("click");
+    el(h, "genesis-text").value = "Create Smith Residence.";
+    el(h, "genesis-analyze").trigger("click");
+    await flush();
+
+    // Demolition removed entirely; Electrical is a brand new row. Kitchen survives unchanged.
+    el(h, "genesis-scope").value = "Kitchen\nElectrical";
+    el(h, "genesis-approve").trigger("click");
+    await flush();
+
+    // If Electrical had incorrectly inherited id "demolition", the system would believe
+    // Demolition survived (under a new label) and would NOT block -- so blocking here is itself
+    // the proof the id was never transferred, not merely a side effect of it.
+    const commitCalls = h.fetchCalls.filter(
+      (c) => c.path === "/v1/projects/genesis/commit",
+    );
+    expect(commitCalls).toHaveLength(0);
+    expect(el(h, "genesis-review").hidden).toBe(false);
+    expect(el(h, "genesis-status").textContent).toContain("Demolition");
+  });
+
+  it("B (remove + rename): removing one row while renaming the other never migrates the removed row's date onto the renamed text, and blocks approval", async () => {
+    const h = mount(genesisRespond(), { trackedProjects: [] });
+    el(h, "new-project-open").trigger("click");
+    el(h, "genesis-text").value = "Create Smith Residence.";
+    el(h, "genesis-analyze").trigger("click");
+    await flush();
+
+    // Demolition's line is deleted entirely; the sole surviving line ("Kitchen cabinetry") is
+    // Kitchen renamed. This is a genuinely compound, ambiguous edit -- the system must never
+    // guess that "Kitchen cabinetry" is actually "Demolition" renamed merely because it is the
+    // only unmatched line left.
+    el(h, "genesis-scope").value = "Kitchen cabinetry";
+    el(h, "genesis-approve").trigger("click");
+    await flush();
+
+    const commitCalls = h.fetchCalls.filter(
+      (c) => c.path === "/v1/projects/genesis/commit",
+    );
+    expect(commitCalls).toHaveLength(0);
+    expect(el(h, "genesis-review").hidden).toBe(false);
+    expect(el(h, "genesis-status").textContent).toContain("Demolition");
+  });
+
+  it("D (pure addition): adding a new row alongside two unchanged rows leaves both original ids untouched and commits successfully", async () => {
+    const h = mount(genesisRespond(), { trackedProjects: [] });
+    el(h, "new-project-open").trigger("click");
+    el(h, "genesis-text").value = "Create Smith Residence.";
+    el(h, "genesis-analyze").trigger("click");
+    await flush();
+
+    el(h, "genesis-scope").value = "Demolition\nKitchen\nElectrical";
+    el(h, "genesis-approve").trigger("click");
+    await flush();
+
+    const call = h.fetchCalls.find(
+      (c) => c.path === "/v1/projects/genesis/commit",
+    );
+    expect(call).toBeDefined();
+    const proposal = callBody(call).proposal as Record<string, unknown>;
+    const scope = proposal.baselineScope as { id: string; label: string }[];
+    expect(scope.find((s) => s.label === "Demolition")?.id).toBe("demolition");
+    expect(scope.find((s) => s.label === "Kitchen")?.id).toBe("kitchen");
+    const electrical = scope.find((s) => s.label === "Electrical");
+    expect(electrical?.id).toBeDefined();
+    expect(electrical?.id).not.toBe("demolition");
+    expect(electrical?.id).not.toBe("kitchen");
+    const knownDates = proposal.knownDates as { subjectId: string }[];
+    expect(knownDates.some((d) => d.subjectId === "demolition")).toBe(true);
+  });
+
+  it("E (remove an unbound item): removing the row with no knownDate proceeds normally, and the surviving row keeps its own id rather than inheriting the removed one", async () => {
+    const h = mount(genesisRespond(), { trackedProjects: [] });
+    el(h, "new-project-open").trigger("click");
+    el(h, "genesis-text").value = "Create Smith Residence.";
+    el(h, "genesis-analyze").trigger("click");
+    await flush();
+
+    // Kitchen (no knownDate) is removed entirely; Demolition survives unchanged.
+    el(h, "genesis-scope").value = "Demolition";
+    el(h, "genesis-approve").trigger("click");
+    await flush();
+
+    const call = h.fetchCalls.find(
+      (c) => c.path === "/v1/projects/genesis/commit",
+    );
+    expect(call).toBeDefined();
+    const proposal = callBody(call).proposal as Record<string, unknown>;
+    const scope = proposal.baselineScope as { id: string; label: string }[];
+    expect(scope).toHaveLength(1);
+    expect(scope[0]?.id).toBe("demolition");
+    expect(scope[0]?.label).toBe("Demolition");
+    const knownDates = proposal.knownDates as { subjectId: string }[];
+    expect(knownDates.some((d) => d.subjectId === "demolition")).toBe(true);
+  });
 });
 
 describe("Project Genesis: successful commit", () => {
