@@ -62,26 +62,31 @@ function jsonBody(response: Response): Promise<unknown> {
   return response.json();
 }
 
+async function tableCount(table: string): Promise<number> {
+  const row = await env.HOWLER_DB.prepare(
+    `SELECT COUNT(*) AS n FROM ${table}`,
+  ).first<{ n: number }>();
+  return row?.n ?? -1;
+}
+
 async function tableCounts(): Promise<{
   projects: number;
   project_events: number;
   forecast_snapshots: number;
   oversight_reviews: number;
 }> {
+  // A literal 4-element array of explicit promise expressions (not `.map()` over a plain
+  // string array) is what lets TypeScript infer Promise.all's result as a fixed-length tuple
+  // here -- `.map()` over `string[]` would return a general `Promise<number>[]`, and
+  // destructuring a general array under noUncheckedIndexedAccess widens each element to
+  // `number | undefined` even though every branch always resolves to a real number.
   const [projects, project_events, forecast_snapshots, oversight_reviews] =
-    await Promise.all(
-      [
-        "projects",
-        "project_events",
-        "forecast_snapshots",
-        "oversight_reviews",
-      ].map(async (table) => {
-        const row = await env.HOWLER_DB.prepare(
-          `SELECT COUNT(*) AS n FROM ${table}`,
-        ).first<{ n: number }>();
-        return row?.n ?? -1;
-      }),
-    );
+    await Promise.all([
+      tableCount("projects"),
+      tableCount("project_events"),
+      tableCount("forecast_snapshots"),
+      tableCount("oversight_reviews"),
+    ]);
   return { projects, project_events, forecast_snapshots, oversight_reviews };
 }
 
