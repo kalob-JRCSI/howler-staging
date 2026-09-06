@@ -181,10 +181,16 @@ describe("required field experience", () => {
   });
 });
 
-// Phase 2 (product integration), requirement #2/#3: the visible project workspace (the Index
-// Cards, and the admin key needed to load them) must never live inside the collapsed "Admin &
-// diagnostics" drawer -- a normal pilot user must not need to know or use it for normal operation.
-describe("Phase 2: project workspace and admin key are outside the collapsed admin drawer", () => {
+// Phase 2 (product integration) / Task 6: the real product-facing project workspace is now the
+// selected Index Card, not the legacy detailed projectCardHtml cards -- so it, and the admin key
+// needed to load it, must never live inside the collapsed "Admin & diagnostics" drawer. Task 6
+// completes the architecture Task 5 deliberately deferred: the legacy projects-container (still
+// useful diagnostics -- query controls, evidence preview/apply tooling, old conversational
+// test/control panels, raw/technical information) now moves fully INSIDE that same drawer, reachable
+// but no longer sitting as primary page content. This narrow update was pre-authorized by the Task 6
+// interim review specifically for this superseded-parent-location assertion; every other contract in
+// this file (security/CSP/admin-key handling) is unchanged.
+describe("Phase 2/Task 6: the selected Index Card and admin key are outside the collapsed admin drawer; legacy diagnostics now live inside it", () => {
   function drawerInnerHtml(html: string): string {
     const match = /<details class="ph-admin-drawer">([\s\S]*?)<\/details>/.exec(
       html,
@@ -201,11 +207,19 @@ describe("Phase 2: project workspace and admin key are outside the collapsed adm
     expect(html).toMatch(/id="admin-key"[^>]*type="password"/);
   });
 
-  it("the projects-container (Index Cards) is not inside the admin drawer", async () => {
+  it("index-card-container (the real selected product Index Card) is not inside the admin drawer", async () => {
     const html = await (
       await worker.fetch(plainRequest("GET", "/admin/field"), env)
     ).text();
-    expect(drawerInnerHtml(html)).not.toContain('id="projects-container"');
+    expect(drawerInnerHtml(html)).not.toContain('id="index-card-container"');
+    expect(html).toContain('id="index-card-container"');
+  });
+
+  it("the legacy projects-container (detailed diagnostic/evidence cards) now lives inside the admin drawer", async () => {
+    const html = await (
+      await worker.fetch(plainRequest("GET", "/admin/field"), env)
+    ).text();
+    expect(drawerInnerHtml(html)).toContain('id="projects-container"');
     expect(html).toContain('id="projects-container"');
   });
 
@@ -217,6 +231,16 @@ describe("Phase 2: project workspace and admin key are outside the collapsed adm
     expect(drawer).toContain('id="new-project-id"');
     expect(drawer).toContain('id="add-project"');
     expect(drawer).toContain('id="refresh-all"');
+  });
+
+  it("legacy evidence/diagnostic controls remain reachable under the admin drawer (query/evidence submission targets are unchanged)", async () => {
+    const html = await (
+      await worker.fetch(plainRequest("GET", "/admin/field"), env)
+    ).text();
+    const drawer = drawerInnerHtml(html);
+    expect(drawer).toContain('id="projects-container"');
+    expect(html).toContain("/v1/intents");
+    expect(html).toContain("fieldDashboardClientScript");
   });
 });
 

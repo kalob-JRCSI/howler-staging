@@ -2264,6 +2264,15 @@ export function fieldDashboardClientScript(
    * render it; those remain available, unchanged, in Full project diagnostics below. */
   const summaryByProject = new Map<string, ProjectSummaryLike>();
   let selectedProjectId: string | null = null;
+  /** Task 6: the most recent Index Card update/clarification/confirmation message per project,
+   * kept separately from the DOM because renderIndexCard rebuilds the whole card's innerHTML on
+   * every summary refresh and every project-selection change -- without this, a message shown the
+   * instant a conversational turn resolves would vanish the moment anything else caused a
+   * re-render, even while the same project stayed selected. Never a second conversation-state
+   * store: this only remembers text already produced by describeConversationalTurn/the confirm
+   * outcome switch below, exactly like pendingConversationalConfirmation remembers confirmation
+   * state across the same re-renders. */
+  const indexCardMessageByProject = new Map<string, string>();
 
   function formatMoney(value: number): string {
     return `$${Math.round(value).toLocaleString("en-US")}`;
@@ -2334,29 +2343,260 @@ export function fieldDashboardClientScript(
     </button>`;
   }
 
-  /** Compact selected-project Index Card shell -- Task 6 replaces/enriches this container with
-   * the full project operating environment. Task 5 only needs exactly one selected project
-   * represented here, never every tracked project rendered at once. */
-  function indexCardHtml(summary: ProjectSummaryLike): string {
-    const scopeItems = summary.scope
-      .map((item) => `<li>${escapeHtml(item.label)}</li>`)
-      .join("");
-    return `<div class="ph-index-card">
-      <h2>${escapeHtml(summary.projectName || summary.projectId)}</h2>
-      <div class="ph-index-card-grid">
-        <div><span class="ph-portfolio-card-label">Project Integrity</span><div>${String(summary.integrity.score)} / 100 ${EM_DASH} ${escapeHtml(summary.integrity.condition)}</div></div>
-        <div><span class="ph-portfolio-card-label">Progress</span><div>${String(summary.progressPercent)}%</div></div>
-        <div><span class="ph-portfolio-card-label">Budget</span><div>${escapeHtml(budgetLineHtml(summary.budget))}</div></div>
-        <div><span class="ph-portfolio-card-label">Primary exposure</span><div>${escapeHtml(summary.primaryExposure)}</div></div>
-        <div><span class="ph-portfolio-card-label">Next movement</span><div>${escapeHtml(summary.nextMovement)}</div></div>
-        <div><span class="ph-portfolio-card-label">Projected completion</span><div>${escapeHtml(formatDate(summary.projectedCompletion))}</div></div>
+  /** Merges committed + forecast for DISPLAY ONLY (never mutates either list), one row per
+   * activity, tagged with a truthful Committed/Forecast badge sourced strictly from which list the
+   * item actually came from -- Task 4's own computeSchedule already guarantees an activity is
+   * never in both lists, so no dedup logic is needed here. Sorted deterministically by each row's
+   * own first meaningful date (startDate if known, else finishDate) -- undated rows sort last. */
+  function scheduleRowHtml(
+    item: ProjectScheduleItemLike,
+    basis: "COMMITTED" | "FORECAST",
+  ): { html: string; sortKey: string } {
+    const dateText =
+      item.startDate && item.finishDate && item.startDate !== item.finishDate
+        ? `${formatDate(item.startDate)} → ${formatDate(item.finishDate)}`
+        : formatDate(item.startDate ?? item.finishDate);
+    const badgeClass = basis === "COMMITTED" ? "ic-committed" : "ic-forecast";
+    const badgeLabel = basis === "COMMITTED" ? "Committed" : "Forecast";
+    return {
+      html: `<li class="ic-schedule-row">
+        <span class="ic-schedule-date">${escapeHtml(dateText)}</span>
+        <span class="ic-schedule-name">${escapeHtml(item.activityName)}</span>
+        <span class="ic-schedule-phase">${escapeHtml(item.phase)}</span>
+        <span class="ic-date-kind ${badgeClass}">${badgeLabel}</span>
+      </li>`,
+      sortKey: item.startDate ?? item.finishDate ?? "9999-99-99",
+    };
+  }
+
+  function scheduleSectionHtml(
+    schedule: ProjectSummaryLike["schedule"],
+  ): string {
+    const rows = schedule.committed
+      .map((item) => scheduleRowHtml(item, "COMMITTED"))
+      .concat(
+        schedule.forecast.map((item) => scheduleRowHtml(item, "FORECAST")),
+      );
+    if (rows.length === 0) {
+      return `<p class="ph-empty">No schedule or forecast activity recorded.</p>`;
+    }
+    rows.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+    return `<ul class="ic-schedule-list">${rows.map((row) => row.html).join("")}</ul>`;
+  }
+
+  /**
+   * The selected project's Index Card -- the project operating environment (Task 6). Reads
+   * summary.integrity/progressPercent/budget/schedule/scope literally (never recomputes or
+   * patches them locally); the natural-language update surface below submits through the exact
+   * same submitConversationalTurn/submitConversationalConfirm the legacy diagnostic cards use --
+   * never a second mutation implementation. Only ever one selected project's Index Card exists;
+   * selecting a different project fully replaces this container's content (see renderIndexCard).
+   */
+  function scopeListHtml(scope: ProjectSummaryLike["scope"]): string {
+    return scope.length
+      ? scope.map((item) => `<li>${escapeHtml(item.label)}</li>`).join("")
+      : `<li class="none">No baseline scope recorded.</li>`;
+  }
+
+  function indexCardHtml(
+    summary: ProjectSummaryLike,
+    projectId: string,
+  ): string {
+    const integrityPercent = Math.max(
+      0,
+      Math.min(100, summary.integrity.score),
+    );
+    const progressPercent = Math.max(0, Math.min(100, summary.progressPercent));
+    // Persisted across re-renders (see indexCardMessageByProject above) so an update result
+    // already shown to the user survives a summary refresh or an unrelated re-render while this
+    // same project stays selected. ic-confirm's own visibility/text is applied separately by
+    // renderIndexCard (via setIndexCardConfirmVisible) for the same reason renderIndexCard also
+    // separately populates ic-schedule/ic-scope -- see its comment there.
+    const persistedMessage = indexCardMessageByProject.get(projectId) ?? "";
+    return `<div class="ic-shell">
+      <div class="ic-head">
+        <h2 id="ic-project-name">${escapeHtml(summary.projectName || summary.projectId)}</h2>
+        <div class="ic-head-metrics">
+          <div class="ic-metric">
+            <span class="ph-portfolio-card-label">Project Integrity</span>
+            <div id="ic-integrity">${String(summary.integrity.score)} / 100 ${EM_DASH} ${escapeHtml(summary.integrity.condition)}</div>
+            <span class="ph-meter"><span class="ph-meter-fill" style="width:${String(integrityPercent)}%"></span></span>
+            <div id="ic-integrity-driver" class="ic-driver">${escapeHtml(summary.integrity.primaryDriver)}</div>
+          </div>
+          <div class="ic-metric">
+            <span class="ph-portfolio-card-label">Progress</span>
+            <div id="ic-progress">${String(summary.progressPercent)}%</div>
+            <span class="ph-meter"><span class="ph-meter-fill" style="width:${String(progressPercent)}%"></span></span>
+          </div>
+        </div>
       </div>
-      ${
-        scopeItems
-          ? `<div class="ph-index-card-scope"><span class="ph-portfolio-card-label">Baseline scope</span><ul>${scopeItems}</ul></div>`
-          : ""
-      }
+      <div class="ic-section ic-brief-grid">
+        <div>
+          <h3>Budget</h3>
+          <div id="ic-budget">${escapeHtml(budgetLineHtml(summary.budget))}</div>
+        </div>
+        <div class="ic-brief">
+          <h3>Howler brief</h3>
+          <div id="ic-exposure">Exposure: ${escapeHtml(summary.primaryExposure)}</div>
+          <div id="ic-next-movement">Next: ${escapeHtml(summary.nextMovement)}</div>
+          <div id="ic-completion">Completion: ${escapeHtml(formatDate(summary.projectedCompletion))}</div>
+        </div>
+      </div>
+      <div class="ic-section">
+        <h3>Schedule &amp; Forecast</h3>
+        <div id="ic-schedule"></div>
+      </div>
+      <div class="ic-section">
+        <h3>Baseline scope</h3>
+        <ul id="ic-scope"></ul>
+      </div>
+      <div class="ic-section ic-update">
+        <h3>Tell Howler what changed</h3>
+        <div class="ic-update-row">
+          <input id="ic-update-input" type="text" placeholder="e.g. Demolition started today">
+          <button type="button" id="ic-update-send">Update</button>
+        </div>
+        <div id="ic-update-result" aria-live="polite">${escapeHtml(persistedMessage)}</div>
+        <div id="ic-confirm" hidden>
+          <p id="ic-confirm-text"></p>
+          <button type="button" id="ic-confirm-yes">Confirm</button>
+          <button type="button" id="ic-confirm-no">Reject</button>
+        </div>
+      </div>
     </div>`;
+  }
+
+  /** Every Index Card DOM write (message text, confirm visibility) funnels through here/
+   * setIndexCardConfirmVisible so wrong-project safety is enforced in exactly one place: a live,
+   * write-time check that `projectId` is still the *currently selected* project, never a check
+   * performed once at request-start. renderIndexCard fully rebuilds the container on every summary
+   * refresh and every selection change, so an element captured earlier may already be a detached
+   * orphan by the time a promise resolves -- looking the element up fresh here, gated by the live
+   * selection check, is what actually stops project A's late response from ever overwriting
+   * project B's visible card once B is selected. The persisted-message map is always updated
+   * regardless of selection, so switching back to A later still shows A's own last result. */
+  function setIndexCardMessage(projectId: string, text: string): void {
+    indexCardMessageByProject.set(projectId, text);
+    if (selectedProjectId !== projectId) return;
+    const el = tryGetElementById("ic-update-result");
+    if (el) el.textContent = text;
+  }
+
+  function setIndexCardConfirmVisible(
+    projectId: string,
+    message: string | null,
+  ): void {
+    if (selectedProjectId !== projectId) return;
+    const confirmBlock = tryGetElementById("ic-confirm");
+    if (!confirmBlock) return;
+    if (message === null) {
+      confirmBlock.hidden = true;
+      return;
+    }
+    const confirmText = tryGetElementById("ic-confirm-text");
+    if (confirmText) confirmText.textContent = message;
+    confirmBlock.hidden = false;
+  }
+
+  /** Renders one conversational turn's safe summary onto the Index Card -- clarification,
+   * awaiting-confirmation (reveals ic-confirm), or a plain result line. Reuses
+   * describeConversationalTurn and pendingConversationalConfirmation exactly like the legacy
+   * per-project diagnostic cards' renderConversationTurn; this is not a second interpretation of
+   * the server's response. */
+  function renderConversationResultOnIndexCard(
+    projectId: string,
+    result: ConversationalTurnResultSummary,
+  ): void {
+    const described = describeConversationalTurn(result);
+    setIndexCardMessage(projectId, described.message);
+    if (described.pendingConfirmation) {
+      pendingConversationalConfirmation.set(
+        projectId,
+        described.pendingConfirmation,
+      );
+      setIndexCardConfirmVisible(projectId, described.message);
+    } else {
+      pendingConversationalConfirmation.delete(projectId);
+      setIndexCardConfirmVisible(projectId, null);
+    }
+  }
+
+  /** The Index Card's Update button -- calls the exact same submitConversationalTurn the legacy
+   * per-project conversation panel and the voice bridge both use. No second mutation path, no
+   * local claim compilation, no direct POST, no local summary patching. */
+  function runIndexCardUpdate(projectId: string): void {
+    const inputEl = tryGetElementById("ic-update-input");
+    if (!inputEl) return;
+    const text = inputEl.value.trim();
+    if (!text || conversationInFlight.has(projectId)) return;
+    setIndexCardMessage(projectId, "Working…");
+    submitConversationalTurn(projectId, text)
+      .then((response) => {
+        if (selectedProjectId === projectId) {
+          const liveInput = tryGetElementById("ic-update-input");
+          if (liveInput) liveInput.value = "";
+        }
+        renderConversationResultOnIndexCard(projectId, response.result);
+      })
+      .catch((error: unknown) => {
+        setIndexCardMessage(projectId, `Error: ${describeError(error)}`);
+      });
+  }
+
+  /** Confirm/Reject -- calls the exact same submitConversationalConfirm the legacy per-project
+   * conversation panel uses, reusing the same pendingConversationalConfirmation entry (never a
+   * second pending-confirmation object). Only a genuinely APPLIED outcome refreshes canonical
+   * state (refreshSummary re-renders both the Penthouse portfolio card and, if this project is
+   * still selected, this same Index Card) -- CANCELLED/BLOCKED/FAILED/INTERRUPTED/NOOP each show
+   * their own honest message and never claim a mutation happened. */
+  function runIndexCardConfirm(projectId: string, affirmative: boolean): void {
+    const confirmation = pendingConversationalConfirmation.get(projectId);
+    if (!confirmation) return;
+    setIndexCardMessage(projectId, "Working…");
+    submitConversationalConfirm(projectId, confirmation, affirmative)
+      .then((outcome) => {
+        pendingConversationalConfirmation.delete(projectId);
+        let message: string;
+        switch (outcome.outcome) {
+          case "APPLIED":
+            message = "Recorded.";
+            break;
+          case "CANCELLED":
+            message = "Cancelled.";
+            break;
+          case "BLOCKED":
+            message = "Not recorded — it touches an unresolved block.";
+            break;
+          case "FAILED":
+            message = "Not recorded — the apply failed.";
+            break;
+          case "INTERRUPTED":
+            message = "Not recorded — the apply was interrupted.";
+            break;
+          default:
+            message = "That update is no longer pending.";
+        }
+        setIndexCardMessage(projectId, message);
+        setIndexCardConfirmVisible(projectId, null);
+        if (outcome.outcome === "APPLIED") {
+          void refreshSummary(projectId);
+        }
+      })
+      .catch((error: unknown) => {
+        setIndexCardMessage(projectId, `Error: ${describeError(error)}`);
+      });
+  }
+
+  function wireIndexCard(projectId: string): void {
+    tryGetElementById("ic-update-send")?.addEventListener("click", () => {
+      runIndexCardUpdate(projectId);
+    });
+    tryGetElementById("ic-confirm-yes")?.addEventListener("click", () => {
+      runIndexCardConfirm(projectId, true);
+    });
+    tryGetElementById("ic-confirm-no")?.addEventListener("click", () => {
+      runIndexCardConfirm(projectId, false);
+    });
   }
 
   function renderIndexCard(): void {
@@ -2367,9 +2607,29 @@ export function fieldDashboardClientScript(
       return;
     }
     const summary = summaryByProject.get(selectedProjectId);
-    container.innerHTML = summary
-      ? indexCardHtml(summary)
-      : `<p class="ph-empty">Loading ${escapeHtml(selectedProjectId)}${EM_DASH}</p>`;
+    if (!summary) {
+      container.innerHTML = `<p class="ph-empty">Loading ${escapeHtml(selectedProjectId)}${EM_DASH}</p>`;
+      return;
+    }
+    container.innerHTML = indexCardHtml(summary, selectedProjectId);
+    // Populated separately from indexCardHtml's own string, exactly like the legacy per-project
+    // card's renderActiveWorkflows populates its own nested container after the outer card render
+    // -- a directly-set innerHTML always carries its full nested markup, while text merely
+    // embedded inside a larger already-set innerHTML string does not.
+    const scheduleEl = tryGetElementById("ic-schedule");
+    if (scheduleEl)
+      scheduleEl.innerHTML = scheduleSectionHtml(summary.schedule);
+    const scopeEl = tryGetElementById("ic-scope");
+    if (scopeEl) scopeEl.innerHTML = scopeListHtml(summary.scope);
+    const pendingConfirmation =
+      pendingConversationalConfirmation.get(selectedProjectId);
+    setIndexCardConfirmVisible(
+      selectedProjectId,
+      pendingConfirmation
+        ? (indexCardMessageByProject.get(selectedProjectId) ?? "")
+        : null,
+    );
+    wireIndexCard(selectedProjectId);
   }
 
   function selectProject(projectId: string): void {
@@ -3117,18 +3377,55 @@ ${PENTHOUSE_TOKENS}
     .ph-alert-project { display: block; font-weight: 600; color: var(--hw-ink); margin-bottom: 2px; }
     .ph-alert-detail { color: var(--hw-ink-muted); word-break: break-word; }
 
-    /* One selected project's compact Index Card -- Task 6 replaces/enriches this container. */
+    /* One selected project's Index Card -- the project operating environment (Task 6). Compact
+       section dividers, restrained 11-14px support type, no nested cards-within-cards. */
     .ph-index-card-section { margin-bottom: 18px; }
     #index-card-container { border: 1px solid var(--hw-border); border-radius: var(--hw-radius); padding: 16px 18px; }
-    .ph-index-card h2 { margin: 0 0 10px; font-size: 16px; }
-    .ph-index-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px 16px; }
-    .ph-index-card-grid .ph-portfolio-card-label { display: block; margin-bottom: 3px; }
-    .ph-index-card-scope { margin-top: 12px; }
-    .ph-index-card-scope ul { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
-    .ph-index-card-scope li {
+    .ic-shell { display: flex; flex-direction: column; gap: 14px; }
+    .ic-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
+    .ic-head h2 { margin: 0; font-size: 16px; }
+    .ic-head-metrics { display: flex; gap: 22px; flex-wrap: wrap; }
+    .ic-metric { display: flex; flex-direction: column; gap: 3px; min-width: 150px; }
+    .ic-metric > div:not(.ic-driver) { font-size: 13px; color: var(--hw-ink); }
+    .ic-driver { font-size: 11px; color: var(--hw-ink-muted); max-width: 30ch; }
+    .ic-section { border-top: 1px solid var(--hw-border); padding-top: 12px; }
+    .ic-section h3 {
+      margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+      color: var(--hw-ink-faint);
+    }
+    .ic-brief-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px 16px; }
+    .ic-brief > div { font-size: 12px; color: var(--hw-ink-muted); margin-bottom: 3px; }
+    #ic-budget { font-size: 13px; color: var(--hw-ink); }
+    .ic-schedule-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+    .ic-schedule-row { display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--hw-ink); }
+    .ic-schedule-date { flex: 0 0 auto; min-width: 64px; color: var(--hw-ink-muted); }
+    .ic-schedule-name { flex: 1 1 auto; }
+    .ic-schedule-phase {
+      flex: 0 0 auto; font-size: 10px; color: var(--hw-ink-faint); text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .ic-date-kind {
+      flex: 0 0 auto; font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em;
+      padding: 2px 8px; border-radius: 999px;
+    }
+    .ic-date-kind.ic-committed { background: var(--hw-ok-bg); color: var(--hw-ok); }
+    .ic-date-kind.ic-forecast { background: var(--hw-surface-raised); color: var(--hw-ink-muted); }
+    #ic-scope { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+    #ic-scope li {
       font-size: 11px; padding: 3px 8px; border-radius: 999px; background: var(--hw-surface-raised);
       color: var(--hw-ink-muted);
     }
+    #ic-scope li.none { background: none; padding: 0; color: var(--hw-ink-faint); }
+    .ic-update-row { display: flex; gap: 10px; }
+    .ic-update-row input { flex: 1 1 auto; }
+    .ic-update-row button { flex: 0 0 auto; }
+    #ic-update-result { font-size: 12px; color: var(--hw-ink-muted); margin-top: 8px; min-height: 14px; }
+    #ic-confirm {
+      margin-top: 8px; padding: 10px 12px; border: 1px solid var(--hw-warn);
+      background: var(--hw-warn-bg); border-radius: var(--hw-radius-sm);
+    }
+    #ic-confirm p { margin: 0 0 8px; font-size: 12px; color: var(--hw-warn); }
+    #ic-confirm button { margin-right: 8px; }
 
     .ph-connect { margin-bottom: 18px; }
     .ph-connect input { max-width: 420px; }
@@ -3159,6 +3456,11 @@ ${PENTHOUSE_TOKENS}
       }
       .ph-command { font-size: 22px; }
       .ph-header { align-items: flex-start; }
+      /* Schedule rows: a long activity name wrapping to a second line still leaves the date and
+         Committed/Forecast badge visually anchored on their own line at this width -- the phase
+         label is the least essential of the four and is dropped first to keep the row legible. */
+      .ic-schedule-phase { display: none; }
+      .ic-schedule-row { flex-wrap: wrap; }
     }
     .project-head {
       display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
@@ -3256,11 +3558,11 @@ ${PENTHOUSE_TOKENS}
       <button id="add-project" type="button">Add project</button>
       <button id="refresh-all" type="button">Refresh all</button>
     </section>
-  </details>
 
-  <p class="ph-diagnostics-heading" id="ph-workspace-heading">Full project diagnostics</p>
-  <p class="hw-sub">Read-only forecast/health/recovery intelligence and explicit staging-only evidence actions, one project at a time -- advanced/troubleshooting use, not the primary portfolio view. This page submits requests only; all forecasting, revision, retry, and mutation logic runs server-side.</p>
-  <div id="projects-container"></div>
+    <p class="ph-diagnostics-heading" id="ph-workspace-heading">Full project diagnostics</p>
+    <p class="hw-sub">Read-only forecast/health/recovery intelligence and explicit staging-only evidence actions, one project at a time -- advanced/troubleshooting use, not the primary portfolio view. This page submits requests only; all forecasting, revision, retry, and mutation logic runs server-side.</p>
+    <div id="projects-container"></div>
+  </details>
 </main>
 <script>
 ${createSubmissionKernel.toString()}

@@ -2646,7 +2646,11 @@ describe("Penthouse static shell: portfolio map requirements", () => {
     expect(genesisTextareaMatch?.[0].toLowerCase()).not.toContain("json");
   });
 
-  it("legacy evidence/admin controls remain available only under Admin & diagnostics", () => {
+  // Task 6: the Index Card is now the product-facing project experience, so the legacy detailed
+  // diagnostic cards (projectCardHtml/projects-container) move fully inside Admin & diagnostics --
+  // reachable, but no longer sitting as primary page content. admin-key stays outside the drawer
+  // (the selected Index Card and the automatic portfolio-summary load both still need it).
+  it("legacy evidence/admin controls remain available only under Admin & diagnostics, with the legacy detailed cards now inside it too", () => {
     const match = /<details class="ph-admin-drawer">([\s\S]*?)<\/details>/.exec(
       html,
     );
@@ -2655,8 +2659,17 @@ describe("Penthouse static shell: portfolio map requirements", () => {
     expect(drawer).toContain('id="new-project-id"');
     expect(drawer).toContain('id="add-project"');
     expect(drawer).toContain('id="refresh-all"');
+    expect(drawer).toContain('id="projects-container"');
     expect(drawer).not.toContain('id="admin-key"');
-    expect(drawer).not.toContain('id="projects-container"');
+  });
+
+  it("the selected Index Card container stays outside the collapsed Admin & diagnostics drawer", () => {
+    const match = /<details class="ph-admin-drawer">([\s\S]*?)<\/details>/.exec(
+      html,
+    );
+    const drawer = match?.[1] ?? "";
+    expect(drawer).not.toContain('id="index-card-container"');
+    expect(html).toContain('id="index-card-container"');
   });
 
   it("the staging/shadow banner remains", () => {
@@ -2672,5 +2685,465 @@ describe("Penthouse static shell: portfolio map requirements", () => {
 
   it("has a selected Index Card container, ready for one selected project rather than all-project rendering", () => {
     expect(html).toContain('id="index-card-container"');
+  });
+});
+
+// ==================================================================================================
+// v0.9.6 Task 6: the selected Index Card becomes the project operating environment -- overview,
+// budget, schedule/forecast, baseline scope, and a natural-language update surface that reuses the
+// exact existing submitConversationalTurn/submitConversationalConfirm path (never a second
+// mutation implementation).
+// ==================================================================================================
+
+const RICH_INDEX_CARD_SUMMARY = {
+  projectId: "proj-a",
+  projectName: "Carver Residence",
+  progressPercent: 72,
+  integrity: {
+    score: 82,
+    condition: "Stable, exposed",
+    primaryDriver: "Schedule exposure from an unresolved permit.",
+  },
+  budget: {
+    baseline: 400000,
+    spent: 284000,
+    remaining: 116000,
+    spentPercent: 71,
+  },
+  primaryExposure: "Electrical final not confirmed.",
+  nextMovement: "Granite install then Electrical finals.",
+  projectedCompletion: "2026-09-20",
+  schedule: {
+    committed: [
+      {
+        activityId: "granite",
+        activityName: "Granite install",
+        phase: "Finishes",
+        startDate: "2026-09-09",
+        finishDate: null,
+        basis: "COMMITTED",
+      },
+    ],
+    forecast: [
+      {
+        activityId: "electrical",
+        activityName: "Electrical finals",
+        phase: "MEP Finals",
+        startDate: "2026-09-10",
+        finishDate: null,
+        basis: "FORECAST",
+      },
+      {
+        activityId: "glass",
+        activityName: "Glass template",
+        phase: "Envelope",
+        startDate: "2026-09-12",
+        finishDate: null,
+        basis: "FORECAST",
+      },
+    ],
+  },
+  scope: [
+    { id: "kitchen", label: "Kitchen", phase: "Interior" },
+    { id: "primary-bath", label: "Primary bath", phase: "Interior" },
+  ],
+};
+
+function richIndexCardRespond(): Respond {
+  return genesisRespond({
+    summary: { ok: true, status: 200, bodyText: json(RICH_INDEX_CARD_SUMMARY) },
+  });
+}
+
+function loadAndSelect(h: Harness, rowId = "ph-row-0"): Promise<void> {
+  el(h, "admin-key").value = "key-1";
+  el(h, "admin-key").trigger("change");
+  return flush().then(() => {
+    el(h, rowId).trigger("click");
+    return flush();
+  });
+}
+
+describe("Index Card structure (Task 6): the selected project's operating environment", () => {
+  it("renders every required Index Card anchor for the selected project, from Task 4's summary literally", async () => {
+    const h = mount(richIndexCardRespond(), { trackedProjects: ["proj-a"] });
+    await loadAndSelect(h);
+
+    expect(el(h, "ic-project-name").textContent).toBe("Carver Residence");
+    expect(el(h, "ic-integrity").textContent).toContain("82");
+    expect(el(h, "ic-integrity").textContent).toContain("Stable, exposed");
+    expect(el(h, "ic-integrity-driver").textContent).toContain("permit");
+    expect(el(h, "ic-progress").textContent).toContain("72%");
+    expect(el(h, "ic-budget").textContent).toContain("284,000");
+    expect(el(h, "ic-budget").textContent).toContain("116,000");
+    expect(el(h, "ic-exposure").textContent).toContain("Electrical final");
+    expect(el(h, "ic-next-movement").textContent).toContain("Granite install");
+    expect(el(h, "ic-completion").textContent.length).toBeGreaterThan(0);
+    const scheduleHtml = el(h, "ic-schedule").innerHTML;
+    expect(scheduleHtml).toContain("Granite install");
+    expect(scheduleHtml).toContain("Committed");
+    expect(scheduleHtml).toContain("Electrical finals");
+    expect(scheduleHtml).toContain("Glass template");
+    expect(scheduleHtml).toContain("Forecast");
+    const scopeHtml = el(h, "ic-scope").innerHTML;
+    expect(scopeHtml).toContain("Kitchen");
+    expect(scopeHtml).toContain("Primary bath");
+    expect(() => el(h, "ic-update-input")).not.toThrow();
+    expect(() => el(h, "ic-update-send")).not.toThrow();
+    expect(el(h, "ic-update-result").textContent).toBe("");
+    expect(el(h, "ic-confirm").hidden).toBe(true);
+    expect(() => el(h, "ic-confirm-text")).not.toThrow();
+    expect(() => el(h, "ic-confirm-yes")).not.toThrow();
+    expect(() => el(h, "ic-confirm-no")).not.toThrow();
+  });
+
+  it("never labels a committed-only activity as Forecast, or a forecast-only activity as Committed", async () => {
+    const h = mount(richIndexCardRespond(), { trackedProjects: ["proj-a"] });
+    await loadAndSelect(h);
+    const html = el(h, "ic-schedule").innerHTML;
+    const graniteRow = /Granite install[\s\S]*?<\/li>/.exec(html)?.[0] ?? "";
+    expect(graniteRow).toContain("Committed");
+    expect(graniteRow).not.toContain("Forecast");
+    const electricalRow =
+      /Electrical finals[\s\S]*?<\/li>/.exec(html)?.[0] ?? "";
+    expect(electricalRow).toContain("Forecast");
+    expect(electricalRow).not.toContain("Committed");
+  });
+
+  it("renders a truthful empty state when no schedule/forecast activity exists", async () => {
+    const h = mount(genesisRespond(), { trackedProjects: ["proj-a"] });
+    await loadAndSelect(h);
+    expect(el(h, "ic-schedule").innerHTML.toLowerCase()).toContain(
+      "no schedule",
+    );
+  });
+
+  it("escapes HTML-like content in every rendered Index Card field (XSS regression)", async () => {
+    const XSS_SUMMARY = {
+      projectId: "proj-a",
+      projectName: "<img src=x onerror=alert(1)>",
+      progressPercent: 10,
+      integrity: {
+        score: 50,
+        condition: "<b>At risk</b>",
+        primaryDriver: "<script>alert(2)</script>",
+      },
+      budget: { baseline: 100, spent: 10, remaining: 90, spentPercent: 10 },
+      primaryExposure: "<svg onload=alert(3)>",
+      nextMovement: "<img src=x onerror=alert(4)>",
+      projectedCompletion: null,
+      schedule: {
+        committed: [
+          {
+            activityId: "a1",
+            activityName: "<img src=x onerror=alert(5)>",
+            phase: "<b>Demolition</b>",
+            startDate: "2026-09-09",
+            finishDate: null,
+            basis: "COMMITTED",
+          },
+        ],
+        forecast: [],
+      },
+      scope: [
+        { id: "s1", label: "<img src=x onerror=alert(6)>", phase: "General" },
+      ],
+    };
+    const h = mount(
+      genesisRespond({
+        summary: { ok: true, status: 200, bodyText: json(XSS_SUMMARY) },
+      }),
+      { trackedProjects: ["proj-a"] },
+    );
+    await loadAndSelect(h);
+    const html = el(h, "index-card-container").innerHTML;
+    expect(html).not.toContain("<img");
+    expect(html).not.toContain("<script>");
+    expect(html).not.toContain("<svg");
+    expect(html).not.toContain("<b>");
+    expect(html).toContain("&lt;img");
+  });
+});
+
+describe("Index Card natural-language update: reuses the existing conversation/turn path only", () => {
+  function respondWithTurn(
+    turnResult: unknown,
+    confirmResult?: unknown,
+    base: Respond = genesisRespond(),
+  ): Respond {
+    return (call) => {
+      if (call.path.endsWith("/conversation/turn")) {
+        const body = callBody(call);
+        if (body.confirm && confirmResult !== undefined) {
+          return {
+            ok: true,
+            status: 200,
+            bodyText: json({
+              session: { sessionId: "s1" },
+              confirm: confirmResult,
+              timing: [],
+            }),
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          bodyText: json({
+            session: { sessionId: "s1" },
+            turn: turnResult,
+            timing: [],
+          }),
+        };
+      }
+      return base(call);
+    };
+  }
+
+  it("Update posts to the exact existing /v1/projects/:id/conversation/turn route with the entered text", async () => {
+    const h = mount(respondWithTurn({ kind: "NO_OP", clarifications: [] }), {
+      trackedProjects: ["proj-a"],
+    });
+    await loadAndSelect(h);
+    el(h, "ic-update-input").value = "Demolition started today";
+    el(h, "ic-update-send").trigger("click");
+    await flush();
+    const turnCall = h.fetchCalls.find((c) =>
+      c.path.endsWith("/conversation/turn"),
+    );
+    expect(turnCall?.path).toBe("/v1/projects/proj-a/conversation/turn");
+    expect(callBody(turnCall).text).toBe("Demolition started today");
+  });
+
+  it("CLARIFICATION shows the concise question and never implies a mutation happened", async () => {
+    const h = mount(
+      respondWithTurn({
+        kind: "CLARIFICATION",
+        clarifications: [{ message: "Which activity do you mean?" }],
+      }),
+      { trackedProjects: ["proj-a"] },
+    );
+    await loadAndSelect(h);
+    el(h, "ic-update-input").value = "started today";
+    el(h, "ic-update-send").trigger("click");
+    await flush();
+    expect(el(h, "ic-update-result").textContent).toBe(
+      "Which activity do you mean?",
+    );
+    expect(el(h, "ic-confirm").hidden).toBe(true);
+  });
+
+  it("AWAITING_CONFIRMATION reveals the confirm controls; Confirm(yes) applies and refreshes only that project's summary", async () => {
+    let summaryCalls = 0;
+    const h = mount(
+      respondWithTurn(
+        {
+          kind: "AWAITING_CONFIRMATION",
+          clarifications: [],
+          pending: [
+            {
+              claim: {
+                claimType: "ACTIVITY_STARTED",
+                subjectText: "demolition",
+                effectiveDate: "2026-09-09",
+              },
+              confirmation: {
+                confirmationId: "conf-1",
+                createdAt: 0,
+                expiresAt: 30000,
+                projectId: "proj-a",
+                intentKind: "EVIDENCE_APPLY_SHADOW",
+                canonicalEvidence: {},
+                immutableSnapshot: {},
+                snapshotFingerprint: "fp",
+                captureSessionId: "cap-1",
+                state: "PENDING",
+              },
+              previewResult: { workflowState: "SUCCEEDED" },
+            },
+          ],
+        },
+        { outcome: "APPLIED", result: { workflowState: "SUCCEEDED" } },
+        (call) => {
+          if (/\/summary$/.test(call.path)) summaryCalls += 1;
+          return genesisRespond()(call);
+        },
+      ),
+      { trackedProjects: ["proj-a"] },
+    );
+    await loadAndSelect(h);
+    const summaryCallsBeforeUpdate = summaryCalls;
+
+    el(h, "ic-update-input").value = "demolition started today";
+    el(h, "ic-update-send").trigger("click");
+    await flush();
+    expect(el(h, "ic-confirm").hidden).toBe(false);
+    expect(el(h, "ic-confirm-text").textContent).toContain("demolition");
+    expect(el(h, "ic-update-result").textContent).toContain("demolition");
+
+    el(h, "ic-confirm-yes").trigger("click");
+    await flush();
+    expect(el(h, "ic-confirm").hidden).toBe(true);
+    expect(el(h, "ic-update-result").textContent).toBe("Recorded.");
+    expect(summaryCalls).toBeGreaterThan(summaryCallsBeforeUpdate);
+  });
+
+  it("a CANCELLED confirmation shows Cancelled and never refreshes the summary", async () => {
+    let summaryCalls = 0;
+    const h = mount(
+      respondWithTurn(
+        {
+          kind: "AWAITING_CONFIRMATION",
+          clarifications: [],
+          pending: [
+            {
+              claim: {
+                claimType: "ACTIVITY_STARTED",
+                subjectText: "demolition",
+                effectiveDate: "2026-09-09",
+              },
+              confirmation: {
+                confirmationId: "conf-2",
+                createdAt: 0,
+                expiresAt: 30000,
+                projectId: "proj-a",
+                intentKind: "EVIDENCE_APPLY_SHADOW",
+                canonicalEvidence: {},
+                immutableSnapshot: {},
+                snapshotFingerprint: "fp",
+                captureSessionId: "cap-1",
+                state: "PENDING",
+              },
+              previewResult: { workflowState: "SUCCEEDED" },
+            },
+          ],
+        },
+        { outcome: "CANCELLED" },
+        (call) => {
+          if (/\/summary$/.test(call.path)) summaryCalls += 1;
+          return genesisRespond()(call);
+        },
+      ),
+      { trackedProjects: ["proj-a"] },
+    );
+    await loadAndSelect(h);
+    const summaryCallsBeforeUpdate = summaryCalls;
+
+    el(h, "ic-update-input").value = "demolition started today";
+    el(h, "ic-update-send").trigger("click");
+    await flush();
+    el(h, "ic-confirm-no").trigger("click");
+    await flush();
+    expect(el(h, "ic-update-result").textContent).toBe("Cancelled.");
+    expect(el(h, "ic-confirm").hidden).toBe(true);
+    expect(summaryCalls).toBe(summaryCallsBeforeUpdate);
+  });
+
+  it("does not send a duplicate update while the same project's conversation is already in flight", async () => {
+    const { fetchFn, calls, pending } = makeDeferredFetch();
+    const rest = mountWithFetch(fetchFn, { trackedProjects: ["proj-a"] });
+    const h = { ...rest, fetchCalls: calls };
+
+    el(h, "admin-key").value = "key-1";
+    el(h, "admin-key").trigger("change");
+    await flush();
+    resolvePending(pending, (c) => /\/proj-a\/summary$/.test(c.path), {
+      ok: true,
+      status: 200,
+      bodyText: json({ ...SAMPLE_SUMMARY, projectId: "proj-a" }),
+    });
+    await flush();
+    el(h, "ph-row-0").trigger("click");
+    await flush();
+
+    el(h, "ic-update-input").value = "Demolition started today";
+    el(h, "ic-update-send").trigger("click");
+    await flush();
+    el(h, "ic-update-send").trigger("click");
+    await flush();
+
+    const turnCalls = calls.filter(
+      (c) => c.path === "/v1/projects/proj-a/conversation/turn",
+    );
+    expect(turnCalls).toHaveLength(1);
+  });
+});
+
+describe("Index Card wrong-project safety: an in-flight update never bleeds into a different selected project", () => {
+  it("selecting B before A's response resolves keeps B selected and untouched by A's result", async () => {
+    const { fetchFn, calls, pending } = makeDeferredFetch();
+    const rest = mountWithFetch(fetchFn, {
+      trackedProjects: ["proj-a", "proj-b"],
+    });
+    const h = { ...rest, fetchCalls: calls };
+
+    el(h, "admin-key").value = "key-1";
+    el(h, "admin-key").trigger("change");
+    await flush();
+    resolvePending(pending, (c) => /\/proj-a\/summary$/.test(c.path), {
+      ok: true,
+      status: 200,
+      bodyText: json({
+        ...SAMPLE_SUMMARY,
+        projectId: "proj-a",
+        projectName: "Proj A",
+      }),
+    });
+    resolvePending(pending, (c) => /\/proj-b\/summary$/.test(c.path), {
+      ok: true,
+      status: 200,
+      bodyText: json({
+        ...SAMPLE_SUMMARY,
+        projectId: "proj-b",
+        projectName: "Proj B",
+      }),
+    });
+    await flush();
+
+    el(h, "ph-row-0").trigger("click");
+    await flush();
+    expect(el(h, "ic-project-name").textContent).toBe("Proj A");
+
+    el(h, "ic-update-input").value = "Demolition started today";
+    el(h, "ic-update-send").trigger("click");
+    await flush();
+    expect(el(h, "ic-update-result").textContent).toBe("Working…");
+
+    // Before A's conversation/turn response resolves, select B.
+    el(h, "ph-row-1").trigger("click");
+    await flush();
+    expect(el(h, "ic-project-name").textContent).toBe("Proj B");
+    expect(el(h, "ic-update-result").textContent).toBe("");
+
+    // Now resolve A's turn -- a clarification, so it must never claim a mutation happened.
+    resolvePending(
+      pending,
+      (c) => c.path === "/v1/projects/proj-a/conversation/turn",
+      {
+        ok: true,
+        status: 200,
+        bodyText: json({
+          session: { sessionId: "s1" },
+          turn: {
+            kind: "CLARIFICATION",
+            clarifications: [{ message: "Which activity for A?" }],
+          },
+          timing: [],
+        }),
+      },
+    );
+    await flush();
+
+    // B must remain selected, and B's own result area must be untouched by A's response.
+    expect(el(h, "ic-project-name").textContent).toBe("Proj B");
+    expect(el(h, "ic-update-result").textContent).toBe("");
+    expect(
+      calls.some((c) => c.path === "/v1/projects/proj-b/conversation/turn"),
+    ).toBe(false);
+
+    // Switching back to A shows A's own persisted message -- proving it was kept, just never
+    // painted over B's visible card while B was selected.
+    el(h, "ph-row-0").trigger("click");
+    await flush();
+    expect(el(h, "ic-update-result").textContent).toBe("Which activity for A?");
   });
 });
