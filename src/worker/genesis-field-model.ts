@@ -188,9 +188,17 @@ function isSimpleActivitySubject(subjectPhrase: string): boolean {
 const NON_DIRECT_FORECAST_RE =
   /\b(?:hope|hoping|plan|planning|forecast|forecasted|expect|expects|expected|intend|intending|anticipate|anticipating|aim|aiming)\b/i;
 
+// Breaker review P1-2/multiline: a newline is as much a statement boundary as a
+// period/exclamation/question mark for this pilot grammar (a design-style intake, or a textarea
+// paste, commonly separates statements by line without ending each one in punctuation). Splitting
+// on newlines FIRST, then still splitting each resulting line on the existing punctuation rule,
+// means a fully-punctuated single-paragraph intake behaves exactly as before (one "line" in, same
+// sentences out) while a newline-separated intake with no punctuation at all no longer collapses
+// into one unsplit blob that every per-sentence recognizer below would fail to parse correctly.
 function splitSentences(text: string): string[] {
   return text
-    .split(/(?<=[.!?])\s+/)
+    .split(/\r?\n/)
+    .flatMap((line) => line.split(/(?<=[.!?])\s+/))
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 }
@@ -342,6 +350,33 @@ function splitScopePhrases(sentence: string): string[] {
     .filter((phrase) => phrase.length > 0);
 }
 
+// Breaker review P1-2: the approved natural Genesis boundary must not require the schema-like
+// "Scope is ..."/"Scope: ..." prefix -- a confidently scope-like BARE noun list (e.g. "Kitchen,
+// primary bath, flooring, windows.") is recognized on its own. Deliberately narrow, not a general
+// "every sentence is scope" rule: the WHOLE sentence is rejected outright if it contains any
+// clause/auxiliary/modal marker (CLAUSE_MARKER_RE, the same fixed list that already keeps
+// clause-shaped activity-start subjects out of the direct-commit path) or any digit anywhere
+// (ruling out money/measurement/date sentences in one check), and every individual comma/and-
+// separated phrase must be a short (<=5 word), purely alphabetic noun phrase. A sentence failing
+// any of these checks is left for whichever OTHER recognizer (project name, budget, activity
+// start, vendor/uncertainty assumption) actually owns it -- this function never competes with
+// those, since it only ever fires when none of their own patterns matched first.
+const BARE_SCOPE_PHRASE_RE =
+  /^[A-Za-z][A-Za-z'-]*(?:\s+[A-Za-z][A-Za-z'-]*){0,4}$/;
+
+function findBareScopeListPhrases(sentence: string): string[] | null {
+  const stripped = stripTrailingPunctuation(sentence);
+  if (!stripped) return null;
+  if (CLAUSE_MARKER_RE.test(stripped)) return null;
+  if (/\d/.test(stripped)) return null;
+  const phrases = splitScopePhrases(stripped);
+  if (phrases.length < 2) return null;
+  if (!phrases.every((phrase) => BARE_SCOPE_PHRASE_RE.test(phrase))) {
+    return null;
+  }
+  return phrases;
+}
+
 function uniqueScopeId(baseId: string, usedIds: Set<string>): string {
   if (!usedIds.has(baseId)) return baseId;
   let suffix = 2;
@@ -363,15 +398,28 @@ function findScopeListItems(sentences: string[]): GenesisScopeItemV096[] {
   const usedIds = new Set<string>();
   let fallbackCounter = 0;
   for (const raw of sentences) {
-    const scopeMatch = /^scope\s*(?:is|:)\s*(.+)$/i.exec(
-      stripTrailingPunctuation(raw),
-    );
-    if (!scopeMatch?.[1]) continue;
-    for (const phrase of splitScopePhrases(scopeMatch[1])) {
+    const stripped = stripTrailingPunctuation(raw);
+    const scopeMatch = /^scope\s*(?:is|:)\s*(.+)$/i.exec(stripped);
+    const phrases = scopeMatch?.[1]
+      ? splitScopePhrases(scopeMatch[1])
+      : findBareScopeListPhrases(raw);
+    if (!phrases) continue;
+    for (const phrase of phrases) {
       const normalizedPhrase = phrase.trim().toLowerCase();
       if (!normalizedPhrase || seenPhrases.has(normalizedPhrase)) continue;
       seenPhrases.add(normalizedPhrase);
-      let baseId = slugify(phrase);
+      // Breaker review P1-3: a phrase that exactly names a recognized construction-dictionary
+      // term (e.g. "demo") must resolve to that SAME canonical id/label/phase a later sentence
+      // referencing it by its canonical name (e.g. "Demo starts September 14" ->
+      // SCOPE_DICTIONARY["demo"].id === "demolition") would also resolve to -- otherwise the same
+      // intended work item ends up as two distinct activities (a raw slug plus a dictionary-
+      // canonical id). Only an EXACT (whole-phrase) dictionary key match canonicalizes; a
+      // multi-word phrase like "electrical service upgrade" does not exactly match the
+      // single-word key "electrical", so it is untouched and keeps its own distinct identity --
+      // this must never discard a genuinely distinct phrase that only happens to share a
+      // substring with a dictionary keyword.
+      const dictionaryEntry = SCOPE_DICTIONARY[normalizedPhrase];
+      let baseId = dictionaryEntry?.id ?? slugify(phrase);
       if (!baseId) {
         fallbackCounter += 1;
         baseId = `scope-item-${String(fallbackCounter)}`;
@@ -380,8 +428,8 @@ function findScopeListItems(sentences: string[]): GenesisScopeItemV096[] {
       usedIds.add(id);
       items.push({
         id,
-        label: capitalizeFirst(phrase),
-        phase: findPhaseForPhrase(phrase),
+        label: dictionaryEntry?.label ?? capitalizeFirst(phrase),
+        phase: dictionaryEntry?.phase ?? findPhaseForPhrase(phrase),
       });
     }
   }
@@ -639,6 +687,16 @@ export const synthesizeGenesisField: GenesisSynthesizer = (
   assumptions.push(
     "Timezone defaulted to America/New_York for the pilot and needs PM confirmation.",
   );
+  // Breaker review P1-4: the canonical builder (src/operator/genesis.ts's
+  // PILOT_BASELINE_DURATION_DAYS) silently defaults every scope item with no explicit duration to
+  // 2/4/7 workdays -- a real assumption that drives the initial forecast. It must be visible to
+  // the PM in the review BEFORE approval, not merely documented in code, matching the missingCritical
+  // "Activity durations need PM validation" note this same condition already adds below.
+  if (scopeItems.length > 0) {
+    assumptions.push(
+      "Unspecified activity durations use the pilot baseline of 2 / 4 / 7 workdays (optimistic / likely / conservative) until PM validation.",
+    );
+  }
 
   const missingCritical: string[] = [];
   if (!projectName) {

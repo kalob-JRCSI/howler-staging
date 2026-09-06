@@ -543,6 +543,131 @@ describe("POST /v1/projects/genesis/commit: invalid proposal rejected by validat
   });
 });
 
+// Breaker review P1-1: validateGenesisProposal assumes its nested fields are already correctly
+// shaped (arrays, not null; objects, not null; recognized enum values) -- an authenticated but
+// malformed request whose nested shape is wrong must still return 400, never an unhandled 500.
+describe("POST /v1/projects/genesis/commit: malformed nested shapes return 400, never 500", () => {
+  const ZERO_COUNTS = {
+    projects: 0,
+    project_events: 0,
+    forecast_snapshots: 0,
+    oversight_reviews: 0,
+  };
+
+  it("rejects a proposal containing only schemaVersion, zero writes", async () => {
+    const response = await worker.fetch(
+      jsonRequest("POST", "/v1/projects/genesis/commit", {
+        proposal: { schemaVersion: "0.9.6" },
+      }),
+      adminEnv(),
+    );
+    expect(response.status).toBe(400);
+    expect(await tableCounts()).toEqual(ZERO_COUNTS);
+  });
+
+  it("rejects baselineScope: null, zero writes", async () => {
+    const base = validProposal("malformed-1");
+    const proposal = { ...base, baselineScope: null };
+    const response = await worker.fetch(
+      jsonRequest("POST", "/v1/projects/genesis/commit", { proposal }),
+      adminEnv(),
+    );
+    expect(response.status).toBe(400);
+    expect(await tableCounts()).toEqual(ZERO_COUNTS);
+  });
+
+  it("rejects knownDates: null, zero writes", async () => {
+    const base = validProposal("malformed-2");
+    const proposal = { ...base, knownDates: null };
+    const response = await worker.fetch(
+      jsonRequest("POST", "/v1/projects/genesis/commit", { proposal }),
+      adminEnv(),
+    );
+    expect(response.status).toBe(400);
+    expect(await tableCounts()).toEqual(ZERO_COUNTS);
+  });
+
+  it("rejects assumptions: null, zero writes", async () => {
+    const base = validProposal("malformed-3");
+    const proposal = { ...base, assumptions: null };
+    const response = await worker.fetch(
+      jsonRequest("POST", "/v1/projects/genesis/commit", { proposal }),
+      adminEnv(),
+    );
+    expect(response.status).toBe(400);
+    expect(await tableCounts()).toEqual(ZERO_COUNTS);
+  });
+
+  it("rejects a baselineScope array containing a null element, zero writes", async () => {
+    const base = validProposal("malformed-4");
+    const proposal = {
+      ...base,
+      baselineScope: [null, ...base.baselineScope],
+    };
+    const response = await worker.fetch(
+      jsonRequest("POST", "/v1/projects/genesis/commit", { proposal }),
+      adminEnv(),
+    );
+    expect(response.status).toBe(400);
+    expect(await tableCounts()).toEqual(ZERO_COUNTS);
+  });
+
+  it("rejects a knownDates array containing a null element, zero writes", async () => {
+    const base = validProposal("malformed-5");
+    const proposal = { ...base, knownDates: [null, ...base.knownDates] };
+    const response = await worker.fetch(
+      jsonRequest("POST", "/v1/projects/genesis/commit", { proposal }),
+      adminEnv(),
+    );
+    expect(response.status).toBe(400);
+    expect(await tableCounts()).toEqual(ZERO_COUNTS);
+  });
+
+  it("rejects a wrong-type (string) baselineScope, zero writes", async () => {
+    const base = validProposal("malformed-6");
+    const proposal = { ...base, baselineScope: "kitchen, primary bath" };
+    const response = await worker.fetch(
+      jsonRequest("POST", "/v1/projects/genesis/commit", { proposal }),
+      adminEnv(),
+    );
+    expect(response.status).toBe(400);
+    expect(await tableCounts()).toEqual(ZERO_COUNTS);
+  });
+
+  it("rejects a wrong-type (object) knownDates, zero writes", async () => {
+    const base = validProposal("malformed-7");
+    const proposal = { ...base, knownDates: { subjectId: "demolition" } };
+    const response = await worker.fetch(
+      jsonRequest("POST", "/v1/projects/genesis/commit", { proposal }),
+      adminEnv(),
+    );
+    expect(response.status).toBe(400);
+    expect(await tableCounts()).toEqual(ZERO_COUNTS);
+  });
+
+  it("rejects a knownDates entry with an unrecognized kind, zero writes", async () => {
+    const base = validProposal("malformed-8");
+    const subjectId = base.baselineScope[0]?.id ?? "demolition";
+    const proposal = {
+      ...base,
+      knownDates: [
+        {
+          subjectId,
+          kind: "MALICIOUS_KIND",
+          date: "2026-09-14",
+          label: "x",
+        },
+      ],
+    };
+    const response = await worker.fetch(
+      jsonRequest("POST", "/v1/projects/genesis/commit", { proposal }),
+      adminEnv(),
+    );
+    expect(response.status).toBe(400);
+    expect(await tableCounts()).toEqual(ZERO_COUNTS);
+  });
+});
+
 describe("POST /v1/projects/genesis/commit: duplicate project id", () => {
   it("returns 409 and does not mutate the existing project", async () => {
     const proposal = validProposal("duplicate-target");

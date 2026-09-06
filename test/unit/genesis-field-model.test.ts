@@ -831,3 +831,168 @@ describe("synthesizeGenesisField: conflicting budget statements across sentences
     expect(result.budget?.baseline).toBe(425000);
   });
 });
+
+// Breaker review P1-2: the approved natural Genesis boundary must not require the schema-like
+// phrase "Scope is ..." -- a confidently scope-like bare noun list (comma/and-separated short
+// phrases, no verbs/digits/currency) is recognized on its own. This stays a narrow, conservative
+// recognizer: it must never treat arbitrary prose, vendor/pricing sentences, or the project-name/
+// budget/activity-start sentences themselves as scope.
+describe("synthesizeGenesisField: natural scope lists without the words 'Scope is' (design-style intake)", () => {
+  const DESIGN_STYLE_INTAKE =
+    "Create Smith Residence. 2,800sf remodel. Budget is $310,000. Kitchen, primary bath, flooring, windows, electrical service upgrade, HVAC modifications. Demo starts September 14. We already selected Wayland for electrical. Cabinets are still being priced.";
+
+  it("captures the bare comma-separated scope list without any 'Scope is' prefix", () => {
+    const result = synthesizeGenesisField(DESIGN_STYLE_INTAKE, NOW);
+    expect(result.baselineScope.map((x) => x.label)).toEqual(
+      expect.arrayContaining([
+        "Demolition",
+        "Kitchen",
+        "Primary bath",
+        "Flooring",
+        "Windows",
+        "Electrical service upgrade",
+        "HVAC modifications",
+      ]),
+    );
+  });
+
+  it("still resolves project name, budget, and the committed Demo date correctly alongside the bare list", () => {
+    const result = synthesizeGenesisField(DESIGN_STYLE_INTAKE, NOW);
+    expect(result.projectName).toBe("Smith Residence");
+    expect(result.budget?.baseline).toBe(310000);
+    expect(result.knownDates).toContainEqual(
+      expect.objectContaining({
+        subjectId: "demolition",
+        kind: "COMMITTED_START",
+        date: "2026-09-14",
+      }),
+    );
+  });
+
+  it("still keeps the vendor-selection and pricing-uncertainty sentences as assumptions, never scope items", () => {
+    const result = synthesizeGenesisField(DESIGN_STYLE_INTAKE, NOW);
+    expect(
+      result.assumptions.some(
+        (a) => /Wayland/i.test(a) && /unverified/i.test(a),
+      ),
+    ).toBe(true);
+    expect(
+      result.assumptions.some(
+        (a) => /cabinet/i.test(a) && /unresolved/i.test(a),
+      ),
+    ).toBe(true);
+    expect(
+      result.baselineScope.some((item) => /wayland/i.test(item.label)),
+    ).toBe(false);
+    expect(
+      result.baselineScope.some((item) => /priced/i.test(item.label)),
+    ).toBe(false);
+  });
+
+  it("captures the same bare scope list when the intake is newline-separated with no sentence punctuation", () => {
+    const multiline = [
+      "Create Smith Residence",
+      "2,800sf remodel",
+      "Budget is $310,000",
+      "Kitchen, primary bath, flooring, windows, electrical service upgrade, HVAC modifications",
+      "Demo starts September 14",
+      "We already selected Wayland for electrical",
+      "Cabinets are still being priced",
+    ].join("\n");
+    const result = synthesizeGenesisField(multiline, NOW);
+    expect(result.projectName).toBe("Smith Residence");
+    expect(result.baselineScope.map((x) => x.label)).toEqual(
+      expect.arrayContaining([
+        "Demolition",
+        "Kitchen",
+        "Primary bath",
+        "Flooring",
+        "Windows",
+        "Electrical service upgrade",
+        "HVAC modifications",
+      ]),
+    );
+    expect(result.knownDates).toContainEqual(
+      expect.objectContaining({
+        subjectId: "demolition",
+        kind: "COMMITTED_START",
+        date: "2026-09-14",
+      }),
+    );
+  });
+
+  it("does not turn arbitrary multi-clause prose into a scope list (conservative boundary)", () => {
+    const result = synthesizeGenesisField(
+      "Create Test Project. We still need to confirm windows, doors, and better insulation before winter.",
+      NOW,
+    );
+    expect(result.baselineScope).toHaveLength(0);
+  });
+
+  it("does not turn the budget sentence into a scope list merely because it is short", () => {
+    const result = synthesizeGenesisField(
+      "Create Test Project. Budget is $50,000, roughly.",
+      NOW,
+    );
+    expect(result.baselineScope).toHaveLength(0);
+  });
+});
+
+// Breaker review P1-3: a work item named once in a natural scope list, then referenced again by
+// its canonical construction-dictionary name in a committed-start statement, must resolve to
+// exactly ONE semantic activity -- never two ids (a raw slug plus a dictionary-canonical id) for
+// the same intended work.
+describe("synthesizeGenesisField: one work item has one identity, even across a bare alias and its canonical dictionary name", () => {
+  it("'Scope is demo, flooring' + 'Demo starts September 14' produces exactly one Demolition item", () => {
+    const result = synthesizeGenesisField(
+      "Create X. Scope is demo, flooring. Demo starts September 14.",
+      NOW,
+    );
+    const demolitionItems = result.baselineScope.filter(
+      (item) => item.id === "demolition" || item.label === "Demolition",
+    );
+    expect(demolitionItems).toHaveLength(1);
+    expect(demolitionItems[0]?.id).toBe("demolition");
+    expect(result.baselineScope.some((item) => item.id === "demo")).toBe(false);
+    expect(result.knownDates).toContainEqual(
+      expect.objectContaining({
+        subjectId: "demolition",
+        kind: "COMMITTED_START",
+        date: "2026-09-14",
+      }),
+    );
+  });
+
+  it("a proposal built from that same intake has exactly one demolition activity, not two", () => {
+    const result = synthesizeGenesisField(
+      "Create X. Scope is demo, flooring. Demo starts September 14.",
+      NOW,
+    );
+    expect(validateGenesisProposal(result)).toEqual([]);
+    const model = buildProjectFromGenesis(result, NOW);
+    expect(Object.keys(model.activities)).toEqual(
+      expect.arrayContaining(["demolition", "flooring"]),
+    );
+    expect(Object.keys(model.activities)).not.toContain("demo");
+    expect(model.activities.demolition?.scheduleLock?.startDate).toBe(
+      "2026-09-14",
+    );
+  });
+});
+
+// Breaker review P1-4: the canonical builder's 2/4/7 pilot duration default is a real assumption
+// driving the initial forecast -- it must be visible in the proposal BEFORE approval, not merely
+// documented in code.
+describe("synthesizeGenesisField: discloses the real 2/4/7 pilot duration default", () => {
+  it("a Smith preview visibly states the 2/4/7 workday default as an assumption", () => {
+    const result = synthesizeGenesisField(SMITH_INTAKE, NOW);
+    expect(
+      result.assumptions.some(
+        (a) => /2\s*\/\s*4\s*\/\s*7/.test(a) && /workday/i.test(a),
+      ),
+    ).toBe(true);
+    expect(result.missingCritical).toContain(
+      "Activity durations need PM validation",
+    );
+  });
+});

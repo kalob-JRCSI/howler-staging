@@ -939,6 +939,125 @@ async function handle(request: Request, env: Env): Promise<Response> {
     );
   }
 
+  // Breaker review P1-1: validateGenesisProposal (src/operator/genesis.ts) assumes its nested
+  // fields are already correctly shaped -- it iterates baselineScope/knownDates directly and reads
+  // properties off each entry. A malformed but authenticated request (null/wrong-type arrays, null
+  // array elements, an unrecognized knownDates.kind) throws a raw TypeError there, which the top-
+  // level handler turns into an unhandled 500 rather than a clean 400. This runs BEFORE the value
+  // is ever cast to GenesisProposalV096 or handed to validateGenesisProposal, so a malformed nested
+  // shape is always reported as a 400 with detail, never reaches code that assumes the shape is
+  // already correct.
+  const GENESIS_KNOWN_DATE_KINDS = new Set([
+    "COMMITTED_START",
+    "COMMITTED_FINISH",
+    "FORECAST_START",
+  ]);
+  function validateGenesisProposalShape(raw: unknown): string[] {
+    const errors: string[] = [];
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      return ["proposal must be a JSON object"];
+    }
+    const record = raw as Record<string, unknown>;
+
+    function checkStringArray(key: string): void {
+      const value = record[key];
+      if (value === undefined) return;
+      if (!Array.isArray(value)) {
+        errors.push(`${key} must be an array`);
+        return;
+      }
+      value.forEach((entry, index) => {
+        if (typeof entry !== "string") {
+          errors.push(`${key}[${String(index)}] must be a string`);
+        }
+      });
+    }
+
+    const baselineScope = record.baselineScope;
+    if (!Array.isArray(baselineScope)) {
+      errors.push("baselineScope must be an array");
+    } else {
+      baselineScope.forEach((item, index) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) {
+          errors.push(`baselineScope[${String(index)}] must be an object`);
+          return;
+        }
+        const scopeRecord = item as Record<string, unknown>;
+        if (typeof scopeRecord.id !== "string") {
+          errors.push(`baselineScope[${String(index)}].id must be a string`);
+        }
+        if (typeof scopeRecord.label !== "string") {
+          errors.push(`baselineScope[${String(index)}].label must be a string`);
+        }
+        if (typeof scopeRecord.phase !== "string") {
+          errors.push(`baselineScope[${String(index)}].phase must be a string`);
+        }
+        for (const durationKey of [
+          "optimisticDays",
+          "likelyDays",
+          "conservativeDays",
+        ] as const) {
+          if (
+            scopeRecord[durationKey] !== undefined &&
+            typeof scopeRecord[durationKey] !== "number"
+          ) {
+            errors.push(
+              `baselineScope[${String(index)}].${durationKey} must be a number when present`,
+            );
+          }
+        }
+      });
+    }
+
+    const knownDates = record.knownDates;
+    if (!Array.isArray(knownDates)) {
+      errors.push("knownDates must be an array");
+    } else {
+      knownDates.forEach((item, index) => {
+        if (!item || typeof item !== "object" || Array.isArray(item)) {
+          errors.push(`knownDates[${String(index)}] must be an object`);
+          return;
+        }
+        const dateRecord = item as Record<string, unknown>;
+        if (typeof dateRecord.subjectId !== "string") {
+          errors.push(
+            `knownDates[${String(index)}].subjectId must be a string`,
+          );
+        }
+        if (
+          typeof dateRecord.kind !== "string" ||
+          !GENESIS_KNOWN_DATE_KINDS.has(dateRecord.kind)
+        ) {
+          errors.push(
+            `knownDates[${String(index)}].kind must be one of COMMITTED_START, COMMITTED_FINISH, FORECAST_START`,
+          );
+        }
+        if (typeof dateRecord.date !== "string") {
+          errors.push(`knownDates[${String(index)}].date must be a string`);
+        }
+        if (typeof dateRecord.label !== "string") {
+          errors.push(`knownDates[${String(index)}].label must be a string`);
+        }
+      });
+    }
+
+    checkStringArray("assumptions");
+    checkStringArray("risks");
+    checkStringArray("missingCritical");
+
+    if (record.budget !== undefined) {
+      if (
+        !record.budget ||
+        typeof record.budget !== "object" ||
+        Array.isArray(record.budget)
+      ) {
+        errors.push("budget must be an object when present");
+      }
+    }
+
+    return errors;
+  }
+
   // Task 3 (Project Genesis, v0.9.6 design doc §"Project Genesis"/plan §"Task 3"): two global
   // routes with no projectId in the URL. Preview is pure analysis (zero D1 writes -- it never
   // touches `repo`). Commit is the one-time, revision-0 canonical creation path and reuses the
@@ -1005,6 +1124,12 @@ async function handle(request: Request, env: Env): Promise<Response> {
         400,
         `proposal.schemaVersion must be "0.9.6", received: ${JSON.stringify(rawSchemaVersion)}`,
       );
+    }
+    const shapeErrors = validateGenesisProposalShape(rawProposal);
+    if (shapeErrors.length > 0) {
+      throw new HttpError(400, "Invalid Genesis proposal", {
+        errors: shapeErrors,
+      });
     }
     const proposal = rawProposal as GenesisProposalV096;
     const errors = validateGenesisProposal(proposal);

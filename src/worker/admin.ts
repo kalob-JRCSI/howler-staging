@@ -2862,36 +2862,84 @@ export function fieldDashboardClientScript(
         .replace(/^-+|-+$/g, "");
     }
 
+    interface RebuildScopeResult {
+      scope: GenesisScopeItemLike[];
+      /** Original items whose id no longer appears anywhere in the rebuilt scope -- i.e. the row
+       * was deleted from the textarea entirely, not merely renamed. */
+      removed: GenesisScopeItemLike[];
+    }
+
     /** Rebuilds baselineScope from the edited textarea, one visible line per scope item -- every
-     * non-empty line survives (never silently discarded); a line matching an original label
-     * (case-insensitively) keeps that item's original id/phase, and any other line gets a
-     * deterministic slug id, de-duplicated against ids already used this render. This is not a
-     * second Genesis parser: it only assigns stable ids to the text the user can already see. */
+     * non-empty line survives (never silently discarded). Two-pass identity resolution, never
+     * plain label-text equality alone (which broke identity the moment a label was edited) and
+     * never plain position alone (which mis-attributes a REMOVED row's identity onto whichever
+     * row now happens to shift into its old line number):
+     *
+     * Pass 1 claims by exact (case-insensitive) label match against still-unclaimed original
+     * items, in line order -- an unrenamed or merely reordered row always keeps its own identity
+     * this way, which is what lets Pass 2 correctly tell "renamed" apart from "removed".
+     *
+     * Pass 2 pairs each STILL-unmatched line, in order, with whichever original item is still
+     * unclaimed, in order -- this is what preserves a renamed row's stable id (its new text
+     * matches no original label, so it falls through to here and claims the one original item
+     * pass 1 couldn't otherwise place).
+     *
+     * Any original item left unclaimed after both passes is reported in `removed`: no line in the
+     * edited textarea refers to it any more, by either its original label or positional fallback.
+     * A line beyond what any original item (claimed or fallback) can cover is genuinely NEW and
+     * gets its own deterministic slug id. */
     function rebuildScope(
       rawText: string,
       original: GenesisScopeItemLike[],
-    ): GenesisScopeItemLike[] {
-      const byLabel = new Map(
-        original.map((item) => [item.label.toLowerCase(), item]),
-      );
-      const usedIds = new Set<string>();
-      return rawText
+    ): RebuildScopeResult {
+      const lines = rawText
         .split("\n")
         .map((line) => line.trim())
-        .filter((line) => line.length > 0)
-        .map((label) => {
-          const matched = byLabel.get(label.toLowerCase());
-          let baseId = matched ? matched.id : genesisSlugify(label);
-          if (!baseId) baseId = "scope-item";
-          let id = baseId;
-          let suffix = 2;
-          while (usedIds.has(id)) {
-            id = `${baseId}-${String(suffix)}`;
-            suffix += 1;
-          }
-          usedIds.add(id);
-          return { id, label, phase: matched ? matched.phase : "General" };
-        });
+        .filter((line) => line.length > 0);
+
+      const unclaimed = [...original];
+      const claimedByLine = new Map<number, GenesisScopeItemLike>();
+      lines.forEach((label, index) => {
+        const matchIndex = unclaimed.findIndex(
+          (item) => item.label.toLowerCase() === label.toLowerCase(),
+        );
+        if (matchIndex === -1) return;
+        const [matched] = unclaimed.splice(matchIndex, 1);
+        if (matched) claimedByLine.set(index, matched);
+      });
+
+      const unmatchedLineIndexes = lines
+        .map((_, index) => index)
+        .filter((index) => !claimedByLine.has(index));
+      unmatchedLineIndexes.forEach((lineIndex, fallbackIndex) => {
+        const fallback = unclaimed[fallbackIndex];
+        if (fallback) claimedByLine.set(lineIndex, fallback);
+      });
+      const consumedByFallback = Math.min(
+        unmatchedLineIndexes.length,
+        unclaimed.length,
+      );
+      const removed = unclaimed.slice(consumedByFallback);
+
+      const usedIds = new Set<string>();
+      const scope = lines.map((label, index) => {
+        const claimed = claimedByLine.get(index);
+        let baseId = claimed ? claimed.id : genesisSlugify(label);
+        if (!baseId) baseId = "scope-item";
+        let id = baseId;
+        let suffix = 2;
+        while (usedIds.has(id)) {
+          id = `${baseId}-${String(suffix)}`;
+          suffix += 1;
+        }
+        usedIds.add(id);
+        return {
+          id,
+          label,
+          phase: claimed ? claimed.phase : "General",
+        };
+      });
+      return { scope, removed };
     }
 
     function closeGenesisPanel(): void {
@@ -2990,9 +3038,25 @@ export function fieldDashboardClientScript(
       const budgetEl = tryGetElementById("genesis-budget");
 
       const correctedName = nameEl ? nameEl.value.trim() : proposal.projectName;
-      const correctedScope = scopeEl
+      const rebuilt = scopeEl
         ? rebuildScope(scopeEl.value, proposal.baselineScope)
-        : proposal.baselineScope;
+        : { scope: proposal.baselineScope, removed: [] };
+      const correctedScope = rebuilt.scope;
+
+      // A scope row that still owns a committed/forecast date must never simply vanish: posting a
+      // proposal whose knownDates points at a since-deleted scope item would be internally
+      // inconsistent (and, before this fix, silently dropped that date without telling the user).
+      // Fail locally with a clear message and leave the review open instead.
+      const removedIdsWithKnownDate = new Set(
+        proposal.knownDates.map((d) => d.subjectId),
+      );
+      const blockedRemoval = rebuilt.removed.find((item) =>
+        removedIdsWithKnownDate.has(item.id),
+      );
+      if (blockedRemoval) {
+        genesisStatus.textContent = `Cannot remove "${blockedRemoval.label}" -- it still has a committed date. Restore the line or edit its text instead of deleting it.`;
+        return Promise.resolve();
+      }
 
       // Budget correction: blank stays unknown (preserving any other known budget facts), a
       // valid number replaces ONLY the baseline, and an invalid (non-blank, non-numeric or

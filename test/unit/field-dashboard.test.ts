@@ -59,12 +59,26 @@ function makeFakeDocument(staticIds: string[]): {
         for (const match of value.matchAll(
           /<([a-zA-Z0-9]+)\b([^>]*)>([^<]*)/g,
         )) {
+          const tagName = (match[1] ?? "").toLowerCase();
           const attrs = match[2] ?? "";
           const id = /\bid="([^"]+)"/.exec(attrs)?.[1];
           if (!id) continue;
           const text = match[3] ?? "";
           const disabled = /\bdisabled\b/.test(attrs);
-          elements.set(id, createElement({ textContent: text, disabled }));
+          // A real <textarea>'s initial .value reflects its rendered inner text (unlike other
+          // elements, which have no such quirk) -- Genesis review's own scope textarea is
+          // rendered pre-filled this way, so a caller that reads .value without first explicitly
+          // setting it (i.e. approving the review unedited) must see the same text a real browser
+          // would show, not an empty default.
+          const initialValue = tagName === "textarea" ? text : "";
+          elements.set(
+            id,
+            createElement({
+              textContent: text,
+              disabled,
+              value: initialValue,
+            }),
+          );
           ownedIds.push(id);
         }
       },
@@ -2295,6 +2309,59 @@ describe("Project Genesis: editing the proposal before approval", () => {
     const scope = proposal.baselineScope as { id: string; label: string }[];
     expect(scope).toHaveLength(3);
     expect(new Set(scope.map((s) => s.id)).size).toBe(3);
+  });
+
+  // Breaker review P1-3: renaming an existing scope row's VISIBLE LABEL must never mint an
+  // unrelated new id for it -- the old label-text-matching approach broke exactly this case, since
+  // the edited text no longer equals any original label. SAMPLE_PROPOSAL's own "demolition" row is
+  // bound to a real committed knownDate, so this also proves that date is never silently stranded.
+  it("preserves the stable identity of an edited existing scope row, so its committed date remains valid", async () => {
+    const h = mount(genesisRespond(), { trackedProjects: [] });
+    el(h, "new-project-open").trigger("click");
+    el(h, "genesis-text").value = "Create Smith Residence.";
+    el(h, "genesis-analyze").trigger("click");
+    await flush();
+
+    el(h, "genesis-scope").value = "Selective demolition\nKitchen";
+    el(h, "genesis-approve").trigger("click");
+    await flush();
+
+    const call = h.fetchCalls.find(
+      (c) => c.path === "/v1/projects/genesis/commit",
+    );
+    expect(call).toBeDefined();
+    const proposal = callBody(call).proposal as Record<string, unknown>;
+    const scope = proposal.baselineScope as { id: string; label: string }[];
+    const renamed = scope.find((s) => s.label === "Selective demolition");
+    expect(renamed?.id).toBe("demolition");
+    const knownDates = proposal.knownDates as { subjectId: string }[];
+    expect(knownDates.some((d) => d.subjectId === "demolition")).toBe(true);
+  });
+
+  // Breaker review P1-3: removing a scope row that a knownDate still references must fail
+  // locally with a clear message rather than silently posting a proposal whose knownDates points
+  // at a scope item that no longer exists.
+  it("blocks approval locally when a scope row bound to a committed date is removed, rather than posting an internally inconsistent proposal", async () => {
+    const h = mount(genesisRespond(), { trackedProjects: [] });
+    el(h, "new-project-open").trigger("click");
+    el(h, "genesis-text").value = "Create Smith Residence.";
+    el(h, "genesis-analyze").trigger("click");
+    await flush();
+
+    el(h, "genesis-scope").value = "Kitchen";
+    el(h, "genesis-approve").trigger("click");
+    await flush();
+
+    const commitCalls = h.fetchCalls.filter(
+      (c) => c.path === "/v1/projects/genesis/commit",
+    );
+    expect(commitCalls).toHaveLength(0);
+    expect(el(h, "genesis-review").hidden).toBe(false);
+    expect(el(h, "genesis-status").textContent).toContain("Demolition");
+    const tracked = JSON.parse(
+      h.storage.getItem("howler_field_tracked_projects") ?? "[]",
+    ) as string[];
+    expect(tracked).not.toContain("smith-residence");
   });
 });
 
