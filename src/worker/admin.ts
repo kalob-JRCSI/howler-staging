@@ -2870,31 +2870,20 @@ export function fieldDashboardClientScript(
     }
 
     /** Rebuilds baselineScope from the edited textarea, one visible line per scope item -- every
-     * non-empty line survives (never silently discarded). Two-pass identity resolution, never
-     * plain label-text equality alone (which broke identity the moment a label was edited) and
-     * never "pair the Nth remaining unmatched line with the Nth remaining unmatched original"
-     * (which can silently transfer an existing canonical id -- and its knownDate -- onto a
-     * completely unrelated new row the moment a removal and an addition happen in the same edit;
-     * see the breaker review's "remove + add" / "remove + rename" cases):
-     *
-     * Pass 1 claims by exact (case-insensitive) label match against still-unclaimed original
-     * items, in line order -- an unrenamed or merely reordered row always keeps its own identity
-     * this way, regardless of position.
-     *
-     * Pass 2 is positional fallback by TRUE original array index (line N can only ever claim
-     * original[N], never "whichever original happens to still be unclaimed") -- and it is only
-     * even attempted when the total row count is UNCHANGED (`lines.length === original.length`).
-     * The moment a row is added or removed, every later original index shifts relative to the
-     * edited line indexes, so "line N" no longer reliably corresponds to "original row N"; this is
-     * exactly the ambiguity that must never be guessed. Only a pure in-place edit -- same count,
-     * nothing added or removed -- is safe to resolve this way, which is what lets a genuinely
-     * renamed row (its new text matches no original label) keep its original id while a more
-     * ambiguous compound edit (a simultaneous add/remove, or remove/rename) is left unresolved and
-     * correctly surfaces as a removal instead.
-     *
-     * Any original item left unclaimed after both passes is reported in `removed`. A line beyond
-     * what any original item (claimed or fallback) can cover is genuinely NEW and gets its own
-     * deterministic slug id. */
+     * non-empty line survives (never silently discarded). Identity resolution uses EXACT
+     * case-insensitive label matching only -- no positional fallback of any kind, not even one
+     * gated on the row count staying unchanged (an earlier attempt at that was still unsafe: a
+     * same-count swap -- delete one row, type unrelated new work in its place, leave everything
+     * else unchanged -- lines up positionally by coincidence and would silently transfer an
+     * existing canonical id, and its knownDate, onto the unrelated new row; see the breaker
+     * review's "same-position replacement" reproducer). A free-form textarea genuinely cannot
+     * distinguish "this row was renamed" from "this row was deleted and unrelated new text was
+     * typed in its place" -- so this never guesses. A line matching no original label (by exact
+     * text) is always NEW and gets its own deterministic slug id, regardless of which line number
+     * it occupies. Any original item with no exactly-matching line is REMOVED; the caller blocks
+     * approval locally when a removed item still owns a knownDate, rather than silently stranding
+     * or migrating that date. A future structured row editor with explicit hidden ids could safely
+     * support true renaming -- that is out of scope for this remediation. */
     function rebuildScope(
       rawText: string,
       original: GenesisScopeItemLike[],
@@ -2918,17 +2907,6 @@ export function fieldDashboardClientScript(
         const item = original[originalIndex];
         if (item) claimedByLine.set(lineIndex, item);
       });
-
-      if (lines.length === original.length) {
-        lines.forEach((_, lineIndex) => {
-          if (claimedByLine.has(lineIndex)) return;
-          if (claimedOriginalIndexes.has(lineIndex)) return;
-          const candidate = original[lineIndex];
-          if (!candidate) return;
-          claimedOriginalIndexes.add(lineIndex);
-          claimedByLine.set(lineIndex, candidate);
-        });
-      }
 
       const removed = original.filter(
         (_, idx) => !claimedOriginalIndexes.has(idx),
