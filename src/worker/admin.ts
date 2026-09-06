@@ -2507,21 +2507,22 @@ export function fieldDashboardClientScript(
     refreshAllSummaries();
   });
 
-  /** Requirement #3 (automatic canonical reads): opening Penthouse must load real canonical
-   * project data without the pilot user ever visiting Admin & diagnostics -- but a Worker route
-   * genuinely cannot be read before an admin key exists, so "automatic" means "the moment a key is
-   * available", not "before". Fires once per distinct non-empty key value (not on every keystroke,
-   * and not repeatedly for the same key), on the input's `change` event (fires on blur/Enter,
-   * exactly like a real browser commits a credential field) -- never on `input`, which would fire
-   * mid-paste/mid-type against a key that isn't finished yet. */
+  /** Requirement #3 (automatic canonical reads) as refined by interim review: opening Penthouse
+   * must load real canonical project data the moment a key becomes available, but the *primary*
+   * portfolio map is explicitly summary-only (Task 5's speed/cost improvement) -- automatic
+   * loading here fires exactly one GET /v1/projects/:id/summary per tracked project, never the
+   * old FORECAST_QUERY/FORECAST_HEALTH_QUERY/RECOVERY_QUERY workflows. Those remain diagnostics-
+   * only, still reachable via an individual card's own Refresh button or the Admin & diagnostics
+   * "Refresh all" button (both unchanged, still call runProjectQueries). Fires once per distinct
+   * non-empty key value (not on every keystroke, not repeatedly for the same key), on the input's
+   * `change` event (fires on blur/Enter, exactly like a real browser commits a credential field)
+   * -- never on `input`, which would fire mid-paste/mid-type against a key that isn't finished
+   * yet. */
   let lastAutoLoadedAdminKey = "";
   els.adminKey.addEventListener("change", () => {
     const key = adminKeyValue();
     if (!key || key === lastAutoLoadedAdminKey) return;
     lastAutoLoadedAdminKey = key;
-    trackedProjects.forEach((id) => {
-      runProjectQueries(id);
-    });
     refreshAllSummaries();
   });
 
@@ -2696,6 +2697,31 @@ export function fieldDashboardClientScript(
       });
     }
 
+    type GenesisBudgetLike = NonNullable<GenesisProposalLike["budget"]>;
+
+    // Clearing the baseline field must never discard other known budget facts (spent/currency);
+    // it only ever removes `baseline`. If nothing meaningful remains (no spent recorded either),
+    // the whole budget becomes undefined rather than a vestigial `{currency}`-only object.
+    function budgetWithoutBaseline(
+      existing: GenesisBudgetLike | undefined,
+    ): GenesisBudgetLike | undefined {
+      if (!existing || existing.spent === undefined) return undefined;
+      return { currency: existing.currency, spent: existing.spent };
+    }
+
+    // A valid new baseline replaces ONLY `baseline` -- `spent`/`currency` are preserved via
+    // conservative spread, never dropped by rebuilding the object from baseline+currency alone.
+    function budgetWithBaseline(
+      existing: GenesisBudgetLike | undefined,
+      baseline: number,
+    ): GenesisBudgetLike {
+      return {
+        currency: existing?.currency ?? "USD",
+        baseline,
+        ...(existing?.spent !== undefined ? { spent: existing.spent } : {}),
+      };
+    }
+
     function submitGenesisApproval(): Promise<void> {
       if (!currentProposal) return Promise.resolve();
       const proposal = currentProposal;
@@ -2708,24 +2734,23 @@ export function fieldDashboardClientScript(
         ? rebuildScope(scopeEl.value, proposal.baselineScope)
         : proposal.baselineScope;
 
-      // Budget correction: blank stays unknown, a valid number replaces the baseline, and an
-      // invalid (non-blank, non-numeric) entry is never silently coerced to 0 -- the previous
-      // value is kept and a concise inline note explains why.
+      // Budget correction: blank stays unknown (preserving any other known budget facts), a
+      // valid number replaces ONLY the baseline, and an invalid (non-blank, non-numeric or
+      // negative) entry BLOCKS approval entirely -- it must never silently commit a different
+      // value than the one the user believes they are approving.
       let correctedBudget = proposal.budget;
       if (budgetEl) {
         const raw = budgetEl.value.trim();
         if (raw === "") {
-          correctedBudget = undefined;
+          correctedBudget = budgetWithoutBaseline(proposal.budget);
         } else {
           const numeric = Number(raw.replace(/[$,]/g, ""));
           if (Number.isFinite(numeric) && numeric >= 0) {
-            correctedBudget = {
-              baseline: numeric,
-              currency: proposal.budget?.currency ?? "USD",
-            };
+            correctedBudget = budgetWithBaseline(proposal.budget, numeric);
           } else {
             genesisStatus.textContent =
-              "Budget must be a number; keeping the previous value.";
+              "Budget must be a valid non-negative number before approval.";
+            return Promise.resolve();
           }
         }
       }

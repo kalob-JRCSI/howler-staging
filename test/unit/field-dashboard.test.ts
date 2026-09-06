@@ -876,7 +876,7 @@ describe("admin key handling", () => {
 // exists, so "automatic" means the moment a key is entered, never requiring a manual visit to
 // Admin & diagnostics or a manual Refresh-all click first.
 describe("automatic canonical reads once an admin key is entered", () => {
-  it("entering the admin key (change event) automatically queries every tracked project, without clicking Refresh all", async () => {
+  it("entering the admin key (change event) automatically loads a summary for every tracked project, without clicking Refresh all", async () => {
     const h = mount(() => ({ ok: true, status: 200, bodyText: "{}" }), {
       trackedProjects: ["proj-a", "proj-b"],
     });
@@ -884,23 +884,19 @@ describe("automatic canonical reads once an admin key is entered", () => {
     el(h, "admin-key").value = "my-key";
     el(h, "admin-key").trigger("change");
     await flush();
-    // v0.9.6 Task 5: entering the admin key now *also* fires one portfolio-summary GET per
-    // tracked project (see "portfolio summary cards" below) -- additive, unrelated to this
-    // pre-existing /v1/intents query-workflow behavior, so this assertion is scoped to /v1/intents
-    // calls only.
+    // Interim review correction (post-Task 5): the primary Penthouse load is explicitly
+    // summary-only -- one GET /v1/projects/:id/summary per tracked project -- and never the old
+    // FORECAST_QUERY/FORECAST_HEALTH_QUERY/RECOVERY_QUERY /v1/intents workflows. Those remain
+    // diagnostics-only, reachable exclusively via an individual card's own Refresh button or the
+    // Admin & diagnostics "Refresh all" button (see the still-passing tests below and in the
+    // Refresh-all describe block, unaffected by this fix).
+    const summaryCalls = h.fetchCalls.filter((c) => /\/summary$/.test(c.path));
+    expect(summaryCalls.map((c) => c.path).sort()).toEqual([
+      "/v1/projects/proj-a/summary",
+      "/v1/projects/proj-b/summary",
+    ]);
     const intentCalls = h.fetchCalls.filter((c) => c.path === "/v1/intents");
-    const kinds = intentCalls.map((c) => callBody(c).kind).sort();
-    expect(kinds).toEqual(
-      ["FORECAST_QUERY", "FORECAST_HEALTH_QUERY", "RECOVERY_QUERY"]
-        .concat(["FORECAST_QUERY", "FORECAST_HEALTH_QUERY", "RECOVERY_QUERY"])
-        .sort(),
-    );
-    expect(intentCalls.some((c) => callBody(c).projectId === "proj-a")).toBe(
-      true,
-    );
-    expect(intentCalls.some((c) => callBody(c).projectId === "proj-b")).toBe(
-      true,
-    );
+    expect(intentCalls).toHaveLength(0);
   });
 
   it("does not re-fire for the same admin key value on a second change event", async () => {
@@ -2161,7 +2157,10 @@ describe("Project Genesis: editing the proposal before approval", () => {
     expect(new Set(scope.map((s) => s.id)).size).toBe(3);
   });
 
-  it("never converts an invalid budget entry to 0", async () => {
+  // Interim review gap: an invalid, non-blank budget correction must never silently commit the
+  // old value under a misleading "Approving..." status -- it must block approval entirely so the
+  // user is never told something was approved when it wasn't what they actually corrected.
+  it("blocks approval and keeps the review open when the corrected budget is invalid, never committing a different value than the user believes they entered", async () => {
     const h = mount(genesisRespond(), { trackedProjects: [] });
     el(h, "new-project-open").trigger("click");
     el(h, "genesis-text").value = "Create Smith Residence.";
@@ -2172,13 +2171,92 @@ describe("Project Genesis: editing the proposal before approval", () => {
     el(h, "genesis-approve").trigger("click");
     await flush();
 
+    const commitCalls = h.fetchCalls.filter(
+      (c) => c.path === "/v1/projects/genesis/commit",
+    );
+    expect(commitCalls).toHaveLength(0);
+    const tracked = JSON.parse(
+      h.storage.getItem("howler_field_tracked_projects") ?? "[]",
+    ) as string[];
+    expect(tracked).not.toContain("smith-residence");
+    expect(el(h, "genesis-review").hidden).toBe(false);
+    expect(el(h, "genesis-budget").value).toBe("not a number");
+    expect(el(h, "genesis-status").textContent.length).toBeGreaterThan(0);
+  });
+
+  it("preserves existing spent/currency when only the baseline is corrected to a new value", async () => {
+    const h = mount(
+      genesisRespond({
+        preview: {
+          ok: true,
+          status: 200,
+          bodyText: json({
+            schemaVersion: "0.9.6",
+            preview: true,
+            proposal: {
+              ...SAMPLE_PROPOSAL,
+              budget: { baseline: 310000, spent: 100000, currency: "USD" },
+            },
+          }),
+        },
+      }),
+      { trackedProjects: [] },
+    );
+    el(h, "new-project-open").trigger("click");
+    el(h, "genesis-text").value = "Create Smith Residence.";
+    el(h, "genesis-analyze").trigger("click");
+    await flush();
+
+    el(h, "genesis-budget").value = "350000";
+    el(h, "genesis-approve").trigger("click");
+    await flush();
+
     const call = h.fetchCalls.find(
       (c) => c.path === "/v1/projects/genesis/commit",
     );
     const proposal = callBody(call).proposal as Record<string, unknown>;
-    const budget = proposal.budget as Record<string, unknown> | undefined;
-    expect(budget?.baseline).not.toBe(0);
-    expect(budget?.baseline).toBe(310000);
+    expect(proposal.budget).toEqual({
+      baseline: 350000,
+      spent: 100000,
+      currency: "USD",
+    });
+  });
+
+  it("preserves spent/currency when baseline is cleared, never fabricating a zero baseline", async () => {
+    const h = mount(
+      genesisRespond({
+        preview: {
+          ok: true,
+          status: 200,
+          bodyText: json({
+            schemaVersion: "0.9.6",
+            preview: true,
+            proposal: {
+              ...SAMPLE_PROPOSAL,
+              budget: { baseline: 310000, spent: 100000, currency: "USD" },
+            },
+          }),
+        },
+      }),
+      { trackedProjects: [] },
+    );
+    el(h, "new-project-open").trigger("click");
+    el(h, "genesis-text").value = "Create Smith Residence.";
+    el(h, "genesis-analyze").trigger("click");
+    await flush();
+
+    el(h, "genesis-budget").value = "";
+    el(h, "genesis-approve").trigger("click");
+    await flush();
+
+    const call = h.fetchCalls.find(
+      (c) => c.path === "/v1/projects/genesis/commit",
+    );
+    const proposal = callBody(call).proposal as Record<string, unknown>;
+    const budget = proposal.budget as Record<string, unknown>;
+    expect(budget.baseline).toBeUndefined();
+    expect(budget.spent).toBe(100000);
+    expect(budget.currency).toBe("USD");
   });
 
   it("leaves budget unknown when the field is left blank, never silently zero", async () => {
@@ -2352,6 +2430,22 @@ describe("portfolio summary cards: one GET per tracked project", () => {
       "/v1/projects/proj-a/summary",
       "/v1/projects/proj-b/summary",
     ]);
+  });
+
+  // Interim review gap: automatic primary-portfolio loading must never also fire the old
+  // FORECAST_QUERY/FORECAST_HEALTH_QUERY/RECOVERY_QUERY workflows -- those remain diagnostics-
+  // only, triggered exclusively by an explicit individual-card Refresh or the Admin & diagnostics
+  // "Refresh all" button (see the still-passing tests in the automatic-canonical-reads and
+  // Refresh-all describe blocks above, which are unaffected by this fix).
+  it("never fires the old /v1/intents query workflows for automatic primary-portfolio loading", async () => {
+    const h = mount(genesisRespond(), {
+      trackedProjects: ["proj-a", "proj-b"],
+    });
+    el(h, "admin-key").value = "key-1";
+    el(h, "admin-key").trigger("change");
+    await flush();
+    const intentCalls = h.fetchCalls.filter((c) => c.path === "/v1/intents");
+    expect(intentCalls).toHaveLength(0);
   });
 
   it("renders Project Integrity, Progress, Budget, Primary exposure, Next movement, and Projected completion for each card", async () => {
