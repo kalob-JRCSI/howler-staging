@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { fieldDashboardClientScript } from "../../src/worker/admin";
+import {
+  fieldDashboardClientScript,
+  fieldDashboardHtml,
+} from "../../src/worker/admin";
 import type {
   FieldDashboardDocument,
   FieldDashboardElement,
@@ -346,6 +349,14 @@ function mountWithFetch(
     "ph-priorities-list",
     "ph-movement-band",
     "ph-intelligence-text",
+    "new-project-open",
+    "genesis-panel",
+    "genesis-text",
+    "genesis-analyze",
+    "genesis-review",
+    "genesis-cancel",
+    "genesis-status",
+    "index-card-container",
   ]);
   const storage = makeStorage();
   if (options.trackedProjects) {
@@ -468,12 +479,16 @@ describe("canonical action-kind mapping: refresh fires exactly the three read-on
     );
     el(h, "refresh-all").trigger("click");
     await flush();
-    expect(h.fetchCalls).toHaveLength(6);
+    // v0.9.6 Task 5: Refresh all now *also* fires one portfolio-summary GET per tracked project
+    // (additive, unrelated to this pre-existing /v1/intents query-workflow behavior) -- scoped to
+    // /v1/intents calls only, same as the admin-key auto-load test above.
+    const intentCalls = h.fetchCalls.filter((c) => c.path === "/v1/intents");
+    expect(intentCalls).toHaveLength(6);
     expect(
-      h.fetchCalls.filter((c) => callBody(c).projectId === "proj-a"),
+      intentCalls.filter((c) => callBody(c).projectId === "proj-a"),
     ).toHaveLength(3);
     expect(
-      h.fetchCalls.filter((c) => callBody(c).projectId === "proj-b"),
+      intentCalls.filter((c) => callBody(c).projectId === "proj-b"),
     ).toHaveLength(3);
   });
 
@@ -869,16 +884,21 @@ describe("automatic canonical reads once an admin key is entered", () => {
     el(h, "admin-key").value = "my-key";
     el(h, "admin-key").trigger("change");
     await flush();
-    const kinds = h.fetchCalls.map((c) => callBody(c).kind).sort();
+    // v0.9.6 Task 5: entering the admin key now *also* fires one portfolio-summary GET per
+    // tracked project (see "portfolio summary cards" below) -- additive, unrelated to this
+    // pre-existing /v1/intents query-workflow behavior, so this assertion is scoped to /v1/intents
+    // calls only.
+    const intentCalls = h.fetchCalls.filter((c) => c.path === "/v1/intents");
+    const kinds = intentCalls.map((c) => callBody(c).kind).sort();
     expect(kinds).toEqual(
       ["FORECAST_QUERY", "FORECAST_HEALTH_QUERY", "RECOVERY_QUERY"]
         .concat(["FORECAST_QUERY", "FORECAST_HEALTH_QUERY", "RECOVERY_QUERY"])
         .sort(),
     );
-    expect(h.fetchCalls.some((c) => callBody(c).projectId === "proj-a")).toBe(
+    expect(intentCalls.some((c) => callBody(c).projectId === "proj-a")).toBe(
       true,
     );
-    expect(h.fetchCalls.some((c) => callBody(c).projectId === "proj-b")).toBe(
+    expect(intentCalls.some((c) => callBody(c).projectId === "proj-b")).toBe(
       true,
     );
   });
@@ -1023,23 +1043,17 @@ describe("Facts / Commitments / Unknowns, derived from the real FORECAST_QUERY r
   });
 });
 
-// Phase 2 (product integration), requirement #2: "Selecting a visible portfolio project must
-// open a real usable Index Card/workspace." Every card already renders unconditionally in the
-// always-visible workspace section (see the contract-level drawer-placement tests), so "opening"
-// a project is scrolling its already-rendered card into view.
+// v0.9.6 Task 5: a portfolio card is now the compact, summary-derived Penthouse map entry (see
+// "portfolio summary cards" below) -- selecting one renders that one project's compact Index Card
+// shell into #index-card-container. Never all tracked projects' cards at once.
 describe("selecting a portfolio row opens that project's Index Card", () => {
-  it("clicking a portfolio row scrolls the matching project card's title into view", () => {
+  it("clicking a portfolio row selects that project and renders its Index Card container", async () => {
     const h = mount(() => ({ ok: true, status: 200, bodyText: "{}" }), {
       trackedProjects: ["proj-a", "proj-b"],
     });
-    const scrollSpy: { calls: number } = { calls: 0 };
-    (
-      el(h, "fp-1-title") as unknown as { scrollIntoView: () => void }
-    ).scrollIntoView = () => {
-      scrollSpy.calls += 1;
-    };
     el(h, "ph-row-1").trigger("click");
-    expect(scrollSpy.calls).toBe(1);
+    await flush();
+    expect(el(h, "index-card-container").innerHTML).toContain("proj-b");
   });
 
   it("does nothing for a row whose project is no longer tracked", () => {
@@ -1049,6 +1063,20 @@ describe("selecting a portfolio row opens that project's Index Card", () => {
     expect(() => {
       el(h, "ph-row-0").trigger("click");
     }).not.toThrow();
+  });
+
+  it("shows only one project's Index Card at a time, replacing the previous selection", async () => {
+    const h = mount(() => ({ ok: true, status: 200, bodyText: "{}" }), {
+      trackedProjects: ["proj-a", "proj-b"],
+    });
+    el(h, "ph-row-0").trigger("click");
+    await flush();
+    expect(el(h, "index-card-container").innerHTML).toContain("proj-a");
+    el(h, "ph-row-1").trigger("click");
+    await flush();
+    const html = el(h, "index-card-container").innerHTML;
+    expect(html).toContain("proj-b");
+    expect(html).not.toContain("proj-a");
   });
 });
 
@@ -1914,5 +1942,641 @@ describe("MEDIUM 2: untracked project state is purged automatically once the las
     await flush();
     const resumeCall = calls.find((c) => c.path.includes("/resume"));
     expect(resumeCall?.path).toBe("/v1/workflows/wf-d2/resume");
+  });
+});
+
+// ==================================================================================================
+// v0.9.6 Task 5: Penthouse as the sharp portfolio map + Project Genesis UX.
+// ==================================================================================================
+
+const SAMPLE_PROPOSAL = {
+  schemaVersion: "0.9.6",
+  proposalId: "genesis-smith-residence-2026-09-04T20-00-00-000Z",
+  projectId: "smith-residence",
+  projectName: "Smith Residence",
+  projectType: "RESIDENTIAL_REMODEL",
+  timezone: "America/New_York",
+  forecastAnchorDate: "2026-09-04",
+  sourceText: "Create Smith Residence. Budget is $310k.",
+  baselineScope: [
+    { id: "demolition", label: "Demolition", phase: "Demolition" },
+    { id: "kitchen", label: "Kitchen", phase: "General" },
+  ],
+  knownDates: [
+    {
+      subjectId: "demolition",
+      kind: "COMMITTED_START",
+      date: "2026-09-14",
+      label: "Demolition start",
+    },
+  ],
+  budget: { baseline: 310000, currency: "USD" },
+  assumptions: [
+    "Timezone defaulted to America/New_York for the pilot and needs PM confirmation.",
+  ],
+  risks: [],
+  missingCritical: ["Activity durations need PM validation"],
+};
+
+const SAMPLE_SUMMARY = {
+  projectId: "proj-a",
+  projectName: "proj-a",
+  progressPercent: 40,
+  integrity: {
+    score: 82,
+    condition: "Stable, exposed",
+    primaryDriver: "Stable.",
+  },
+  budget: {
+    baseline: 310000,
+    spent: 100000,
+    remaining: 210000,
+    spentPercent: 32,
+  },
+  primaryExposure: "No critical exposure identified.",
+  nextMovement: "Committed: Demolition starts 2026-09-14.",
+  projectedCompletion: "2026-10-18",
+  schedule: { committed: [], forecast: [] },
+  scope: [{ id: "demolition", label: "Demolition", phase: "Demolition" }],
+};
+
+interface RespondOverrides {
+  preview?: { ok: boolean; status: number; bodyText: string };
+  commit?: { ok: boolean; status: number; bodyText: string };
+  summary?: { ok: boolean; status: number; bodyText: string };
+}
+
+function genesisRespond(overrides: RespondOverrides = {}): Respond {
+  return (call) => {
+    if (call.path === "/v1/projects/genesis/preview") {
+      return (
+        overrides.preview ?? {
+          ok: true,
+          status: 200,
+          bodyText: json({
+            schemaVersion: "0.9.6",
+            preview: true,
+            proposal: SAMPLE_PROPOSAL,
+          }),
+        }
+      );
+    }
+    if (call.path === "/v1/projects/genesis/commit") {
+      return (
+        overrides.commit ?? {
+          ok: true,
+          status: 201,
+          bodyText: json({
+            schemaVersion: "0.9.6",
+            projectId: "smith-residence",
+            revision: 0,
+            forecastVersion: 1,
+            oversightDecision: "PASS",
+            publishable: false,
+            stagingOnly: true,
+          }),
+        }
+      );
+    }
+    if (/\/summary$/.test(call.path)) {
+      const projectId = call.path.split("/")[3];
+      return (
+        overrides.summary ?? {
+          ok: true,
+          status: 200,
+          bodyText: json({
+            ...SAMPLE_SUMMARY,
+            projectId,
+            projectName:
+              projectId === SAMPLE_PROPOSAL.projectId
+                ? SAMPLE_PROPOSAL.projectName
+                : projectId,
+          }),
+        }
+      );
+    }
+    return { ok: true, status: 200, bodyText: "{}" };
+  };
+}
+
+describe("Project Genesis: opening and closing the panel", () => {
+  it("New project opens the Genesis panel", () => {
+    const h = mount(genesisRespond(), { trackedProjects: [] });
+    expect(el(h, "genesis-panel").hidden).toBe(true);
+    el(h, "new-project-open").trigger("click");
+    expect(el(h, "genesis-panel").hidden).toBe(false);
+  });
+
+  it("Cancel closes the panel and clears the intake text cleanly", () => {
+    const h = mount(genesisRespond(), { trackedProjects: [] });
+    el(h, "new-project-open").trigger("click");
+    el(h, "genesis-text").value = "Create Smith Residence.";
+    el(h, "genesis-cancel").trigger("click");
+    expect(el(h, "genesis-panel").hidden).toBe(true);
+    expect(el(h, "genesis-text").value).toBe("");
+  });
+});
+
+describe("Project Genesis: preview", () => {
+  it("Analyze posts the intake text to /v1/projects/genesis/preview", async () => {
+    const h = mount(genesisRespond(), { trackedProjects: [] });
+    el(h, "new-project-open").trigger("click");
+    el(h, "genesis-text").value = "Create Smith Residence. Budget is $310k.";
+    el(h, "genesis-analyze").trigger("click");
+    await flush();
+    const call = h.fetchCalls.find(
+      (c) => c.path === "/v1/projects/genesis/preview",
+    );
+    expect(call).toBeDefined();
+    expect(callBody(call).text).toBe(
+      "Create Smith Residence. Budget is $310k.",
+    );
+  });
+
+  it("renders the preview as readable fields, never as raw JSON", async () => {
+    const h = mount(genesisRespond(), { trackedProjects: [] });
+    el(h, "new-project-open").trigger("click");
+    el(h, "genesis-text").value = "Create Smith Residence.";
+    el(h, "genesis-analyze").trigger("click");
+    await flush();
+    const html = el(h, "genesis-review").innerHTML;
+    expect(html).toContain("Smith Residence");
+    expect(html).toContain("Demolition");
+    expect(html).toContain("310,000");
+    expect(html).toContain("Activity durations need PM validation");
+    expect(html).not.toMatch(/"schemaVersion"/);
+    expect(html).not.toContain("proposalId");
+  });
+
+  it("shows a concise error and preserves the original intake when preview fails", async () => {
+    const h = mount(
+      genesisRespond({
+        preview: {
+          ok: false,
+          status: 400,
+          bodyText: json({ message: "Invalid Genesis proposal" }),
+        },
+      }),
+      { trackedProjects: [] },
+    );
+    el(h, "new-project-open").trigger("click");
+    el(h, "genesis-text").value = "garbled intake";
+    el(h, "genesis-analyze").trigger("click");
+    await flush();
+    expect(el(h, "genesis-status").textContent.length).toBeGreaterThan(0);
+    expect(el(h, "genesis-text").value).toBe("garbled intake");
+    expect(el(h, "genesis-review").hidden).toBe(true);
+  });
+});
+
+describe("Project Genesis: editing the proposal before approval", () => {
+  it("lets the user correct project name, budget, and scope through form inputs, then commits the corrected proposal", async () => {
+    const h = mount(genesisRespond(), { trackedProjects: [] });
+    el(h, "new-project-open").trigger("click");
+    el(h, "genesis-text").value = "Create Smith Residence.";
+    el(h, "genesis-analyze").trigger("click");
+    await flush();
+
+    el(h, "genesis-name").value = "Smith Family Residence";
+    el(h, "genesis-budget").value = "325000";
+    el(h, "genesis-scope").value = "Demolition\nKitchen\nNew Sunroom";
+
+    el(h, "genesis-approve").trigger("click");
+    await flush();
+
+    const call = h.fetchCalls.find(
+      (c) => c.path === "/v1/projects/genesis/commit",
+    );
+    expect(call).toBeDefined();
+    const body = callBody(call);
+    const proposal = body.proposal as Record<string, unknown>;
+    expect(proposal.projectName).toBe("Smith Family Residence");
+    expect((proposal.budget as Record<string, unknown>).baseline).toBe(325000);
+    const scope = proposal.baselineScope as { id: string; label: string }[];
+    expect(scope.map((s) => s.label)).toEqual([
+      "Demolition",
+      "Kitchen",
+      "New Sunroom",
+    ]);
+    expect(new Set(scope.map((s) => s.id)).size).toBe(3);
+  });
+
+  it("never converts an invalid budget entry to 0", async () => {
+    const h = mount(genesisRespond(), { trackedProjects: [] });
+    el(h, "new-project-open").trigger("click");
+    el(h, "genesis-text").value = "Create Smith Residence.";
+    el(h, "genesis-analyze").trigger("click");
+    await flush();
+
+    el(h, "genesis-budget").value = "not a number";
+    el(h, "genesis-approve").trigger("click");
+    await flush();
+
+    const call = h.fetchCalls.find(
+      (c) => c.path === "/v1/projects/genesis/commit",
+    );
+    const proposal = callBody(call).proposal as Record<string, unknown>;
+    const budget = proposal.budget as Record<string, unknown> | undefined;
+    expect(budget?.baseline).not.toBe(0);
+    expect(budget?.baseline).toBe(310000);
+  });
+
+  it("leaves budget unknown when the field is left blank, never silently zero", async () => {
+    const h = mount(genesisRespond(), { trackedProjects: [] });
+    el(h, "new-project-open").trigger("click");
+    el(h, "genesis-text").value = "Create Smith Residence.";
+    el(h, "genesis-analyze").trigger("click");
+    await flush();
+
+    el(h, "genesis-budget").value = "";
+    el(h, "genesis-approve").trigger("click");
+    await flush();
+
+    const call = h.fetchCalls.find(
+      (c) => c.path === "/v1/projects/genesis/commit",
+    );
+    const proposal = callBody(call).proposal as Record<string, unknown>;
+    expect(proposal.budget).toBeUndefined();
+  });
+
+  it("does not silently discard a visible scope entry that no longer matches an original label", async () => {
+    const h = mount(genesisRespond(), { trackedProjects: [] });
+    el(h, "new-project-open").trigger("click");
+    el(h, "genesis-text").value = "Create Smith Residence.";
+    el(h, "genesis-analyze").trigger("click");
+    await flush();
+
+    el(h, "genesis-scope").value = "Demolition\nDemolition\nKitchen";
+    el(h, "genesis-approve").trigger("click");
+    await flush();
+
+    const call = h.fetchCalls.find(
+      (c) => c.path === "/v1/projects/genesis/commit",
+    );
+    const proposal = callBody(call).proposal as Record<string, unknown>;
+    const scope = proposal.baselineScope as { id: string; label: string }[];
+    expect(scope).toHaveLength(3);
+    expect(new Set(scope.map((s) => s.id)).size).toBe(3);
+  });
+});
+
+describe("Project Genesis: successful commit", () => {
+  it("adds the new project to the tracked list, fetches its summary, selects it, and opens its Index Card", async () => {
+    const h = mount(genesisRespond(), { trackedProjects: [] });
+    el(h, "new-project-open").trigger("click");
+    el(h, "genesis-text").value = "Create Smith Residence.";
+    el(h, "genesis-analyze").trigger("click");
+    await flush();
+    el(h, "genesis-approve").trigger("click");
+    await flush();
+    await flush(); // the post-commit summary refresh + select is a further nested fetch chain
+
+    const tracked = JSON.parse(
+      h.storage.getItem("howler_field_tracked_projects") ?? "[]",
+    ) as string[];
+    expect(tracked).toContain("smith-residence");
+    const summaryCall = h.fetchCalls.find(
+      (c) =>
+        c.method === "GET" && c.path === "/v1/projects/smith-residence/summary",
+    );
+    expect(summaryCall).toBeDefined();
+    expect(el(h, "index-card-container").innerHTML).toContain(
+      "Smith Residence",
+    );
+    expect(el(h, "genesis-panel").hidden).toBe(true);
+  });
+
+  it("dedupes when the committed projectId is already tracked, never creating a duplicate card", async () => {
+    const h = mount(genesisRespond(), {
+      trackedProjects: ["smith-residence"],
+    });
+    el(h, "new-project-open").trigger("click");
+    el(h, "genesis-text").value = "Create Smith Residence.";
+    el(h, "genesis-analyze").trigger("click");
+    await flush();
+    el(h, "genesis-approve").trigger("click");
+    await flush();
+    const tracked = JSON.parse(
+      h.storage.getItem("howler_field_tracked_projects") ?? "[]",
+    ) as string[];
+    expect(tracked.filter((id) => id === "smith-residence")).toHaveLength(1);
+  });
+
+  it("shows a concise error and does not add a fake project when commit fails", async () => {
+    const h = mount(
+      genesisRespond({
+        commit: {
+          ok: false,
+          status: 409,
+          bodyText: json({ message: "Project already exists" }),
+        },
+      }),
+      { trackedProjects: [] },
+    );
+    el(h, "new-project-open").trigger("click");
+    el(h, "genesis-text").value = "Create Smith Residence.";
+    el(h, "genesis-analyze").trigger("click");
+    await flush();
+    el(h, "genesis-approve").trigger("click");
+    await flush();
+    const tracked = JSON.parse(
+      h.storage.getItem("howler_field_tracked_projects") ?? "[]",
+    ) as string[];
+    expect(tracked).not.toContain("smith-residence");
+    expect(el(h, "genesis-status").textContent.length).toBeGreaterThan(0);
+    expect(el(h, "genesis-review").hidden).toBe(false);
+  });
+});
+
+describe("Project Genesis: HTML escaping", () => {
+  it("never renders HTML-like project data as executable markup", async () => {
+    const dangerousProposal = {
+      ...SAMPLE_PROPOSAL,
+      projectName: '<img src=x onerror="window.__pwned=true">',
+      assumptions: ["<script>window.__pwned2=true<" + "/script>"],
+    };
+    const h = mount(
+      genesisRespond({
+        preview: {
+          ok: true,
+          status: 200,
+          bodyText: json({
+            schemaVersion: "0.9.6",
+            preview: true,
+            proposal: dangerousProposal,
+          }),
+        },
+      }),
+      { trackedProjects: [] },
+    );
+    el(h, "new-project-open").trigger("click");
+    el(h, "genesis-text").value = "anything";
+    el(h, "genesis-analyze").trigger("click");
+    await flush();
+    const html = el(h, "genesis-review").innerHTML;
+    expect(html).not.toContain("<img src=x");
+    expect(html).not.toContain("<script>window.__pwned2");
+    expect(html).toContain("&lt;img");
+  });
+});
+
+describe("Project Genesis: admin key handling", () => {
+  it("sends the live admin-key value as a Bearer token and never persists it", async () => {
+    const h = mount(genesisRespond(), { trackedProjects: [] });
+    el(h, "admin-key").value = "secret-key-1";
+    el(h, "new-project-open").trigger("click");
+    el(h, "genesis-text").value = "Create Smith Residence.";
+    el(h, "genesis-analyze").trigger("click");
+    await flush();
+    const previewCall = h.fetchCalls.find(
+      (c) => c.path === "/v1/projects/genesis/preview",
+    );
+    expect(previewCall?.headers.get("authorization")).toBe(
+      "Bearer secret-key-1",
+    );
+    expect(h.storage.hasKey("secret-key-1")).toBe(false);
+  });
+});
+
+describe("portfolio summary cards: one GET per tracked project", () => {
+  it("fetches exactly one /summary per tracked project when the admin key is entered", async () => {
+    const h = mount(genesisRespond(), {
+      trackedProjects: ["proj-a", "proj-b"],
+    });
+    el(h, "admin-key").value = "key-1";
+    el(h, "admin-key").trigger("change");
+    await flush();
+    const summaryCalls = h.fetchCalls.filter((c) => /\/summary$/.test(c.path));
+    expect(summaryCalls).toHaveLength(2);
+    expect(summaryCalls.map((c) => c.path).sort()).toEqual([
+      "/v1/projects/proj-a/summary",
+      "/v1/projects/proj-b/summary",
+    ]);
+  });
+
+  it("renders Project Integrity, Progress, Budget, Primary exposure, Next movement, and Projected completion for each card", async () => {
+    const h = mount(genesisRespond(), { trackedProjects: ["proj-a"] });
+    el(h, "admin-key").value = "key-1";
+    el(h, "admin-key").trigger("change");
+    await flush();
+    const html = el(h, "ph-portfolio-rows").innerHTML;
+    expect(html).toContain("Project Integrity");
+    expect(html).toContain("Progress");
+    expect(html).toContain("Budget");
+    expect(html).toContain("Primary exposure");
+    expect(html).toContain("Next movement");
+    expect(html).toContain("Projected completion");
+    expect(html).toContain("82 / 100");
+    expect(html).toContain("Stable, exposed");
+  });
+});
+
+describe("portfolio summary cards: budget honesty", () => {
+  it("shows spent/remaining when both are known", async () => {
+    const h = mount(genesisRespond(), { trackedProjects: ["proj-a"] });
+    el(h, "admin-key").value = "key-1";
+    el(h, "admin-key").trigger("change");
+    await flush();
+    const html = el(h, "ph-portfolio-rows").innerHTML;
+    expect(html).toMatch(/\$100,000 spent[\s\S]*\$210,000 remaining/);
+  });
+
+  it("discloses spend not recorded when baseline is known but spent is unknown, and never fabricates remaining", async () => {
+    const h = mount(
+      genesisRespond({
+        summary: {
+          ok: true,
+          status: 200,
+          bodyText: json({
+            ...SAMPLE_SUMMARY,
+            budget: {
+              baseline: 310000,
+              spent: null,
+              remaining: null,
+              spentPercent: null,
+            },
+          }),
+        },
+      }),
+      { trackedProjects: ["proj-a"] },
+    );
+    el(h, "admin-key").value = "key-1";
+    el(h, "admin-key").trigger("change");
+    await flush();
+    const html = el(h, "ph-portfolio-rows").innerHTML;
+    expect(html).toContain("Baseline $310,000");
+    expect(html).toContain("spend not recorded");
+    expect(html).not.toContain("remaining");
+  });
+
+  it("shows Budget not recorded when baseline is unknown", async () => {
+    const h = mount(
+      genesisRespond({
+        summary: {
+          ok: true,
+          status: 200,
+          bodyText: json({
+            ...SAMPLE_SUMMARY,
+            budget: {
+              baseline: null,
+              spent: null,
+              remaining: null,
+              spentPercent: null,
+            },
+          }),
+        },
+      }),
+      { trackedProjects: ["proj-a"] },
+    );
+    el(h, "admin-key").value = "key-1";
+    el(h, "admin-key").trigger("change");
+    await flush();
+    const html = el(h, "ph-portfolio-rows").innerHTML;
+    expect(html).toContain("Budget not recorded");
+  });
+});
+
+describe("portfolio: Project Integrity and Progress are visually and semantically distinct", () => {
+  it("uses separate labeled containers, never merging the two metrics", async () => {
+    const h = mount(genesisRespond(), { trackedProjects: ["proj-a"] });
+    el(h, "admin-key").value = "key-1";
+    el(h, "admin-key").trigger("change");
+    await flush();
+    const html = el(h, "ph-portfolio-rows").innerHTML;
+    const integrityIndex = html.indexOf("Project Integrity");
+    const progressIndex = html.indexOf("Progress");
+    expect(integrityIndex).toBeGreaterThan(-1);
+    expect(progressIndex).toBeGreaterThan(-1);
+    expect(integrityIndex).not.toBe(progressIndex);
+  });
+});
+
+describe("Needs attention", () => {
+  it("lists a project whose integrity is At risk or worse, with a concise one-line exposure", async () => {
+    const h = mount(
+      genesisRespond({
+        summary: {
+          ok: true,
+          status: 200,
+          bodyText: json({
+            ...SAMPLE_SUMMARY,
+            integrity: {
+              score: 45,
+              condition: "Critical",
+              primaryDriver: "Blocked constraint.",
+            },
+            primaryExposure: "Blocked: Permit approval.",
+          }),
+        },
+      }),
+      { trackedProjects: ["proj-a"] },
+    );
+    el(h, "admin-key").value = "key-1";
+    el(h, "admin-key").trigger("change");
+    await flush();
+    const html = el(h, "ph-priorities-list").innerHTML;
+    expect(html).toContain("Blocked: Permit approval.");
+  });
+
+  it("does not list a project whose integrity is Stable or Stable, exposed", async () => {
+    const h = mount(genesisRespond(), { trackedProjects: ["proj-a"] });
+    el(h, "admin-key").value = "key-1";
+    el(h, "admin-key").trigger("change");
+    await flush();
+    const html = el(h, "ph-priorities-list").innerHTML;
+    expect(html).toContain("Nothing needs you right now.");
+  });
+});
+
+describe("Penthouse static shell: portfolio map requirements", () => {
+  const html = fieldDashboardHtml();
+
+  it("has no portfolio-level 14-day Movement Gantt", () => {
+    expect(html).not.toContain("ph-gantt");
+    expect(html).not.toContain("ph-movement-band");
+  });
+
+  it("has no dead/fake nav buttons for modules that do not route anywhere", () => {
+    for (const label of [
+      "Forecast",
+      "Trades",
+      "Materials",
+      "Inspections",
+      "Decisions",
+      "Risks",
+      "Documents",
+      "Activity",
+    ]) {
+      expect(html).not.toMatch(new RegExp(`>${label}<`));
+    }
+  });
+
+  it("contains a visible New project anchor and the portfolio card container", () => {
+    expect(html).toContain('id="new-project-open"');
+    expect(html).toMatch(/New project/);
+    expect(html).toContain('id="ph-portfolio-rows"');
+  });
+
+  it('"Command the work." remains brand copy', () => {
+    expect(html).toContain("Command");
+    expect(html).toContain("the work.");
+  });
+
+  it("the desktop hero/atmosphere area is compact: no 520px+ hero, command heading <= 32px desktop and <= 28px mobile", () => {
+    expect(html).not.toMatch(/min-height:\s*520px/);
+    const desktopSizeMatch = /\.ph-command\s*\{[^}]*font-size:\s*(\d+)px/.exec(
+      html,
+    );
+    expect(desktopSizeMatch).not.toBeNull();
+    expect(Number(desktopSizeMatch?.[1])).toBeLessThanOrEqual(32);
+    const mobileBlockMatch =
+      /@media \(max-width:\s*760px\)[\s\S]*?\.ph-command\s*\{[^}]*font-size:\s*(\d+)px/.exec(
+        html,
+      );
+    expect(mobileBlockMatch).not.toBeNull();
+    expect(Number(mobileBlockMatch?.[1])).toBeLessThanOrEqual(28);
+    const atmosphereHeightMatches = [
+      ...html.matchAll(/\.ph-atmosphere\s*\{[^}]*min-height:\s*(\d+)px/g),
+    ];
+    expect(atmosphereHeightMatches.length).toBeGreaterThan(0);
+    for (const m of atmosphereHeightMatches) {
+      expect(Number(m[1])).toBeLessThanOrEqual(220);
+    }
+  });
+
+  it("Project Genesis is natural-language first: a textarea for intake, never a raw JSON textarea", () => {
+    const genesisTextareaMatch = /<textarea[^>]*id="genesis-text"[^>]*>/.exec(
+      html,
+    );
+    expect(genesisTextareaMatch).not.toBeNull();
+    expect(genesisTextareaMatch?.[0].toLowerCase()).not.toContain("json");
+  });
+
+  it("legacy evidence/admin controls remain available only under Admin & diagnostics", () => {
+    const match = /<details class="ph-admin-drawer">([\s\S]*?)<\/details>/.exec(
+      html,
+    );
+    expect(match).not.toBeNull();
+    const drawer = match?.[1] ?? "";
+    expect(drawer).toContain('id="new-project-id"');
+    expect(drawer).toContain('id="add-project"');
+    expect(drawer).toContain('id="refresh-all"');
+    expect(drawer).not.toContain('id="admin-key"');
+    expect(drawer).not.toContain('id="projects-container"');
+  });
+
+  it("the staging/shadow banner remains", () => {
+    expect(html).toMatch(/id="env-banner" role="status"/);
+    expect(html).toContain("STAGING");
+    expect(html).toContain("SHADOW");
+  });
+
+  it("voice control remains", () => {
+    expect(html).toContain('id="voice-push-to-talk"');
+    expect(html).toContain('id="voice-status"');
+  });
+
+  it("has a selected Index Card container, ready for one selected project rather than all-project rendering", () => {
+    expect(html).toContain('id="index-card-container"');
   });
 });

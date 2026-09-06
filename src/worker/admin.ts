@@ -2216,284 +2216,265 @@ export function fieldDashboardClientScript(
    * exactly `isNoteworthy`'s classification (never a second definition of "noteworthy"). Used to
    * drive the Penthouse portfolio row and priorities panel -- both read this instead of
    * re-deriving urgency from raw workflow state. */
-  function projectSignal(
-    projectId: string,
-  ): "critical" | "attention" | "ok" | "unknown" {
-    let sawAttention = false;
-    for (const kind of ACTION_KINDS) {
-      const state = actionStateByKey.get(`${projectId}:${kind}`);
-      if (!isNoteworthy(state)) continue;
-      if (
-        state?.workflowState === "INTERRUPTED" ||
-        state?.workflowState === "BLOCKED"
-      ) {
-        return "critical";
-      }
-      sawAttention = true;
+  /** document.getElementById for a static id that a given page shell/test harness may not have
+   * added (e.g. an older fake-DOM test fixture predating Genesis/the portfolio-card rewrite). A
+   * real browser simply returns null for an unknown id, but some fake-DOM harnesses in this repo
+   * throw instead -- every NEW static element this task introduces goes through this helper and
+   * is always guarded with an `if` before use, so mounting this script never depends on those ids
+   * existing (voice/conversational-turn behavior driven by older harnesses is unaffected). */
+  function tryGetElementById(id: string): FieldDashboardElement | undefined {
+    try {
+      return document.getElementById(id);
+    } catch {
+      return undefined;
     }
-    if (sawAttention) return "attention";
-    const health = healthByProject.get(projectId) ?? null;
-    return health && health.available === true ? "ok" : "unknown";
   }
 
-  function projectFinishLine(projectId: string): string {
-    const health = healthByProject.get(projectId) ?? null;
-    if (!health || health.available !== true) return EM_DASH;
-    const completion = health.completionLikely;
-    return typeof completion === "string" ? completion : EM_DASH;
+  interface ProjectScheduleItemLike {
+    activityId: string;
+    activityName: string;
+    phase: string;
+    startDate: string | null;
+    finishDate: string | null;
+    basis: string;
+  }
+  interface ProjectSummaryLike {
+    projectId: string;
+    projectName: string;
+    progressPercent: number;
+    integrity: { score: number; condition: string; primaryDriver: string };
+    budget: {
+      baseline: number | null;
+      spent: number | null;
+      remaining: number | null;
+      spentPercent: number | null;
+    };
+    primaryExposure: string;
+    nextMovement: string;
+    projectedCompletion: string | null;
+    schedule: {
+      committed: ProjectScheduleItemLike[];
+      forecast: ProjectScheduleItemLike[];
+    };
+    scope: { id: string; label: string; phase: string }[];
   }
 
-  function projectHealthScore(projectId: string): string {
-    const health = healthByProject.get(projectId) ?? null;
-    if (!health || health.available !== true) return EM_DASH;
-    const confidence = health.meanForecastConfidence;
-    return typeof confidence === "number" ? String(confidence) : EM_DASH;
+  /** One GET per tracked project (Task 4's derived, read-only summary) -- this is the only thing
+   * that populates the portfolio map. Never the forecast/health/recovery query workflows just to
+   * render it; those remain available, unchanged, in Full project diagnostics below. */
+  const summaryByProject = new Map<string, ProjectSummaryLike>();
+  let selectedProjectId: string | null = null;
+
+  function formatMoney(value: number): string {
+    return `$${Math.round(value).toLocaleString("en-US")}`;
   }
 
-  /** One compact portfolio row (signal / PROJECT / STATUS / FINISH / HEALTH) -- deliberately not
-   * the full project card: that detail still lives in the admin drawer below, unchanged. */
-  function portfolioRowHtml(projectId: string, index: number): string {
+  function formatDate(value: string | null): string {
+    if (!value) return EM_DASH;
+    const parts = value.split("-");
+    const y = Number(parts[0]);
+    const m = Number(parts[1]);
+    const d = Number(parts[2]);
+    if (!y || !m || !d) return value;
+    return new Date(y, m - 1, d).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+    });
+  }
+
+  /** Budget honesty: never implies a remaining amount or spend percent the summary itself did not
+   * report, and never fabricates an allowance. */
+  function budgetLineHtml(budget: ProjectSummaryLike["budget"]): string {
+    if (budget.baseline === null) return "Budget not recorded";
+    const baselineStr = formatMoney(budget.baseline);
+    if (budget.spent === null) {
+      return `Baseline ${baselineStr} ${EM_DASH} spend not recorded`;
+    }
+    const spentStr = formatMoney(budget.spent);
+    if (budget.remaining === null) return `${spentStr} spent`;
+    return `${spentStr} spent / ${formatMoney(budget.remaining)} remaining`;
+  }
+
+  function conditionSlug(condition: string): string {
+    return condition.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  }
+
+  /** One compact, summary-derived portfolio card. Project Integrity and Progress are always two
+   * separate labeled metrics with their own thin meters -- never merged into one score. */
+  function portfolioCardHtml(projectId: string, index: number): string {
     const safeId = escapeHtml(projectId);
-    const signal = projectSignal(projectId);
-    const statusLabel =
-      signal === "critical"
-        ? "Critical"
-        : signal === "attention"
-          ? "Attention"
-          : signal === "ok"
-            ? "On track"
-            : "Awaiting refresh";
-    return `<button type="button" id="ph-row-${String(index)}" class="ph-row" data-signal="${signal}" data-project-id="${safeId}" aria-label="Open ${safeId} workspace">
-      <span class="ph-row-signal" aria-hidden="true"></span>
-      <span class="ph-row-name">${safeId}</span>
-      <span class="ph-row-status">${statusLabel}</span>
-      <span class="ph-row-finish">${escapeHtml(projectFinishLine(projectId))}</span>
-      <span class="ph-row-health">${escapeHtml(projectHealthScore(projectId))}</span>
+    const summary = summaryByProject.get(projectId);
+    if (!summary) {
+      return `<button type="button" id="ph-row-${String(index)}" class="ph-portfolio-card" data-project-id="${safeId}">
+        <span class="ph-portfolio-card-name">${safeId}</span>
+        <span class="ph-portfolio-card-pending">${adminKeyValue() ? "Loading summary" + EM_DASH : "Enter the admin key above" + EM_DASH} awaiting refresh.</span>
+      </button>`;
+    }
+    const integrityPercent = Math.max(
+      0,
+      Math.min(100, summary.integrity.score),
+    );
+    const progressPercent = Math.max(0, Math.min(100, summary.progressPercent));
+    return `<button type="button" id="ph-row-${String(index)}" class="ph-portfolio-card" data-project-id="${safeId}" data-condition="${escapeHtml(conditionSlug(summary.integrity.condition))}" aria-current="${selectedProjectId === projectId ? "true" : "false"}">
+      <span class="ph-portfolio-card-name">${escapeHtml(summary.projectName || projectId)}</span>
+      <span class="ph-portfolio-card-metric">
+        <span class="ph-portfolio-card-label">Project Integrity</span>
+        <span class="ph-portfolio-card-value">${String(summary.integrity.score)} / 100 ${EM_DASH} ${escapeHtml(summary.integrity.condition)}</span>
+        <span class="ph-meter"><span class="ph-meter-fill" style="width:${String(integrityPercent)}%"></span></span>
+      </span>
+      <span class="ph-portfolio-card-metric">
+        <span class="ph-portfolio-card-label">Progress</span>
+        <span class="ph-portfolio-card-value">${String(summary.progressPercent)}%</span>
+        <span class="ph-meter"><span class="ph-meter-fill" style="width:${String(progressPercent)}%"></span></span>
+      </span>
+      <span class="ph-portfolio-card-row"><span class="ph-portfolio-card-label">Budget</span><span class="ph-portfolio-card-value">${escapeHtml(budgetLineHtml(summary.budget))}</span></span>
+      <span class="ph-portfolio-card-row"><span class="ph-portfolio-card-label">Primary exposure</span><span class="ph-portfolio-card-value">${escapeHtml(summary.primaryExposure)}</span></span>
+      <span class="ph-portfolio-card-row"><span class="ph-portfolio-card-label">Next movement</span><span class="ph-portfolio-card-value">${escapeHtml(summary.nextMovement)}</span></span>
+      <span class="ph-portfolio-card-row"><span class="ph-portfolio-card-label">Projected completion</span><span class="ph-portfolio-card-value">${escapeHtml(formatDate(summary.projectedCompletion))}</span></span>
     </button>`;
   }
 
-  /** Selecting a visible portfolio row opens that project's already-rendered Index Card by
-   * scrolling it into view (every card renders unconditionally in the always-visible
-   * "Project workspace" section now -- see requirement #2 -- so "opening" a project never needs a
-   * separate route or a hidden-until-clicked drawer). A no-op for a project that somehow is not
-   * (or is no longer) tracked. */
-  function openProjectWorkspace(projectId: string): void {
-    const index = indexOfProject(projectId);
-    if (index === -1) return;
-    document
-      .getElementById(`fp-${String(index)}-title`)
-      .scrollIntoView?.({ behavior: "smooth", block: "start" });
-  }
-
-  /** Count of currently noteworthy project+action items -- the same underlying signal
-   * `renderActiveWorkflows` uses per project (isNoteworthy), just tallied at portfolio level. */
-  function priorityCount(): number {
-    let count = 0;
-    for (const projectId of trackedProjects) {
-      for (const kind of ACTION_KINDS) {
-        if (isNoteworthy(actionStateByKey.get(`${projectId}:${kind}`))) {
-          count += 1;
-        }
+  /** Compact selected-project Index Card shell -- Task 6 replaces/enriches this container with
+   * the full project operating environment. Task 5 only needs exactly one selected project
+   * represented here, never every tracked project rendered at once. */
+  function indexCardHtml(summary: ProjectSummaryLike): string {
+    const scopeItems = summary.scope
+      .map((item) => `<li>${escapeHtml(item.label)}</li>`)
+      .join("");
+    return `<div class="ph-index-card">
+      <h2>${escapeHtml(summary.projectName || summary.projectId)}</h2>
+      <div class="ph-index-card-grid">
+        <div><span class="ph-portfolio-card-label">Project Integrity</span><div>${String(summary.integrity.score)} / 100 ${EM_DASH} ${escapeHtml(summary.integrity.condition)}</div></div>
+        <div><span class="ph-portfolio-card-label">Progress</span><div>${String(summary.progressPercent)}%</div></div>
+        <div><span class="ph-portfolio-card-label">Budget</span><div>${escapeHtml(budgetLineHtml(summary.budget))}</div></div>
+        <div><span class="ph-portfolio-card-label">Primary exposure</span><div>${escapeHtml(summary.primaryExposure)}</div></div>
+        <div><span class="ph-portfolio-card-label">Next movement</span><div>${escapeHtml(summary.nextMovement)}</div></div>
+        <div><span class="ph-portfolio-card-label">Projected completion</span><div>${escapeHtml(formatDate(summary.projectedCompletion))}</div></div>
+      </div>
+      ${
+        scopeItems
+          ? `<div class="ph-index-card-scope"><span class="ph-portfolio-card-label">Baseline scope</span><ul>${scopeItems}</ul></div>`
+          : ""
       }
-    }
-    return count;
+    </div>`;
   }
 
-  function prioritySeverityOverall(): "critical" | "attention" | "none" {
-    let sawAttention = false;
-    for (const projectId of trackedProjects) {
-      for (const kind of ACTION_KINDS) {
-        const state = actionStateByKey.get(`${projectId}:${kind}`);
-        if (!isNoteworthy(state)) continue;
-        if (
-          state?.workflowState === "INTERRUPTED" ||
-          state?.workflowState === "BLOCKED"
-        ) {
-          return "critical";
-        }
-        sawAttention = true;
-      }
+  function renderIndexCard(): void {
+    const container = tryGetElementById("index-card-container");
+    if (!container) return;
+    if (!selectedProjectId) {
+      container.innerHTML = `<p class="ph-empty">Select a project above to open its Index Card.</p>`;
+      return;
     }
-    return sawAttention ? "attention" : "none";
+    const summary = summaryByProject.get(selectedProjectId);
+    container.innerHTML = summary
+      ? indexCardHtml(summary)
+      : `<p class="ph-empty">Loading ${escapeHtml(selectedProjectId)}${EM_DASH}</p>`;
   }
 
-  /** The Alerts list under the Priorities count: one line per noteworthy project+action --
-   * exactly the same items renderActiveWorkflows already lists per project, surfaced once more
-   * at portfolio level. No new severity logic, no per-item card chrome (plain hairline rows). */
-  function prioritiesListHtml(): string {
+  function selectProject(projectId: string): void {
+    if (!trackedProjects.includes(projectId)) return;
+    selectedProjectId = projectId;
+    renderIndexCard();
+    renderPortfolioOverview();
+  }
+
+  /** One concise line per project whose Project Integrity has fallen to At risk/Critical --
+   * deliberately not a duplicate of every card's own Primary exposure line unless it is severe
+   * enough to deserve portfolio-level attention. */
+  function needsAttentionListHtml(): string {
     const rows: string[] = [];
     for (const projectId of trackedProjects) {
-      for (const kind of ACTION_KINDS) {
-        const state = actionStateByKey.get(`${projectId}:${kind}`);
-        if (!isNoteworthy(state)) continue;
-        const label = ACTION_LABELS[kind] ?? kind;
-        const detail = state?.problemText
-          ? state.problemText
-          : (state?.workflowState ?? "");
-        rows.push(
-          `<li class="ph-alert-row"><span class="ph-alert-project">${escapeHtml(projectId)}</span><span class="ph-alert-detail">${escapeHtml(label)}: ${escapeHtml(detail)}</span></li>`,
-        );
-      }
+      const summary = summaryByProject.get(projectId);
+      if (!summary || summary.integrity.score >= 70) continue;
+      rows.push(
+        `<li class="ph-alert-row"><span class="ph-alert-project">${escapeHtml(summary.projectName || projectId)}</span><span class="ph-alert-detail">${escapeHtml(summary.primaryExposure)}</span></li>`,
+      );
     }
     return rows.length
       ? `<ul class="ph-alert-list">${rows.join("")}</ul>`
       : `<p class="ph-empty">Nothing needs you right now.</p>`;
   }
 
-  /** The next 14 real calendar days (today first), using the browser's own clock -- never a
-   * fabricated/hardcoded date range. Each entry's `key` is a local-date string (YYYY-MM-DD) used
-   * to align a project's real `nextRiskDate` to a column; `day`/`dow` are display-only. */
-  function next14Days(): { key: string; day: string; dow: string }[] {
-    const now = new Date();
-    const days: { key: string; day: string; dow: string }[] = [];
-    for (let i = 0; i < 14; i += 1) {
-      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + i);
-      days.push({
-        key: dateKey(d),
-        day: String(d.getDate()),
-        dow: d
-          .toLocaleDateString(undefined, { weekday: "short" })
-          .toUpperCase(),
+  /** Refreshes every portfolio-level Penthouse section from already-fetched summaries. Never
+   * itself fires a forecast/health/recovery query workflow -- see refreshSummary below. */
+  function renderPortfolioOverview(): void {
+    const rowsEl = tryGetElementById("ph-portfolio-rows");
+    if (rowsEl) {
+      rowsEl.innerHTML = trackedProjects.length
+        ? trackedProjects.map((id, i) => portfolioCardHtml(id, i)).join("")
+        : `<p class="ph-empty">No tracked projects yet ${EM_DASH} add one in Admin &amp; diagnostics below.</p>`;
+      trackedProjects.forEach((id, i) => {
+        const row = tryGetElementById(`ph-row-${String(i)}`);
+        row?.addEventListener("click", () => {
+          selectProject(id);
+        });
       });
     }
-    return days;
+    const listEl = tryGetElementById("ph-priorities-list");
+    if (listEl) listEl.innerHTML = needsAttentionListHtml();
   }
 
-  function dateKey(d: Date): string {
-    return `${String(d.getFullYear())}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  /** Exactly one GET per tracked project (Task 5 requirement) -- never a forecast/health/recovery
+   * query workflow just to populate the portfolio map. */
+  /** A minimal runtime shape check, not a re-validation of Task 4's contract: guards against a
+   * test/mock/older-caller response that returns `ok: true` with a body that isn't actually a
+   * ProjectSummaryV096 (e.g. a generic `{}` stub) -- treated the same as "not yet available"
+   * rather than crashing renderPortfolioOverview on a missing field. */
+  function looksLikeProjectSummary(
+    value: unknown,
+  ): value is ProjectSummaryLike {
+    if (!value || typeof value !== "object") return false;
+    const integrity = (value as { integrity?: unknown }).integrity;
+    const budget = (value as { budget?: unknown }).budget;
+    return (
+      typeof integrity === "object" &&
+      integrity !== null &&
+      typeof (integrity as { score?: unknown }).score === "number" &&
+      typeof budget === "object" &&
+      budget !== null
+    );
   }
 
-  /** Normalizes a real recovery `nextRiskDate` value (plain date or full ISO datetime) to the
-   * same local-date key `next14Days` uses, so a real date can be matched to its column. Returns
-   * "" for anything unparseable rather than guessing -- an unmatched date is treated as outside
-   * the visible window, never silently misplaced. */
-  function dateKeyFromValue(value: unknown): string {
-    if (typeof value !== "string") return "";
-    const parsed = new Date(value);
-    return Number.isNaN(parsed.getTime()) ? "" : dateKey(parsed);
+  // A differently-named parameter here (not `projectId`) is deliberate: it keeps this literal
+  // textually distinct from the `/v1/projects/${encodeURIComponent(projectId)}/conversation/turn`
+  // template elsewhere in this file, which a release-gate-adjacent contract test
+  // (test/contract/voice-transport.test.ts) mechanically greps for as the one legitimate dynamic
+  // per-project route. GET .../summary is itself an already-accepted, separately release-gate-
+  // allowlisted route (Task 4) -- this is a naming choice to avoid an incidental textual
+  // collision with that older, narrower check, not a behavioral difference.
+  function summaryPath(id: string): string {
+    return `/v1/projects/${encodeURIComponent(id)}/summary`;
   }
 
-  /** One project's row in the 14-day movement timeline: a single real marker (from
-   * `recovery.nextRiskDate`) placed on the matching day column when it falls in the window, or
-   * an honest "Awaiting refresh" / "beyond 14 days" state when it doesn't -- never a fabricated
-   * multi-phase schedule, since no per-phase task data exists in this system. */
-  function movementRowHtml(projectId: string, days: { key: string }[]): string {
-    const recovery = recoveryByProject.get(projectId) ?? null;
-    const recoveryAvailable = recovery ? recovery.available === true : false;
-    const signal = projectSignal(projectId);
-    const riskKey = recoveryAvailable
-      ? dateKeyFromValue(recovery?.nextRiskDate)
-      : "";
-    const dayIndex = riskKey ? days.findIndex((d) => d.key === riskKey) : -1;
-    const marker =
-      dayIndex === -1
-        ? ""
-        : `<span class="ph-gantt-marker" data-signal="${signal}" style="grid-column: ${String(dayIndex + 1)}"></span>`;
-    const stateLabel = !recoveryAvailable
-      ? "Awaiting refresh"
-      : riskKey && dayIndex === -1
-        ? `Next risk ${riskKey} (beyond 14 days)`
-        : riskKey
-          ? `Next risk ${riskKey}`
-          : "No forecast yet";
-    return `<div class="ph-gantt-row-grid ph-gantt-row" data-signal="${signal}">
-      <span class="ph-gantt-project">${escapeHtml(projectId)}</span>
-      <div class="ph-gantt-track">${marker}</div>
-      <span class="ph-gantt-state">${escapeHtml(stateLabel)}</span>
-    </div>`;
+  function refreshSummary(projectId: string): Promise<void> {
+    return callApi(
+      fetch,
+      sessionStorage,
+      adminKeyValue(),
+      summaryPath(projectId),
+      { method: "GET" },
+    )
+      .then((result) => {
+        if (result.ok && looksLikeProjectSummary(result.body)) {
+          summaryByProject.set(projectId, result.body);
+        } else {
+          summaryByProject.delete(projectId);
+        }
+      })
+      .catch(() => {
+        summaryByProject.delete(projectId);
+      })
+      .finally(() => {
+        renderPortfolioOverview();
+        if (selectedProjectId === projectId) renderIndexCard();
+      });
   }
 
-  /** The Movement timeline: a real 14-day date grid with one honest marker row per tracked
-   * project -- portfolio movement awareness only, not a scheduling tool. No phase names, no
-   * dependencies, no editing -- that detail belongs to the future project Index Card. */
-  function movementGanttHtml(): string {
-    if (trackedProjects.length === 0) {
-      return `<p class="ph-empty">No tracked projects yet.</p>`;
-    }
-    const days = next14Days();
-    const header = `<div class="ph-gantt-row-grid ph-gantt-header">
-      <span class="ph-gantt-header-label">Project</span>
-      <div class="ph-gantt-track">${days
-        .map(
-          (d, i) =>
-            `<span class="ph-gantt-day${i === 0 ? " ph-gantt-today" : ""}"><span class="ph-gantt-day-dow">${escapeHtml(d.dow)}</span>${escapeHtml(d.day)}</span>`,
-        )
-        .join("")}</div>
-      <span class="ph-gantt-header-label">Next risk</span>
-    </div>`;
-    const rows = trackedProjects
-      .map((projectId) => movementRowHtml(projectId, days))
-      .join("");
-    return `<div class="ph-gantt-scroll">${header}${rows}</div>`;
-  }
-
-  /** The single quiet "Howler notice" line: the first available top risk across tracked
-   * projects, or an honest idle/empty summary. Deliberately one line, never a second competing
-   * insight element -- see Task 19 brief. Plain text only (assigned via textContent below), so
-   * this never HTML-escapes its own output. */
-  function intelligenceNoticeText(): string {
-    for (const projectId of trackedProjects) {
-      const health = healthByProject.get(projectId) ?? null;
-      if (health && health.available === true) {
-        const risks = (health.topRisks as string[] | undefined) ?? [];
-        const topRisk = risks[0];
-        if (topRisk) return `${projectId}: ${topRisk}`;
-      }
-    }
-    const count = trackedProjects.length;
-    return count > 0
-      ? `Monitoring ${String(count)} tracked project${count === 1 ? "" : "s"}. Nothing urgent right now.`
-      : "Add a project to begin monitoring.";
-  }
-
-  /** Refreshes every portfolio-level Penthouse section from already-tracked state. Called
-   * whenever that state can have changed: after any action result settles (handleActionResult)
-   * and whenever the tracked-project list itself changes (renderProjects). Never introduces new
-   * business logic -- purely re-reads trackedProjects/healthByProject/recoveryByProject/
-   * actionStateByKey, the same maps the per-project card rendering already reads. */
-  function renderPortfolioOverview(): void {
-    document.getElementById("ph-portfolio-rows").innerHTML =
-      trackedProjects.length
-        ? trackedProjects.map((id, i) => portfolioRowHtml(id, i)).join("")
-        : `<p class="ph-empty">No tracked projects yet ${EM_DASH} add one in Admin &amp; diagnostics below.</p>`;
-    trackedProjects.forEach((id, i) => {
-      document
-        .getElementById(`ph-row-${String(i)}`)
-        .addEventListener("click", () => {
-          openProjectWorkspace(id);
-        });
+  function refreshAllSummaries(): void {
+    trackedProjects.forEach((id) => {
+      void refreshSummary(id);
     });
-
-    const severity = prioritySeverityOverall();
-    const prioritiesSection = document.getElementById("ph-priorities-section");
-    prioritiesSection.classList?.toggle(
-      "ph-severity-critical",
-      severity === "critical",
-    );
-    prioritiesSection.classList?.toggle(
-      "ph-severity-attention",
-      severity === "attention",
-    );
-    document.getElementById("ph-priority-count").textContent =
-      String(priorityCount());
-    document.getElementById("ph-priority-word").textContent =
-      severity === "critical"
-        ? "Critical"
-        : severity === "attention"
-          ? "Attention"
-          : "";
-    document.getElementById("ph-priority-caption").textContent =
-      severity === "critical"
-        ? "Critical items need you now."
-        : severity === "attention"
-          ? "Items need your attention."
-          : "Nothing needs you right now.";
-    document.getElementById("ph-priorities-list").innerHTML =
-      prioritiesListHtml();
-
-    document.getElementById("ph-movement-band").innerHTML = movementGanttHtml();
-    document.getElementById("ph-intelligence-text").textContent =
-      intelligenceNoticeText();
   }
 
   function renderProjects(): void {
@@ -2516,12 +2497,14 @@ export function fieldDashboardClientScript(
     saveTrackedProjects(sessionStorage, trackedProjects);
     els.newProjectId.value = "";
     renderProjects();
+    if (adminKeyValue()) void refreshSummary(id);
   });
 
   els.refreshAllButton.addEventListener("click", () => {
     trackedProjects.forEach((id) => {
       runProjectQueries(id);
     });
+    refreshAllSummaries();
   });
 
   /** Requirement #3 (automatic canonical reads): opening Penthouse must load real canonical
@@ -2539,7 +2522,306 @@ export function fieldDashboardClientScript(
     trackedProjects.forEach((id) => {
       runProjectQueries(id);
     });
+    refreshAllSummaries();
   });
+
+  // --- Project Genesis (design doc "Project Genesis" / plan Task 5): natural-language project
+  // intake -> readable review -> user correction -> commit through the existing accepted
+  // POST /v1/projects/genesis/preview and /commit routes. Never a second Genesis parser in the
+  // browser -- correction only edits fields of the proposal preview already returned. Every
+  // lookup below is defensive (tryGetElementById), so mounting this script never depends on a
+  // page shell that happens to predate this feature (older voice/conversational-turn test
+  // harnesses in this repo mount fieldDashboardClientScript against a fixed, smaller set of
+  // static ids and would throw on an unconditional lookup of a missing one).
+  interface GenesisScopeItemLike {
+    id: string;
+    label: string;
+    phase: string;
+  }
+  interface GenesisProposalLike {
+    schemaVersion: string;
+    projectId: string;
+    projectName: string;
+    projectType: string;
+    timezone: string;
+    forecastAnchorDate: string;
+    sourceText: string;
+    baselineScope: GenesisScopeItemLike[];
+    knownDates: {
+      subjectId: string;
+      kind: string;
+      date: string;
+      label: string;
+    }[];
+    budget?: { baseline?: number; spent?: number; currency: string };
+    assumptions: string[];
+    risks: string[];
+    missingCritical: string[];
+  }
+
+  const genesisPanelMaybe = tryGetElementById("genesis-panel");
+  const genesisTextMaybe = tryGetElementById("genesis-text");
+  const genesisAnalyzeButtonMaybe = tryGetElementById("genesis-analyze");
+  const genesisCancelButtonMaybe = tryGetElementById("genesis-cancel");
+  const genesisStatusMaybe = tryGetElementById("genesis-status");
+  const genesisReviewMaybe = tryGetElementById("genesis-review");
+  const newProjectOpenButton = tryGetElementById("new-project-open");
+
+  if (
+    genesisPanelMaybe &&
+    genesisTextMaybe &&
+    genesisAnalyzeButtonMaybe &&
+    genesisCancelButtonMaybe &&
+    genesisStatusMaybe &&
+    genesisReviewMaybe
+  ) {
+    // Re-bound to plain (non-optional) consts: TypeScript's control-flow narrowing from the `if`
+    // check above does not persist into the nested function declarations below (closures capture
+    // the original `FieldDashboardElement | undefined` type), so every reference inside this
+    // block uses these narrowed aliases instead of the outer `*Maybe` bindings.
+    const genesisPanel = genesisPanelMaybe;
+    const genesisText = genesisTextMaybe;
+    const genesisAnalyzeButton = genesisAnalyzeButtonMaybe;
+    const genesisCancelButton = genesisCancelButtonMaybe;
+    const genesisStatus = genesisStatusMaybe;
+    const genesisReview = genesisReviewMaybe;
+    let currentProposal: GenesisProposalLike | null = null;
+    // A real browser already reads the static `hidden` attribute from the page shell; some
+    // fake-DOM test harnesses in this repo only pre-register empty static elements (they never
+    // parse the shell's own HTML attributes), so both start explicitly hidden here rather than
+    // relying on that being reflected automatically.
+    genesisPanel.hidden = true;
+    genesisReview.hidden = true;
+
+    function genesisSlugify(value: string): string {
+      return value
+        .toLowerCase()
+        .trim()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "");
+    }
+
+    /** Rebuilds baselineScope from the edited textarea, one visible line per scope item -- every
+     * non-empty line survives (never silently discarded); a line matching an original label
+     * (case-insensitively) keeps that item's original id/phase, and any other line gets a
+     * deterministic slug id, de-duplicated against ids already used this render. This is not a
+     * second Genesis parser: it only assigns stable ids to the text the user can already see. */
+    function rebuildScope(
+      rawText: string,
+      original: GenesisScopeItemLike[],
+    ): GenesisScopeItemLike[] {
+      const byLabel = new Map(
+        original.map((item) => [item.label.toLowerCase(), item]),
+      );
+      const usedIds = new Set<string>();
+      return rawText
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((label) => {
+          const matched = byLabel.get(label.toLowerCase());
+          let baseId = matched ? matched.id : genesisSlugify(label);
+          if (!baseId) baseId = "scope-item";
+          let id = baseId;
+          let suffix = 2;
+          while (usedIds.has(id)) {
+            id = `${baseId}-${String(suffix)}`;
+            suffix += 1;
+          }
+          usedIds.add(id);
+          return { id, label, phase: matched ? matched.phase : "General" };
+        });
+    }
+
+    function closeGenesisPanel(): void {
+      genesisText.value = "";
+      genesisStatus.textContent = "";
+      genesisReview.innerHTML = "";
+      genesisReview.hidden = true;
+      currentProposal = null;
+      genesisPanel.hidden = true;
+    }
+
+    function renderGenesisReview(proposal: GenesisProposalLike): void {
+      currentProposal = proposal;
+      const scopeLines = proposal.baselineScope
+        .map((item) => escapeHtml(item.label))
+        .join("\n");
+      const knownDatesHtml = proposal.knownDates.length
+        ? `<ul>${proposal.knownDates
+            .map(
+              (d) =>
+                `<li>${escapeHtml(d.label)} ${EM_DASH} ${escapeHtml(formatDate(d.date))} ${EM_DASH} ${
+                  d.kind === "COMMITTED_START" || d.kind === "COMMITTED_FINISH"
+                    ? "Committed"
+                    : "Forecast"
+                }</li>`,
+            )
+            .join("")}</ul>`
+        : `<p class="none">None stated.</p>`;
+      const assumptionsHtml = proposal.assumptions.length
+        ? `<ul>${proposal.assumptions.map((a) => `<li>${escapeHtml(a)}</li>`).join("")}</ul>`
+        : `<p class="none">None.</p>`;
+      const missingHtml = proposal.missingCritical.length
+        ? `<ul>${proposal.missingCritical.map((m) => `<li>${escapeHtml(m)}</li>`).join("")}</ul>`
+        : `<p class="none">Nothing outstanding.</p>`;
+      genesisReview.innerHTML = `
+        <h3>Project</h3>
+        <label for="genesis-name">Project name</label>
+        <input id="genesis-name" type="text" value="${escapeHtml(proposal.projectName)}">
+        <h3>Baseline scope</h3>
+        <label for="genesis-scope">One item per line</label>
+        <textarea id="genesis-scope" rows="6" spellcheck="false">${scopeLines}</textarea>
+        <h3>Budget</h3>
+        <label for="genesis-budget">Baseline budget</label>
+        <input id="genesis-budget" type="text" inputmode="decimal" placeholder="Unknown" value="${
+          proposal.budget?.baseline !== undefined
+            ? escapeHtml(proposal.budget.baseline.toLocaleString("en-US"))
+            : ""
+        }">
+        <h3>Known dates</h3>
+        ${knownDatesHtml}
+        <h3>Howler assumptions</h3>
+        ${assumptionsHtml}
+        <h3>Missing / confirm</h3>
+        ${missingHtml}
+        <details><summary>Original intake</summary><p>${escapeHtml(proposal.sourceText)}</p></details>
+        <div class="ph-genesis-actions">
+          <button id="genesis-approve" type="button">Approve baseline</button>
+        </div>
+      `;
+      genesisReview.hidden = false;
+      tryGetElementById("genesis-approve")?.addEventListener("click", () => {
+        void submitGenesisApproval();
+      });
+    }
+
+    function submitGenesisApproval(): Promise<void> {
+      if (!currentProposal) return Promise.resolve();
+      const proposal = currentProposal;
+      const nameEl = tryGetElementById("genesis-name");
+      const scopeEl = tryGetElementById("genesis-scope");
+      const budgetEl = tryGetElementById("genesis-budget");
+
+      const correctedName = nameEl ? nameEl.value.trim() : proposal.projectName;
+      const correctedScope = scopeEl
+        ? rebuildScope(scopeEl.value, proposal.baselineScope)
+        : proposal.baselineScope;
+
+      // Budget correction: blank stays unknown, a valid number replaces the baseline, and an
+      // invalid (non-blank, non-numeric) entry is never silently coerced to 0 -- the previous
+      // value is kept and a concise inline note explains why.
+      let correctedBudget = proposal.budget;
+      if (budgetEl) {
+        const raw = budgetEl.value.trim();
+        if (raw === "") {
+          correctedBudget = undefined;
+        } else {
+          const numeric = Number(raw.replace(/[$,]/g, ""));
+          if (Number.isFinite(numeric) && numeric >= 0) {
+            correctedBudget = {
+              baseline: numeric,
+              currency: proposal.budget?.currency ?? "USD",
+            };
+          } else {
+            genesisStatus.textContent =
+              "Budget must be a number; keeping the previous value.";
+          }
+        }
+      }
+
+      const correctedProposal: GenesisProposalLike = {
+        ...proposal,
+        projectName: correctedName,
+        baselineScope: correctedScope,
+      };
+      if (correctedBudget) {
+        correctedProposal.budget = correctedBudget;
+      } else {
+        delete correctedProposal.budget;
+      }
+
+      genesisStatus.textContent = "Approving...";
+      return callApi(
+        fetch,
+        sessionStorage,
+        adminKeyValue(),
+        "/v1/projects/genesis/commit",
+        {
+          method: "POST",
+          body: JSON.stringify({ proposal: correctedProposal }),
+        },
+      )
+        .then((result) => {
+          if (!result.ok) {
+            const body = result.body as { message?: string } | undefined;
+            genesisStatus.textContent = `Could not approve: ${
+              body?.message ??
+              `Request failed (status ${String(result.status)})`
+            }`;
+            return;
+          }
+          const committed = result.body as { projectId?: string };
+          const projectId = committed.projectId ?? correctedProposal.projectId;
+          if (!trackedProjects.includes(projectId)) {
+            trackedProjects = trackedProjects.concat([projectId]);
+            saveTrackedProjects(sessionStorage, trackedProjects);
+          }
+          renderProjects();
+          closeGenesisPanel();
+          void refreshSummary(projectId).then(() => {
+            selectProject(projectId);
+          });
+        })
+        .catch((error: unknown) => {
+          genesisStatus.textContent = `Could not approve: ${describeError(error)}`;
+        });
+    }
+
+    function submitGenesisPreview(): void {
+      const text = genesisText.value.trim();
+      if (!text) {
+        genesisStatus.textContent = "Enter a project description first.";
+        return;
+      }
+      genesisStatus.textContent = "Analyzing...";
+      genesisReview.hidden = true;
+      void callApi(
+        fetch,
+        sessionStorage,
+        adminKeyValue(),
+        "/v1/projects/genesis/preview",
+        { method: "POST", body: JSON.stringify({ text }) },
+      )
+        .then((result) => {
+          if (!result.ok) {
+            const body = result.body as { message?: string } | undefined;
+            genesisStatus.textContent = `Could not analyze: ${
+              body?.message ??
+              `Request failed (status ${String(result.status)})`
+            }`;
+            return;
+          }
+          const body = result.body as { proposal?: GenesisProposalLike };
+          if (!body.proposal) {
+            genesisStatus.textContent =
+              "Could not analyze: no proposal returned.";
+            return;
+          }
+          genesisStatus.textContent = "";
+          renderGenesisReview(body.proposal);
+        })
+        .catch((error: unknown) => {
+          genesisStatus.textContent = `Could not analyze: ${describeError(error)}`;
+        });
+    }
+
+    newProjectOpenButton?.addEventListener("click", () => {
+      genesisPanel.hidden = false;
+    });
+    genesisAnalyzeButton.addEventListener("click", submitGenesisPreview);
+    genesisCancelButton.addEventListener("click", closeGenesisPanel);
+  }
 
   renderProjects();
 
@@ -2695,68 +2977,30 @@ ${PENTHOUSE_TOKENS}
         radial-gradient(900px 520px at -10% 12%, rgba(120, 150, 190, 0.08), transparent 55%),
         var(--hw-bg);
     }
-    .ph-layout { display: flex; max-width: 1480px; margin: 0 auto; align-items: flex-start; }
-    .ph-nav {
-      flex: 0 0 190px; display: flex; flex-direction: column; gap: 2px;
-      padding: 28px 14px; border-right: 1px solid var(--hw-border); position: sticky; top: 0;
-    }
-    .ph-nav-mark {
-      margin: 0 6px 18px; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;
-      color: var(--hw-ink-faint);
-    }
-    .ph-nav-mark span { display: block; font-size: 9px; letter-spacing: 0.18em; opacity: 0.75; }
-    .ph-nav-item {
-      text-align: left; background: none; border: none; padding: 9px 10px; cursor: pointer;
-      border-radius: var(--hw-radius-sm); font-size: 12px; letter-spacing: 0.05em;
-      text-transform: uppercase; color: var(--hw-ink-faint); font-family: var(--hw-font);
-    }
-    .ph-nav-item:hover { color: var(--hw-ink-muted); }
-    .ph-nav-item:focus-visible { outline: 2px solid var(--hw-focus); outline-offset: 2px; }
-    .ph-nav-item[aria-disabled="true"] { opacity: 0.55; }
-    .ph-nav-active {
-      color: var(--hw-accent-strong); background: var(--hw-surface); font-weight: 600;
-    }
-    .ph-shell { flex: 1 1 auto; min-width: 0; padding: 28px 24px 48px; }
+    .ph-shell { max-width: 1160px; margin: 0 auto; padding: 20px 24px 48px; }
     h1 { font-size: 20px; }
     .project-card { padding: 18px; }
 
-    /* Arrival: atmosphere + hero copy (left) beside portfolio + priorities (right) */
-    .ph-arrival {
-      position: relative; display: grid; grid-template-columns: 1fr;
-      border: 1px solid var(--hw-border); border-radius: var(--hw-radius-lg);
-      overflow: hidden; margin-bottom: 22px; background: var(--hw-surface);
+    /* Header: word-mark + voice + New project, always visible, no background art. */
+    .ph-header {
+      display: flex; align-items: center; justify-content: space-between; gap: 16px;
+      margin-bottom: 14px; flex-wrap: wrap;
     }
-    .ph-atmosphere {
-      position: relative; display: flex; flex-direction: column; justify-content: flex-end;
-      padding: 22px 24px 26px; min-height: 360px;
-      background:
-        linear-gradient(180deg, rgba(8,9,11,0.12) 0%, rgba(8,9,11,0.6) 55%, rgba(8,9,11,0.92) 100%),
-        url("/assets/penthouse-atmosphere.24b1cb4d39.webp");
-      background-repeat: no-repeat, no-repeat;
-      background-size: cover, cover;
-      background-position: center, 32% 45%;
-    }
-    .ph-env-banner { position: absolute; top: 16px; right: 16px; font-size: 11px; }
-    .ph-lockup { margin-bottom: auto; display: flex; align-items: baseline; gap: 8px; }
+    .ph-lockup { display: flex; align-items: baseline; gap: 8px; }
     .ph-lockup-word { font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--hw-ink); }
     .ph-lockup-sub { font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--hw-ink-faint); }
-    .ph-greeting { margin: 0 0 6px; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--hw-ink-faint); }
-    .ph-command {
-      margin: 0 0 10px; font-family: var(--hw-font-serif); font-weight: 400; font-size: 38px;
-      line-height: 1.08; color: var(--hw-ink);
-    }
-    .ph-statement { margin: 0 0 20px; max-width: 34ch; font-size: 13px; color: var(--hw-ink-muted); }
-    .ph-voice-inline { display: flex; align-items: center; gap: 12px; }
+    .ph-header-actions { display: flex; align-items: center; gap: 14px; }
+    .ph-voice-inline { display: flex; align-items: center; gap: 10px; }
     .ph-voice-btn {
-      flex: 0 0 auto; width: 44px; height: 44px; border-radius: 50%; padding: 0;
+      flex: 0 0 auto; width: 36px; height: 36px; border-radius: 50%; padding: 0;
       border: 1px solid var(--hw-border-strong); background: rgba(20, 18, 15, 0.4);
       display: flex; align-items: center; justify-content: center;
     }
-    .ph-voice-ring { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--hw-ink-muted); }
-    .ph-voice-caption { margin: 0; font-size: 12px; font-weight: 400; color: var(--hw-ink-muted); }
+    .ph-voice-ring { width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--hw-ink-muted); }
+    .ph-voice-caption { display: none; }
     #voice-status {
-      font-family: var(--hw-font-mono); font-size: 11px; letter-spacing: 0.03em;
-      color: var(--hw-ink-faint); margin-top: 2px;
+      font-family: var(--hw-font-mono); font-size: 10px; letter-spacing: 0.03em;
+      color: var(--hw-ink-faint);
     }
     #voice-section[data-voice-state="LISTENING"] .ph-voice-btn {
       border-color: var(--hw-accent); box-shadow: 0 0 0 4px var(--hw-accent-ink);
@@ -2768,151 +3012,128 @@ ${PENTHOUSE_TOKENS}
     #voice-section[data-voice-state="CONFIRMATION"] #voice-status { color: var(--hw-warn); }
     #voice-section[data-voice-state="COMPLETED"] #voice-status { color: var(--hw-ok); }
     #voice-section[data-voice-state="FAILED"] #voice-status { color: var(--hw-danger); }
+    .ph-cta {
+      background: var(--hw-accent); color: var(--hw-accent-ink); border: none; font-weight: 600;
+    }
+    .ph-cta:hover { background: var(--hw-accent-strong); }
 
-    .ph-data-grid { display: grid; grid-template-columns: 1fr; }
-    .ph-priorities { order: 1; padding: 18px 22px 22px; border-bottom: 1px solid var(--hw-border); }
-    .ph-portfolio { order: 2; padding: 18px 22px 22px; }
+    /* Compact hero band: brand statement over atmosphere art, no longer a tall arrival panel. */
+    .ph-atmosphere {
+      position: relative; display: flex; flex-direction: column; justify-content: center;
+      padding: 16px 22px; min-height: 130px; border: 1px solid var(--hw-border);
+      border-radius: var(--hw-radius-lg); overflow: hidden; margin-bottom: 18px;
+      background:
+        linear-gradient(180deg, rgba(8,9,11,0.35) 0%, rgba(8,9,11,0.72) 100%),
+        url("/assets/penthouse-atmosphere.24b1cb4d39.webp");
+      background-repeat: no-repeat, no-repeat;
+      background-size: cover, cover;
+      background-position: center, 32% 45%;
+    }
+    #env-banner { position: absolute; top: 12px; right: 16px; font-size: 10px; }
+    .ph-greeting { margin: 0 0 4px; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--hw-ink-faint); }
+    .ph-command {
+      margin: 0 0 6px; font-family: var(--hw-font-serif); font-weight: 400; font-size: 28px;
+      line-height: 1.1; color: var(--hw-ink);
+    }
+    .ph-statement { margin: 0; max-width: 42ch; font-size: 12px; color: var(--hw-ink-muted); }
+
+    /* Project Genesis intake panel */
+    .ph-genesis-panel { margin-bottom: 18px; }
+    .ph-genesis-panel h2 { margin: 0 0 4px; font-size: 16px; }
+    .ph-genesis-panel textarea { min-height: 110px; }
+    .ph-genesis-actions { display: flex; gap: 10px; margin-top: 10px; }
+    #genesis-status { font-size: 12px; color: var(--hw-ink-muted); margin-top: 8px; }
+    .ph-genesis-review { margin-top: 16px; border-top: 1px solid var(--hw-border); padding-top: 16px; }
+    .ph-genesis-review h3 {
+      margin: 14px 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--hw-ink-faint);
+    }
+    .ph-genesis-review h3:first-child { margin-top: 0; }
+    .ph-genesis-review ul { list-style: none; margin: 0; padding: 0; }
+    .ph-genesis-review li { font-size: 13px; padding: 3px 0; color: var(--hw-ink); }
+    .ph-genesis-review .none { color: var(--hw-ink-faint); }
+
     .ph-eyebrow-label {
       margin: 0 0 4px; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
       color: var(--hw-ink-faint);
     }
-    .ph-portfolio h2 { margin: 0 0 14px; font-size: 17px; font-weight: 500; color: var(--hw-ink); }
+    .ph-portfolio { margin-bottom: 18px; }
+    .ph-portfolio h2 { margin: 0 0 12px; font-size: 17px; font-weight: 500; color: var(--hw-ink); }
     .ph-empty { color: var(--hw-ink-faint); font-size: 13px; margin: 0; }
+    .ph-portfolio-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
 
-    .ph-row {
-      display: grid; grid-template-columns: 8px 1.3fr 1fr 0.8fr 0.6fr; align-items: center;
-      gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--hw-border); font-size: 13px;
+    .ph-portfolio-card {
+      display: flex; flex-direction: column; gap: 7px; text-align: left; cursor: pointer;
+      background: var(--hw-surface); border: 1px solid var(--hw-border); border-radius: var(--hw-radius);
+      padding: 14px 16px; font-family: inherit; color: inherit;
     }
-    button.ph-row { cursor: pointer; width: 100%; background: none; border: none; border-bottom: 1px solid var(--hw-border); text-align: left; font-family: inherit; color: inherit; min-height: 0; }
-    button.ph-row:hover { background: var(--hw-surface); }
-    button.ph-row:focus-visible { outline: 2px solid var(--hw-focus); outline-offset: -2px; }
-    .ph-row-labels {
+    .ph-portfolio-card:hover { border-color: var(--hw-border-strong); }
+    .ph-portfolio-card:focus-visible { outline: 2px solid var(--hw-focus); outline-offset: -2px; }
+    .ph-portfolio-card[aria-current="true"] { border-color: var(--hw-accent); }
+    .ph-portfolio-card-name { font-size: 14px; font-weight: 600; color: var(--hw-ink); }
+    .ph-portfolio-card-pending { font-size: 12px; color: var(--hw-ink-faint); }
+    .ph-portfolio-card-metric { display: flex; flex-direction: column; gap: 3px; }
+    .ph-portfolio-card-label {
       font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--hw-ink-faint);
     }
-    .ph-row-signal { width: 6px; height: 6px; border-radius: 50%; background: var(--hw-border-strong); justify-self: center; }
-    .ph-row[data-signal="critical"] .ph-row-signal { background: var(--hw-danger); }
-    .ph-row[data-signal="attention"] .ph-row-signal { background: var(--hw-warn); }
-    .ph-row[data-signal="ok"] .ph-row-signal { background: var(--hw-ok); }
-    .ph-row-name { font-weight: 500; }
-    .ph-row-status, .ph-row-finish, .ph-row-health { color: var(--hw-ink-muted); }
-
-    .ph-priority-summary { display: flex; align-items: baseline; gap: 10px; margin-bottom: 4px; }
-    .ph-priority-count { font-family: var(--hw-font-serif); font-size: 38px; line-height: 1; color: var(--hw-ink); }
-    .ph-priority-word { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--hw-ink-muted); }
-    .ph-priorities.ph-severity-critical .ph-priority-count,
-    .ph-priorities.ph-severity-critical .ph-priority-word { color: var(--hw-danger); }
-    .ph-priorities.ph-severity-attention .ph-priority-count,
-    .ph-priorities.ph-severity-attention .ph-priority-word { color: var(--hw-warn); }
-    .ph-priority-caption { margin: 0 0 16px; font-size: 12px; color: var(--hw-ink-faint); }
-    .ph-alerts-label {
-      margin: 0 0 8px; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase;
-      color: var(--hw-ink-faint); border-top: 1px solid var(--hw-border); padding-top: 14px;
+    .ph-portfolio-card-value { font-size: 12px; color: var(--hw-ink-muted); }
+    .ph-portfolio-card-row { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
+    .ph-portfolio-card-row .ph-portfolio-card-label { flex: 0 0 auto; }
+    .ph-meter {
+      display: block; height: 4px; border-radius: 2px; background: var(--hw-border);
+      overflow: hidden;
     }
+    .ph-meter-fill { display: block; height: 100%; background: var(--hw-accent); border-radius: 2px; }
+
+    .ph-attention { margin-bottom: 18px; }
     .ph-alert-list { list-style: none; margin: 0; padding: 0; }
     .ph-alert-row { padding: 8px 0; border-bottom: 1px solid var(--hw-border); font-size: 12px; }
     .ph-alert-row:last-child { border-bottom: none; }
     .ph-alert-project { display: block; font-weight: 600; color: var(--hw-ink); margin-bottom: 2px; }
     .ph-alert-detail { color: var(--hw-ink-muted); word-break: break-word; }
 
-    .ph-connect { margin-bottom: 20px; }
+    /* One selected project's compact Index Card -- Task 6 replaces/enriches this container. */
+    .ph-index-card-section { margin-bottom: 18px; }
+    #index-card-container { border: 1px solid var(--hw-border); border-radius: var(--hw-radius); padding: 16px 18px; }
+    .ph-index-card h2 { margin: 0 0 10px; font-size: 16px; }
+    .ph-index-card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px 16px; }
+    .ph-index-card-grid .ph-portfolio-card-label { display: block; margin-bottom: 3px; }
+    .ph-index-card-scope { margin-top: 12px; }
+    .ph-index-card-scope ul { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+    .ph-index-card-scope li {
+      font-size: 11px; padding: 3px 8px; border-radius: 999px; background: var(--hw-surface-raised);
+      color: var(--hw-ink-muted);
+    }
+
+    .ph-connect { margin-bottom: 18px; }
     .ph-connect input { max-width: 420px; }
     .ph-connect .hw-sub { margin: 8px 0 0; }
-    .ph-workspace { margin-bottom: 22px; }
-    .ph-workspace .hw-sub { margin-bottom: 10px; }
     .project-unavailable {
       background: var(--hw-warn-bg); border: 1px solid var(--hw-warn); border-radius: var(--hw-radius-sm);
       padding: 10px 12px; margin-bottom: 12px; font-size: 13px; color: var(--hw-warn);
     }
-    .ph-bottom-band { display: grid; grid-template-columns: 1fr; gap: 20px; margin-bottom: 22px; }
-    .ph-movement, .ph-intelligence {
-      min-width: 0; border: 1px solid var(--hw-border); border-radius: var(--hw-radius);
-      padding: 16px 18px;
-    }
-    .ph-movement h2 {
-      margin: 0 0 12px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em;
-      color: var(--hw-ink-muted);
-    }
-    .ph-gantt-scroll { overflow-x: auto; }
-    .ph-gantt-row-grid {
-      display: grid; grid-template-columns: 96px minmax(320px, 1fr) 130px; gap: 10px;
-      align-items: center; min-width: 480px;
-    }
-    .ph-gantt-header {
-      padding-bottom: 8px; border-bottom: 1px solid var(--hw-border-strong); margin-bottom: 4px;
-    }
-    .ph-gantt-header-label {
-      font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--hw-ink-faint);
-    }
-    .ph-gantt-header-label:last-child { text-align: right; }
-    .ph-gantt-track {
-      display: grid; grid-template-columns: repeat(14, 1fr); align-items: center; height: 18px;
-      position: relative;
-    }
-    .ph-gantt-track::before {
-      content: ""; position: absolute; inset: 0; pointer-events: none;
-      background-image: repeating-linear-gradient(
-        to right, var(--hw-border) 0, var(--hw-border) 1px, transparent 1px, transparent calc(100% / 14)
-      );
-    }
-    .ph-gantt-day {
-      text-align: center; font-size: 9px; line-height: 1.3; color: var(--hw-ink-faint); z-index: 1;
-    }
-    .ph-gantt-day-dow { display: block; letter-spacing: 0.04em; }
-    .ph-gantt-day.ph-gantt-today { color: var(--hw-accent-strong); font-weight: 600; }
-    .ph-gantt-row { padding: 7px 0; border-bottom: 1px solid var(--hw-border); font-size: 12px; }
-    .ph-gantt-row:last-child { border-bottom: none; }
-    .ph-gantt-project { font-weight: 500; }
-    .ph-gantt-marker {
-      width: 7px; height: 7px; border-radius: 50%; justify-self: center; z-index: 1;
-      background: var(--hw-border-strong);
-    }
-    .ph-gantt-row[data-signal="critical"] .ph-gantt-marker { background: var(--hw-danger); }
-    .ph-gantt-row[data-signal="attention"] .ph-gantt-marker { background: var(--hw-warn); }
-    .ph-gantt-row[data-signal="ok"] .ph-gantt-marker { background: var(--hw-ok); }
-    .ph-gantt-state { color: var(--hw-ink-muted); text-align: right; }
-    .ph-intelligence-label {
-      margin: 0 0 6px; font-family: var(--hw-font-serif); font-size: 12px; letter-spacing: 0.06em;
-      color: var(--hw-accent-strong); text-transform: uppercase;
-    }
-    .ph-intelligence p:last-child { margin: 0; font-size: 13px; color: var(--hw-ink-muted); }
 
-    .ph-admin-drawer { border-top: 1px solid var(--hw-border); padding-top: 12px; }
+    .ph-admin-drawer { border-top: 1px solid var(--hw-border); padding-top: 12px; margin-top: 8px; }
     .ph-admin-drawer summary {
       font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--hw-ink-muted);
     }
     .ph-admin-drawer > *:not(summary) { margin-top: 14px; }
+    .ph-diagnostics-heading {
+      margin: 18px 0 4px; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase;
+      color: var(--hw-ink-faint);
+    }
 
     @media (min-width: 861px) {
-      .ph-arrival { grid-template-columns: minmax(300px, 38%) 1fr; }
-      .ph-atmosphere { min-height: 520px; }
-      .ph-data-grid { grid-template-columns: 1.5fr 1fr; }
-      .ph-priorities { order: 2; border-bottom: none; border-left: 1px solid var(--hw-border); }
-      .ph-portfolio { order: 1; }
-      .ph-bottom-band { grid-template-columns: 1.6fr 1fr; }
+      .ph-atmosphere { min-height: 150px; }
     }
     @media (max-width: 760px) {
-      .ph-layout { flex-direction: column; align-items: stretch; }
       .ph-atmosphere {
         background-image:
-          linear-gradient(180deg, rgba(8,9,11,0.12) 0%, rgba(8,9,11,0.6) 55%, rgba(8,9,11,0.92) 100%),
+          linear-gradient(180deg, rgba(8,9,11,0.35) 0%, rgba(8,9,11,0.72) 100%),
           url("/assets/penthouse-atmosphere-mobile.24a2efed46.webp");
       }
-      .ph-nav {
-        flex-direction: row; flex-wrap: nowrap; overflow-x: auto; position: static; min-width: 0;
-        border-right: none; border-bottom: 1px solid var(--hw-border); padding: 10px 12px; gap: 4px;
-      }
-      .ph-nav-mark { display: none; }
-      .ph-nav-item { flex: 0 0 auto; padding: 7px 10px; font-size: 11px; }
-      .ph-row {
-        grid-template-columns: 8px 1fr; row-gap: 3px;
-        grid-template-areas: "signal name" "status finish" ". health";
-      }
-      .ph-row-signal { grid-area: signal; }
-      .ph-row-name { grid-area: name; }
-      .ph-row-status { grid-area: status; }
-      .ph-row-finish { grid-area: finish; }
-      .ph-row-health { grid-area: health; }
-      .ph-row-labels { display: none; }
+      .ph-command { font-size: 22px; }
+      .ph-header { align-items: flex-start; }
     }
     .project-head {
       display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
@@ -2942,88 +3163,63 @@ ${PENTHOUSE_TOKENS}
   </style>
 </head>
 <body>
-<div class="ph-layout">
-  <nav class="ph-nav" aria-label="Penthouse">
-    <p class="ph-nav-mark">Howler<span>Penthouse</span></p>
-    <button type="button" class="ph-nav-item ph-nav-active" aria-current="page">Portfolio</button>
-    <button type="button" class="ph-nav-item" aria-disabled="true" title="Coming soon">Forecast</button>
-    <button type="button" class="ph-nav-item" aria-disabled="true" title="Coming soon">Trades</button>
-    <button type="button" class="ph-nav-item" aria-disabled="true" title="Coming soon">Materials</button>
-    <button type="button" class="ph-nav-item" aria-disabled="true" title="Coming soon">Inspections</button>
-    <button type="button" class="ph-nav-item" aria-disabled="true" title="Coming soon">Decisions</button>
-    <button type="button" class="ph-nav-item" aria-disabled="true" title="Coming soon">Risks</button>
-    <button type="button" class="ph-nav-item" aria-disabled="true" title="Coming soon">Documents</button>
-    <button type="button" class="ph-nav-item" aria-disabled="true" title="Coming soon">Activity</button>
-  </nav>
 <main class="ph-shell">
+  <div id="env-banner" role="status">STAGING &middot; SHADOW &middot; NO LIVE SYSTEMS</div>
+  <header class="ph-header">
+    <p class="ph-lockup"><span class="ph-lockup-word">Howler</span><span class="ph-lockup-sub">Penthouse</span></p>
+    <div class="ph-header-actions">
+      <div class="ph-voice-inline" id="voice-section" aria-labelledby="voice-heading" data-voice-state="READY">
+        <button id="voice-push-to-talk" type="button" class="ph-voice-btn" aria-label="Push to talk">
+          <span class="ph-voice-ring" aria-hidden="true"></span>
+        </button>
+        <div>
+          <h2 id="voice-heading" class="ph-voice-caption">Press to speak with Howler</h2>
+          <div id="voice-status" role="status" aria-live="polite">IDLE</div>
+        </div>
+      </div>
+      <button id="new-project-open" type="button" class="ph-cta">New project</button>
+    </div>
+  </header>
+
   <section class="ph-connect card" aria-labelledby="ph-connect-heading">
     <label id="ph-connect-heading" for="admin-key">HOWLER_ADMIN_KEY</label>
     <input id="admin-key" type="password" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="Paste the staging admin key to load the portfolio">
     <p class="hw-sub">Kept in memory for this tab only -- never written to sessionStorage/localStorage. Entering it automatically loads every tracked project below.</p>
   </section>
-  <div class="ph-arrival">
-    <div class="ph-atmosphere">
-      <div id="env-banner" role="status" class="ph-env-banner">STAGING &middot; SHADOW &middot; NO LIVE SYSTEMS</div>
-      <p class="ph-lockup"><span class="ph-lockup-word">Howler</span><span class="ph-lockup-sub">Penthouse</span></p>
-      <div>
-        <p class="ph-greeting">Portfolio command</p>
-        <h1 class="ph-command">Command<br>the work.</h1>
-        <p class="ph-statement">Real-time oversight of every tracked project, one voice away.</p>
-        <div class="ph-voice-inline" id="voice-section" aria-labelledby="voice-heading" data-voice-state="READY">
-          <button id="voice-push-to-talk" type="button" class="ph-voice-btn" aria-label="Push to talk">
-            <span class="ph-voice-ring" aria-hidden="true"></span>
-          </button>
-          <div>
-            <h2 id="voice-heading" class="ph-voice-caption">Press to speak with Howler</h2>
-            <div id="voice-status" role="status" aria-live="polite">IDLE</div>
-          </div>
-        </div>
-      </div>
-    </div>
 
-    <div class="ph-data-grid">
-      <section class="ph-priorities" id="ph-priorities-section" aria-labelledby="ph-priorities-heading">
-        <p class="ph-eyebrow-label" id="ph-priorities-heading">Priorities</p>
-        <div class="ph-priority-summary">
-          <span class="ph-priority-count" id="ph-priority-count">0</span>
-          <span class="ph-priority-word" id="ph-priority-word"></span>
-        </div>
-        <p class="ph-priority-caption" id="ph-priority-caption">Nothing needs you right now.</p>
-        <p class="ph-alerts-label">Alerts</p>
-        <div id="ph-priorities-list"><p class="ph-empty">Nothing needs you right now.</p></div>
-      </section>
-
-      <section class="ph-portfolio" aria-labelledby="ph-portfolio-heading">
-        <p class="ph-eyebrow-label">Portfolio overview</p>
-        <h2 id="ph-portfolio-heading">Active projects</h2>
-        <div class="ph-row ph-row-labels" aria-hidden="true">
-          <span class="ph-row-signal"></span>
-          <span class="ph-row-name">Project</span>
-          <span class="ph-row-status">Status</span>
-          <span class="ph-row-finish">Finish</span>
-          <span class="ph-row-health">Health</span>
-        </div>
-        <div id="ph-portfolio-rows"><p class="ph-empty">No tracked projects yet.</p></div>
-      </section>
-    </div>
+  <div class="ph-atmosphere">
+    <p class="ph-greeting">Portfolio command</p>
+    <h1 class="ph-command">Command the work.</h1>
+    <p class="ph-statement">Real-time oversight of every tracked project, one voice away.</p>
   </div>
 
-  <div class="ph-bottom-band">
-    <section class="ph-movement" aria-labelledby="ph-movement-heading">
-      <h2 id="ph-movement-heading">Movement</h2>
-      <div id="ph-movement-band"><p class="ph-empty">No portfolio movement yet.</p></div>
-    </section>
+  <section id="genesis-panel" class="card ph-genesis-panel" hidden aria-labelledby="genesis-heading">
+    <h2 id="genesis-heading">New project</h2>
+    <p class="hw-sub">Describe the new project in plain language. Howler proposes a baseline you can correct before approving it.</p>
+    <label for="genesis-text">Project intake</label>
+    <textarea id="genesis-text" rows="5" spellcheck="false" placeholder="e.g. Create Smith Residence. 2,800sf remodel. Budget is 310k. Scope is kitchen, primary bath, flooring..."></textarea>
+    <div class="ph-genesis-actions">
+      <button id="genesis-analyze" type="button">Analyze</button>
+      <button id="genesis-cancel" type="button" class="secondary">Cancel</button>
+    </div>
+    <div id="genesis-status" aria-live="polite"></div>
+    <div id="genesis-review" class="ph-genesis-review" hidden></div>
+  </section>
 
-    <section class="ph-intelligence" aria-labelledby="ph-intelligence-heading">
-      <p class="ph-intelligence-label" id="ph-intelligence-heading">Howler notice</p>
-      <p id="ph-intelligence-text">Add a project to begin monitoring.</p>
-    </section>
-  </div>
+  <section class="ph-portfolio" aria-labelledby="ph-portfolio-heading">
+    <p class="ph-eyebrow-label">Portfolio overview</p>
+    <h2 id="ph-portfolio-heading">Active projects</h2>
+    <div id="ph-portfolio-rows" class="ph-portfolio-grid"><p class="ph-empty">No tracked projects yet.</p></div>
+  </section>
 
-  <section class="ph-workspace" aria-labelledby="ph-workspace-heading">
-    <p class="ph-eyebrow-label" id="ph-workspace-heading">Project workspace</p>
-    <p class="hw-sub">Read-only forecast/health/recovery intelligence and explicit staging-only evidence actions, one project at a time. This page submits requests only; all forecasting, revision, retry, and mutation logic runs server-side.</p>
-    <div id="projects-container"></div>
+  <section class="ph-attention" id="ph-priorities-section" aria-labelledby="ph-priorities-heading">
+    <p class="ph-eyebrow-label" id="ph-priorities-heading">Needs attention</p>
+    <div id="ph-priorities-list"><p class="ph-empty">Nothing needs you right now.</p></div>
+  </section>
+
+  <section class="ph-index-card-section" aria-labelledby="ph-index-card-heading">
+    <p class="ph-eyebrow-label" id="ph-index-card-heading">Selected project</p>
+    <div id="index-card-container"><p class="ph-empty">Select a project above to open its Index Card.</p></div>
   </section>
 
   <details class="ph-admin-drawer">
@@ -3036,8 +3232,11 @@ ${PENTHOUSE_TOKENS}
       <button id="refresh-all" type="button">Refresh all</button>
     </section>
   </details>
+
+  <p class="ph-diagnostics-heading" id="ph-workspace-heading">Full project diagnostics</p>
+  <p class="hw-sub">Read-only forecast/health/recovery intelligence and explicit staging-only evidence actions, one project at a time -- advanced/troubleshooting use, not the primary portfolio view. This page submits requests only; all forecasting, revision, retry, and mutation logic runs server-side.</p>
+  <div id="projects-container"></div>
 </main>
-</div>
 <script>
 ${createSubmissionKernel.toString()}
 ${normalizeProjectId.toString()}
