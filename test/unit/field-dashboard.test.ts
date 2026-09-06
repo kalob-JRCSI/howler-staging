@@ -2531,6 +2531,184 @@ describe("Project Genesis: editing the proposal before approval", () => {
     ) as string[];
     expect(tracked).not.toContain("smith-residence");
   });
+
+  // Second residual-P1 round: id ALLOCATION, not identity resolution, was the remaining flaw.
+  // `usedIds`/suffix-collision tracking only covered ids seen while iterating the EDITED lines,
+  // so an exact-matched row's canonical id could still be bumped onto a numeric suffix if a
+  // brand-new row's slugified label collided with it and happened to be processed first --
+  // silently landing the ORIGINAL knownDate's subjectId on the wrong scope item (the new row
+  // keeps the plain id, the exact-matched -- and dated -- row gets suffixed away from it). Tests
+  // I/J isolate this with a proposal where Kitchen alone is dated, so the collision is provably
+  // independent of Demolition's usual dated-item tests above.
+
+  it("I: a new row's slug collision never steals a dated exact row's id, even when the new row is processed first", async () => {
+    const KITCHEN_DATED_PROPOSAL = {
+      ...SAMPLE_PROPOSAL,
+      baselineScope: [{ id: "kitchen", label: "Kitchen", phase: "General" }],
+      knownDates: [
+        {
+          subjectId: "kitchen",
+          kind: "COMMITTED_START",
+          date: "2026-09-14",
+          label: "Kitchen start",
+        },
+      ],
+    };
+    const h = mount(
+      genesisRespond({
+        preview: {
+          ok: true,
+          status: 200,
+          bodyText: json({
+            schemaVersion: "0.9.6",
+            preview: true,
+            proposal: KITCHEN_DATED_PROPOSAL,
+          }),
+        },
+      }),
+      { trackedProjects: [] },
+    );
+    el(h, "new-project-open").trigger("click");
+    el(h, "genesis-text").value = "Create Smith Residence.";
+    el(h, "genesis-analyze").trigger("click");
+    await flush();
+
+    // "Kitchen!" is a brand-new row (no exact label match) whose slug is identical to the
+    // existing dated "Kitchen" row's id, and it occupies the FIRST line, ahead of the exact match.
+    el(h, "genesis-scope").value = "Kitchen!\nKitchen";
+    el(h, "genesis-approve").trigger("click");
+    await flush();
+
+    const call = h.fetchCalls.find(
+      (c) => c.path === "/v1/projects/genesis/commit",
+    );
+    expect(call).toBeDefined();
+    const proposal = callBody(call).proposal as Record<string, unknown>;
+    const scope = proposal.baselineScope as { id: string; label: string }[];
+    expect(scope.find((s) => s.label === "Kitchen")?.id).toBe("kitchen");
+    const bang = scope.find((s) => s.label === "Kitchen!");
+    expect(bang?.id).toBe("kitchen-2");
+    expect(bang?.id).not.toBe("kitchen");
+    const knownDates = proposal.knownDates as { subjectId: string }[];
+    expect(knownDates).toHaveLength(1);
+    expect(knownDates[0]?.subjectId).toBe("kitchen");
+    expect(scope.find((s) => s.id === "kitchen")?.label).toBe("Kitchen");
+  });
+
+  it("J: the same slug collision resolves identically regardless of edited line order (new row second)", async () => {
+    const KITCHEN_DATED_PROPOSAL = {
+      ...SAMPLE_PROPOSAL,
+      baselineScope: [{ id: "kitchen", label: "Kitchen", phase: "General" }],
+      knownDates: [
+        {
+          subjectId: "kitchen",
+          kind: "COMMITTED_START",
+          date: "2026-09-14",
+          label: "Kitchen start",
+        },
+      ],
+    };
+    const h = mount(
+      genesisRespond({
+        preview: {
+          ok: true,
+          status: 200,
+          bodyText: json({
+            schemaVersion: "0.9.6",
+            preview: true,
+            proposal: KITCHEN_DATED_PROPOSAL,
+          }),
+        },
+      }),
+      { trackedProjects: [] },
+    );
+    el(h, "new-project-open").trigger("click");
+    el(h, "genesis-text").value = "Create Smith Residence.";
+    el(h, "genesis-analyze").trigger("click");
+    await flush();
+
+    el(h, "genesis-scope").value = "Kitchen\nKitchen!";
+    el(h, "genesis-approve").trigger("click");
+    await flush();
+
+    const call = h.fetchCalls.find(
+      (c) => c.path === "/v1/projects/genesis/commit",
+    );
+    expect(call).toBeDefined();
+    const proposal = callBody(call).proposal as Record<string, unknown>;
+    const scope = proposal.baselineScope as { id: string; label: string }[];
+    expect(scope.find((s) => s.label === "Kitchen")?.id).toBe("kitchen");
+    const bang = scope.find((s) => s.label === "Kitchen!");
+    expect(bang?.id).toBe("kitchen-2");
+    expect(bang?.id).not.toBe("kitchen");
+  });
+
+  it("K: a new row's slug collision never steals a REMOVED-but-unbound original's id", async () => {
+    const h = mount(
+      genesisRespond({
+        preview: {
+          ok: true,
+          status: 200,
+          bodyText: json({
+            schemaVersion: "0.9.6",
+            preview: true,
+            proposal: { ...SAMPLE_PROPOSAL, knownDates: [] },
+          }),
+        },
+      }),
+      { trackedProjects: [] },
+    );
+    el(h, "new-project-open").trigger("click");
+    el(h, "genesis-text").value = "Create Smith Residence.";
+    el(h, "genesis-analyze").trigger("click");
+    await flush();
+
+    // Demolition (unbound in this variant) is removed entirely; "Demolition!" is a brand-new row
+    // whose slug collides with the now-removed original's id.
+    el(h, "genesis-scope").value = "Demolition!\nKitchen";
+    el(h, "genesis-approve").trigger("click");
+    await flush();
+
+    const call = h.fetchCalls.find(
+      (c) => c.path === "/v1/projects/genesis/commit",
+    );
+    expect(call).toBeDefined();
+    const proposal = callBody(call).proposal as Record<string, unknown>;
+    const scope = proposal.baselineScope as { id: string; label: string }[];
+    const bang = scope.find((s) => s.label === "Demolition!");
+    expect(bang?.id).toBe("demolition-2");
+    expect(bang?.id).not.toBe("demolition");
+    expect(scope.find((s) => s.label === "Kitchen")?.id).toBe("kitchen");
+  });
+
+  it("L: an exact-matched row's canonical id is always returned directly, never run through suffix/collision allocation, even when a new row's slug collides with it", async () => {
+    const h = mount(genesisRespond(), { trackedProjects: [] });
+    el(h, "new-project-open").trigger("click");
+    el(h, "genesis-text").value = "Create Smith Residence.";
+    el(h, "genesis-analyze").trigger("click");
+    await flush();
+
+    // "Demolition!" (new, slug "demolition") is processed BEFORE the exact "Demolition" match;
+    // the exact row must keep id "demolition" byte-for-byte, never "demolition-2".
+    el(h, "genesis-scope").value = "Demolition!\nDemolition\nKitchen";
+    el(h, "genesis-approve").trigger("click");
+    await flush();
+
+    const call = h.fetchCalls.find(
+      (c) => c.path === "/v1/projects/genesis/commit",
+    );
+    expect(call).toBeDefined();
+    const proposal = callBody(call).proposal as Record<string, unknown>;
+    const scope = proposal.baselineScope as { id: string; label: string }[];
+    expect(scope.find((s) => s.label === "Demolition")?.id).toBe("demolition");
+    const bang = scope.find((s) => s.label === "Demolition!");
+    expect(bang?.id).toBe("demolition-2");
+    expect(scope.find((s) => s.label === "Kitchen")?.id).toBe("kitchen");
+    const knownDates = proposal.knownDates as { subjectId: string }[];
+    expect(knownDates).toHaveLength(1);
+    expect(knownDates[0]?.subjectId).toBe("demolition");
+    expect(scope.find((s) => s.id === "demolition")?.label).toBe("Demolition");
+  });
 });
 
 describe("Project Genesis: successful commit", () => {

@@ -2879,11 +2879,21 @@ export function fieldDashboardClientScript(
      * review's "same-position replacement" reproducer). A free-form textarea genuinely cannot
      * distinguish "this row was renamed" from "this row was deleted and unrelated new text was
      * typed in its place" -- so this never guesses. A line matching no original label (by exact
-     * text) is always NEW and gets its own deterministic slug id, regardless of which line number
-     * it occupies. Any original item with no exactly-matching line is REMOVED; the caller blocks
-     * approval locally when a removed item still owns a knownDate, rather than silently stranding
-     * or migrating that date. A future structured row editor with explicit hidden ids could safely
-     * support true renaming -- that is out of scope for this remediation. */
+     * text) is always NEW; any original item with no exactly-matching line is REMOVED; the caller
+     * blocks approval locally when a removed item still owns a knownDate, rather than silently
+     * stranding or migrating that date. A future structured row editor with explicit hidden ids
+     * could safely support true renaming -- that is out of scope for this remediation.
+     *
+     * ID allocation for a NEW row must never collide with an EXISTING canonical id -- every
+     * original id (including a REMOVED original's -- it is still reserved for the rest of this
+     * reconstruction, which is what makes removal genuinely different from rename) is reserved
+     * up front, before any new row's slug is allocated, regardless of line order. And an
+     * exact-matched row's id is returned directly, never run through collision/suffix logic at
+     * all -- so it can never itself be bumped aside by a new row's slug. Without both of these, a
+     * brand-new row whose slugified label happens to collide with an existing (possibly dated)
+     * row's id could steal that id -- and the knownDate that goes with it -- merely because it
+     * was processed first (see the breaker review's "new row steals an existing id via slug
+     * collision" reproducer, e.g. editing "Kitchen" into "Kitchen!\nKitchen"). */
     function rebuildScope(
       rawText: string,
       original: GenesisScopeItemLike[],
@@ -2912,23 +2922,29 @@ export function fieldDashboardClientScript(
         (_, idx) => !claimedOriginalIndexes.has(idx),
       );
 
-      const usedIds = new Set<string>();
+      // Reserve every original canonical id -- claimed or removed alike -- before allocating any
+      // id for a brand-new row, so a new row's slug can never collide its way into stealing an
+      // existing (possibly dated) identity purely by virtue of processing order.
+      const reservedIds = new Set(original.map((item) => item.id));
+      const allocatedNewIds = new Set<string>();
+
       const scope = lines.map((label, lineIndex) => {
         const claimed = claimedByLine.get(lineIndex);
-        let baseId = claimed ? claimed.id : genesisSlugify(label);
+        if (claimed) {
+          // Authoritative: an exact-matched row keeps its canonical id byte-for-byte, never
+          // touched by collision/suffix allocation, so a new row's slug can never bump it aside.
+          return { id: claimed.id, label, phase: claimed.phase };
+        }
+        let baseId = genesisSlugify(label);
         if (!baseId) baseId = "scope-item";
         let id = baseId;
         let suffix = 2;
-        while (usedIds.has(id)) {
+        while (reservedIds.has(id) || allocatedNewIds.has(id)) {
           id = `${baseId}-${String(suffix)}`;
           suffix += 1;
         }
-        usedIds.add(id);
-        return {
-          id,
-          label,
-          phase: claimed ? claimed.phase : "General",
-        };
+        allocatedNewIds.add(id);
+        return { id, label, phase: "General" };
       });
       return { scope, removed };
     }
@@ -3045,7 +3061,7 @@ export function fieldDashboardClientScript(
         removedIdsWithKnownDate.has(item.id),
       );
       if (blockedRemoval) {
-        genesisStatus.textContent = `Cannot remove "${blockedRemoval.label}" -- it still has a committed date. Restore the line or edit its text instead of deleting it.`;
+        genesisStatus.textContent = `Cannot remove or rename "${blockedRemoval.label}" -- it has a known project date. Restore the original scope line before approval.`;
         return Promise.resolve();
       }
 
