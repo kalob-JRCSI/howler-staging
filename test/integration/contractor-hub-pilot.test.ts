@@ -12,7 +12,7 @@
 // guarantee (docs/superpowers/specs/2026-09-04-howler-contractor-hub-v096-design.md, "Required
 // v0.9.6 pilot slice").
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { env } from "cloudflare:workers";
 import worker from "../../src/worker/index";
 import { D1HowlerRepository } from "../../src/worker/repository";
@@ -47,6 +47,14 @@ const SMITH_INTAKE =
 const SMITH_ID = "smith-residence";
 const REVIEWED_NAME = "Smith Residence - Reviewed";
 const CONTROL_ID = "control-project";
+
+// Deterministic 2026 test environment (Task 7 requirement): every server-side new Date() call --
+// Genesis's own forecastAnchorDate/year resolution, the conversation route's "today", the solver's
+// evidence-supported actualStart -- must observe this exact fixed instant, never the real wall
+// clock, so "Demo starts September 14" always resolves to 2026-09-14 and every "today"-derived
+// assertion stays correct regardless of which real calendar day the suite happens to run on.
+const FIXED_NOW = "2026-09-06T16:00:00.000Z";
+const FIXED_TODAY = "2026-09-06";
 
 const APPROVED_CONDITIONS = [
   "Stable",
@@ -168,6 +176,20 @@ beforeEach(async () => {
   await dropAllTables(env.HOWLER_DB);
   await applySchema(env.HOWLER_DB, baselineMigrationSql());
   await applySchema(env.HOWLER_DB, operatorMigrationSql());
+});
+
+// Freeze Date only -- confirmed experimentally that the Cloudflare Workers vitest pool runs this
+// test file and the imported worker module (src/worker/index.ts) in the same JS realm, so
+// vi.setSystemTime here is genuinely observed by every new Date() call inside worker.fetch()'s
+// handler code, not merely inside this test file. Deliberately does NOT fake timers/setTimeout: D1
+// is real async I/O and must keep running on real microtask/macrotask scheduling.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(FIXED_NOW));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 /**
@@ -533,7 +555,7 @@ describe("Task 7: the complete v0.9.6 Contractor Hub pilot slice, end to end", (
       "IN_PROGRESS",
     );
     expect(smithModelAfterApply.activities.demolition?.actualStart).toBe(
-      new Date().toISOString().slice(0, 10),
+      FIXED_TODAY,
     );
     expect(smithModelAfterApply.eventLedger).toHaveLength(1);
     const smithEventsAfterApply = await repo.loadEvents(SMITH_ID);
@@ -595,7 +617,7 @@ describe("Task 7: the complete v0.9.6 Contractor Hub pilot slice, end to end", (
     // update, rather than changing for no real reason.
     expect(updatedSummary.nextMovement).toBe(initialSummary.nextMovement);
     expect(updatedSummary.nextMovement).toBe(
-      `Kitchen forecast to start ${new Date().toISOString().slice(0, 10)}.`,
+      `Kitchen forecast to start ${FIXED_TODAY}.`,
     );
     expect(updatedSummary.projectedCompletion).not.toBeNull();
     expect(typeof updatedSummary.integrity.score).toBe("number");
@@ -679,7 +701,17 @@ describe("Task 7: duplicate confirmation safety on the full natural-language pil
     const eventsAfterFirst = await repo.loadEvents(projectId);
     expect(eventsAfterFirst).toHaveLength(1);
 
-    // Replay: the exact same original confirmation, sent again (a client resend/retry).
+    // Replay: the exact same original confirmation, sent again (a client resend/retry) -- under
+    // this suite's frozen clock, the two requests are now genuinely byte-identical (including
+    // submittedAt), so repo.claimIntent's own conflict resolution (src/worker/repository.ts's
+    // resolveClaimConflict) correctly classifies this as REPLAY (an exact retry of a request whose
+    // canonical hash already matches), not IDEMPOTENCY_KEY_REUSE (a same-identity request whose
+    // content differs). REPLAY truthfully returns the original cached SUCCEEDED result rather than
+    // re-executing -- this is the accepted, existing, documented safe-duplicate contract this
+    // mechanism was built for, not a new or weakened one. The real safety invariant asserted below
+    // is that the canonical Apply itself never repeats: revision and event count must not advance
+    // a second time, regardless of which of the two safe outcomes (REPLAY or REUSE) a given retry
+    // happens to hit.
     const secondConfirm = await worker.fetch(
       jsonRequest("POST", `/v1/projects/${projectId}/conversation/turn`, {
         session: turnBody.session,
@@ -689,16 +721,14 @@ describe("Task 7: duplicate confirmation safety on the full natural-language pil
     );
     expect(secondConfirm.status).toBe(200);
     const secondConfirmBody = await jsonBody<TurnResponse>(secondConfirm);
-    // Accepted existing contract (see test/integration/conversation-http.test.ts's own duplicate-
-    // confirmation test): a genuine idempotency-key reuse is reported as FAILED, never silently
-    // relabeled APPLIED -- the safety invariant is that the canonical Apply itself never repeats,
-    // not the exact label on the honest rejection.
-    expect(secondConfirmBody.confirm?.outcome).not.toBe("APPLIED");
+    expect(secondConfirmBody.confirm?.outcome).toBe("APPLIED");
+    expect(secondConfirmBody.confirm?.result?.workflowState).toBe("SUCCEEDED");
 
     const revisionAfterSecond = (await repo.loadProject(projectId))?.revision;
     expect(revisionAfterSecond).toBe(1);
     const eventsAfterSecond = await repo.loadEvents(projectId);
     expect(eventsAfterSecond).toHaveLength(1);
+    expect(eventsAfterSecond).toEqual(eventsAfterFirst);
   });
 });
 
