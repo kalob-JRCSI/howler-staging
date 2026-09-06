@@ -640,3 +640,119 @@ describe("POST /v1/projects/genesis/commit: forecast-only dates never become sch
     expect(model.activities[subjectId]?.scheduleLock).toBeUndefined();
   });
 });
+
+const APPROVED_CONDITIONS = [
+  "Stable",
+  "Stable, exposed",
+  "At risk",
+  "Critical",
+];
+
+describe("GET /v1/projects/:id/summary", () => {
+  it("reflects the just-committed Smith Residence project, read-only", async () => {
+    const proposal = validProposal("smith-residence-summary");
+    const commitResponse = await worker.fetch(
+      jsonRequest("POST", "/v1/projects/genesis/commit", { proposal }),
+      adminEnv(),
+    );
+    expect(commitResponse.status).toBe(201);
+
+    const before = await tableCounts();
+    const response = await worker.fetch(
+      jsonRequest("GET", "/v1/projects/smith-residence-summary/summary"),
+      adminEnv(),
+    );
+    expect(response.status).toBe(200);
+    const summary = (await jsonBody(response)) as {
+      projectId: string;
+      projectName: string;
+      progressPercent: number;
+      integrity: { score: number; condition: string; primaryDriver: string };
+      budget: { baseline: number | null };
+      scope: { id: string; label: string; phase: string }[];
+      projectedCompletion: string | null;
+      schedule: {
+        committed: {
+          activityId: string;
+          startDate: string | null;
+          basis: string;
+        }[];
+        forecast: { activityId: string; basis: string }[];
+      };
+    };
+
+    expect(summary.projectId).toBe("smith-residence-summary");
+    expect(summary.projectName).toBe("Smith Residence");
+    expect(typeof summary.progressPercent).toBe("number");
+    expect(Number.isNaN(summary.progressPercent)).toBe(false);
+    // A freshly-created Genesis project has every activity NOT_STARTED -- truthfully 0, never a
+    // fabricated non-zero value.
+    expect(summary.progressPercent).toBe(0);
+    expect(typeof summary.integrity.score).toBe("number");
+    expect(APPROVED_CONDITIONS).toContain(summary.integrity.condition);
+    expect(summary.budget.baseline).toBe(310000);
+    expect(summary.scope.map((s) => s.label)).toEqual(
+      expect.arrayContaining([
+        "Kitchen",
+        "Primary bath",
+        "Flooring",
+        "Windows",
+        "Electrical service upgrade",
+        "HVAC modifications",
+      ]),
+    );
+    expect(summary.projectedCompletion).not.toBeNull();
+
+    const demolitionCommitted = summary.schedule.committed.find(
+      (item) => item.activityId === "demolition",
+    );
+    expect(demolitionCommitted).toBeDefined();
+    expect(demolitionCommitted?.startDate).toBe("2026-09-14");
+    expect(demolitionCommitted?.basis).toBe("COMMITTED");
+    expect(
+      summary.schedule.forecast.some(
+        (item) => item.activityId === "demolition",
+      ),
+    ).toBe(false);
+
+    const after = await tableCounts();
+    expect(after).toEqual(before);
+  });
+
+  it("returns 404 for a project that does not exist", async () => {
+    const response = await worker.fetch(
+      jsonRequest("GET", "/v1/projects/does-not-exist/summary"),
+      adminEnv(),
+    );
+    expect(response.status).toBe(404);
+  });
+
+  it("rejects an unauthenticated request with the existing auth semantics", async () => {
+    const response = await worker.fetch(
+      unauthedJsonRequest(
+        "GET",
+        "/v1/projects/smith-residence-summary/summary",
+      ),
+      adminEnv(),
+    );
+    expect(response.status).toBe(401);
+  });
+
+  it("never causes a row-count change of any kind, including on a 404", async () => {
+    const proposal = validProposal("summary-zero-write-check");
+    await worker.fetch(
+      jsonRequest("POST", "/v1/projects/genesis/commit", { proposal }),
+      adminEnv(),
+    );
+    const before = await tableCounts();
+    await worker.fetch(
+      jsonRequest("GET", "/v1/projects/summary-zero-write-check/summary"),
+      adminEnv(),
+    );
+    await worker.fetch(
+      jsonRequest("GET", "/v1/projects/missing-project-xyz/summary"),
+      adminEnv(),
+    );
+    expect(await tableCounts()).toEqual(before);
+  });
+});

@@ -58,6 +58,7 @@ import {
   buildProjectFromGenesis,
 } from "../operator/genesis";
 import type { GenesisProposalV096 } from "../operator/genesis";
+import { buildProjectSummary } from "../operator/project-summary";
 
 // Engine/admin-page compatibility version. Distinct from GET /health's own `version` field, which
 // buildHealthReport (src/worker/health.ts) now owns and reports as "0.9.5" with an additive
@@ -1129,6 +1130,21 @@ async function handle(request: Request, env: Env): Promise<Response> {
       repo.loadLatestPublishedForecast(projectId),
     ]);
     return json({ modelRevision: model.revision, latest, published });
+  }
+
+  // Task 4 (v0.9.6 Project Genesis / Penthouse-Index-Card summary): read-only, derived state.
+  // Reuses projectHealth() and buildProjectSummary() verbatim -- no second health/forecast
+  // engine, no mutation, no persistence of the derived summary fields.
+  if (
+    request.method === "GET" &&
+    parts.length === 4 &&
+    parts[3] === "summary"
+  ) {
+    const model = await repo.loadProject(projectId);
+    if (!model) throw new HttpError(404, `Project ${projectId} not found`);
+    const forecast = await repo.loadLatestForecast(projectId);
+    const health = await projectHealth(repo, model, forecast);
+    return json(buildProjectSummary(model, forecast, health));
   }
 
   if (
