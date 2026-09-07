@@ -29,11 +29,16 @@ export interface ProductAuthEnv {
 }
 
 function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return Array.from(bytes, (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
 }
 
 export async function pilotPasswordHash(password: string): Promise<string> {
-  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(password));
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    encoder.encode(password),
+  );
   return bytesToHex(new Uint8Array(digest));
 }
 
