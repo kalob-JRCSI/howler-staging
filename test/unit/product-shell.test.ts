@@ -21,6 +21,9 @@ const MUTATION_HTML = `<!doctype html>
     <input id="admin-key" type="password">
   </section>
   <script>
+  const els = {
+    adminKey: document.getElementById("admin-key"),
+  };
   const summaryByProject = new Map();
   let trackedProjects = [];
   let selectedProjectId = null;
@@ -30,6 +33,7 @@ const MUTATION_HTML = `<!doctype html>
   function renderIndexCard() {}
   function refreshSummary() { return Promise.resolve(); }
   function selectProject() {}
+  function adminKeyValue() { return els.adminKey.value.trim(); }
   function handleApplied(outcome, projectId) {
     if (outcome.outcome === "APPLIED") {
       void refreshSummary(projectId);
@@ -40,6 +44,7 @@ const MUTATION_HTML = `<!doctype html>
       selectProject(projectId);
     });
   }
+  els.adminKey.addEventListener("change", () => {});
   function renderProjects() {}
   </script>
 </body>
@@ -70,16 +75,17 @@ describe("authenticated product dashboard decoration", () => {
     expect(html).not.toContain("deboard-v091");
   });
 
-  it("removes the visible admin-key prompt without embedding the real admin secret", () => {
-    const html = decorateProductDashboard(LEGACY_HTML, PROJECT_IDS);
+  it("removes the admin-key field entirely and uses an internal product-session adapter", () => {
+    const html = decorateProductDashboard(MUTATION_HTML, PROJECT_IDS);
 
     expect(html).not.toContain(
       "Paste the staging admin key to load the portfolio",
     );
     expect(html).not.toContain("HOWLER_ADMIN_KEY</label>");
-    expect(html).toContain('id="admin-key"');
-    expect(html).toContain('type="hidden"');
-    expect(html).toContain('value="product-session"');
+    expect(html).not.toContain('id="admin-key"');
+    expect(html).not.toContain('document.getElementById("admin-key")');
+    expect(html).toContain('value: "product-session"');
+    expect(html).toContain("addEventListener: () => {}");
   });
 
   it("starts one aggregate portfolio sync immediately, repeats every 15 seconds, and refreshes on focus/visibility return", () => {
