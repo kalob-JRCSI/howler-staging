@@ -60,8 +60,12 @@ function productBootstrap(projectIds: string[]): string {
     }
   }
 
-  setInterval(() => void syncPortfolio(), ${String(PORTFOLIO_SYNC_INTERVAL_MS)});
-  window.addEventListener("focus", () => void syncPortfolio());
+  if (typeof setInterval === "function") {
+    setInterval(() => void syncPortfolio(), ${String(PORTFOLIO_SYNC_INTERVAL_MS)});
+  }
+  if (window && typeof window.addEventListener === "function") {
+    window.addEventListener("focus", () => void syncPortfolio());
+  }
 })();
 </script>`;
 }
