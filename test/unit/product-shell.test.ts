@@ -50,20 +50,39 @@ describe("authenticated product dashboard decoration", () => {
     expect(html).toContain('value="product-session"');
   });
 
-  it("synchronizes canonical portfolio membership every 15 seconds and when the window regains focus", () => {
+  it("starts one aggregate portfolio sync immediately, repeats every 15 seconds, and refreshes on focus/visibility return", () => {
     const html = decorateProductDashboard(LEGACY_HTML, PROJECT_IDS);
 
     expect(html).toContain("/v1/portfolio");
     expect(html).toContain("15000");
+    expect(html).toContain("void syncPortfolio()");
     expect(html).toContain('addEventListener("focus"');
-    expect(html).toContain("location.reload()");
+    expect(html).toContain('addEventListener("visibilitychange"');
+    expect(html).toContain('document.visibilityState === "visible"');
   });
 
-  it("triggers the existing field-dashboard summary loader after installing the session sentinel", () => {
+  it("feeds aggregate summaries into the field-dashboard renderer instead of triggering N per-project summary loads", () => {
     const html = decorateProductDashboard(LEGACY_HTML, PROJECT_IDS);
 
-    expect(html).toContain("product-session");
-    expect(html).toContain('new Event("change")');
-    expect(html).toContain("dispatchEvent");
+    expect(html).toContain("__howlerApplyPortfolio");
+    expect(html).not.toContain('new Event("change")');
+    expect(html).not.toContain("if (current !== next)");
+  });
+
+  it("prevents overlapping syncs and surfaces live/stale last-sync state while retaining the last good view", () => {
+    const html = decorateProductDashboard(LEGACY_HTML, PROJECT_IDS);
+
+    expect(html).toContain("syncInFlight");
+    expect(html).toContain('id="howler-live-status"');
+    expect(html).toContain("Last synced");
+    expect(html).toContain("Live");
+    expect(html).toContain("Stale");
+  });
+
+  it("returns to the login boundary when the product session expires", () => {
+    const html = decorateProductDashboard(LEGACY_HTML, PROJECT_IDS);
+
+    expect(html).toContain("response.status === 401");
+    expect(html).toContain("location.reload()");
   });
 });
