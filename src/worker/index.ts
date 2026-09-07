@@ -71,10 +71,9 @@ async function handleProductBoundary(
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     try {
-      return (
-        (await handleProductBoundary(request, env)) ??
-        legacyWorker.fetch(request, env)
-      );
+      const productResponse = await handleProductBoundary(request, env);
+      if (productResponse) return productResponse;
+      return await legacyWorker.fetch(request, env);
     } catch (error) {
       if (error instanceof HttpError) {
         return json(
