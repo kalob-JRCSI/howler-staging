@@ -69,7 +69,10 @@ function productBootstrapBody(projectIds: string[]): string {
 })();`;
 }
 
-function appendBootstrapToLastScript(html: string, bootstrapBody: string): string {
+function appendBootstrapToLastScript(
+  html: string,
+  bootstrapBody: string,
+): string {
   const lastScriptClose = html.lastIndexOf("</script>");
   if (lastScriptClose === -1) {
     const standalone = `<script>${bootstrapBody}\n</script>`;
@@ -77,7 +80,9 @@ function appendBootstrapToLastScript(html: string, bootstrapBody: string): strin
       ? html.replace("</body>", `${standalone}\n</body>`)
       : `${html}${standalone}`;
   }
-  return `${html.slice(0, lastScriptClose)}${bootstrapBody}\n${html.slice(lastScriptClose)}`;
+  return `${html.slice(0, lastScriptClose)}${bootstrapBody}\n${html.slice(
+    lastScriptClose,
+  )}`;
 }
 
 export function decorateProductDashboard(
