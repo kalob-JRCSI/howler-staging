@@ -80,7 +80,9 @@ beforeAll(() => {
       `real wrangler build failed (exit ${String(result.status)}):\n${result.stdout}\n${result.stderr}`,
     );
   }
-  const jsFiles = readdirSync(buildDir).filter((name) => name.endsWith(".js"));
+  const jsFiles = readdirSync(buildDir).filter((name) =>
+    name.endsWith(".js"),
+  );
   if (jsFiles.length !== 1) {
     throw new Error(
       `expected exactly one Worker JavaScript bundle in ${buildDir}, found: ${jsFiles.join(", ") || "none"}`,
@@ -116,7 +118,9 @@ async function authenticatedCookie(mod: WorkerModule): Promise<string> {
     PRODUCT_ENV,
   );
   if (response.status !== 204) {
-    throw new Error(`product login failed in browser artifact test: HTTP ${String(response.status)}`);
+    throw new Error(
+      `product login failed in browser artifact test: HTTP ${String(response.status)}`,
+    );
   }
   const cookie = (response.headers.get("set-cookie") ?? "").split(";", 1)[0];
   if (!cookie) throw new Error("product login did not return a session cookie");
