@@ -1,9 +1,14 @@
 /// <reference types="vite/client" />
 
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { env } from "cloudflare:workers";
 import worker from "../../src/worker/entry";
 import { sha256Hex } from "../../src/worker/hash";
+import {
+  applySchema,
+  baselineMigrationSql,
+  dropAllTables,
+} from "../helpers/d1";
 
 const PILOT_PASSWORD = "portfolio-contract-password";
 const PRODUCT_ENV = {
@@ -41,6 +46,11 @@ async function loginCookie(): Promise<string> {
   expect(response.status).toBe(204);
   return (response.headers.get("set-cookie") ?? "").split(";", 1)[0] ?? "";
 }
+
+beforeEach(async () => {
+  await dropAllTables(env.HOWLER_DB);
+  await applySchema(env.HOWLER_DB, baselineMigrationSql());
+});
 
 describe("GET /v1/portfolio", () => {
   it("rejects an unauthenticated product request", async () => {
