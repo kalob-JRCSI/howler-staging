@@ -1,4 +1,4 @@
-import { hmacSha256Hex, sha256Hex } from "./hash";
+import { hmacSha256Hex } from "./hash";
 import { HttpError } from "./http";
 
 const SESSION_COOKIE = "howler_session";
@@ -26,6 +26,15 @@ export interface ProductAuthEnv {
   HOWLER_PILOT_USERNAME?: string;
   HOWLER_PILOT_PASSWORD_HASH?: string;
   HOWLER_SESSION_SIGNING_SECRET?: string;
+}
+
+function bytesToHex(bytes: Uint8Array): string {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+export async function pilotPasswordHash(password: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", encoder.encode(password));
+  return bytesToHex(new Uint8Array(digest));
 }
 
 function bytesToBase64Url(bytes: Uint8Array): string {
@@ -81,7 +90,7 @@ export async function authenticatePilotUser(
 ): Promise<AuthenticatedUser | null> {
   const [usernameMatches, passwordMatches] = await Promise.all([
     timingSafeStringEqual(username, config.username),
-    sha256Hex(password).then((hash) =>
+    pilotPasswordHash(password).then((hash) =>
       timingSafeStringEqual(hash, config.passwordHash),
     ),
   ]);
