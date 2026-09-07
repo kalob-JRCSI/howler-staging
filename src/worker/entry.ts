@@ -66,14 +66,16 @@ async function productDashboard(request: Request, env: Env): Promise<Response> {
   if (!contentType.includes("text/html")) return legacyResponse;
 
   let rows: PortfolioProjectRow[] = [];
-  try {
-    rows = await readPortfolioRows(env);
-  } catch (error) {
-    // Authentication is independent of D1 schema readiness. The signed-in shell must still render
-    // when the product tables have not been initialized yet; the real /v1/portfolio endpoint stays
-    // strict and will surface that readiness problem to the synchronization layer instead of
-    // turning a valid login into a 500 page.
-    if (!isProjectsTableUnavailable(error)) throw error;
+  const shellDb = (env as Partial<Env>).HOWLER_DB;
+  if (shellDb) {
+    try {
+      rows = await readPortfolioRows(env);
+    } catch (error) {
+      // Authentication is independent of D1 schema readiness. The signed-in shell must still
+      // render when the product tables have not been initialized yet; the real /v1/portfolio
+      // endpoint stays strict and surfaces that readiness problem to the synchronization layer.
+      if (!isProjectsTableUnavailable(error)) throw error;
+    }
   }
 
   const html = decorateProductDashboard(
