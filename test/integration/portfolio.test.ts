@@ -144,9 +144,7 @@ async function readPortfolio(productEnv: Env): Promise<{
     productEnv,
   );
   expect(response.status).toBe(200);
-  return (await response.json()) as {
-    projects: { projectId: string; projectName: string }[];
-  };
+  return await response.json();
 }
 
 beforeEach(async () => {
