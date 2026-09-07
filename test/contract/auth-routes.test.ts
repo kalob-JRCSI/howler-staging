@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import { env } from "cloudflare:workers";
-import worker from "../../src/worker/index";
+import worker from "../../src/worker/entry";
 import { sha256Hex } from "../../src/worker/hash";
 
 const ADMIN_KEY = "auth-route-admin-key";
@@ -68,6 +68,18 @@ describe("pilot product authentication routes", () => {
     expect(html).toContain("password");
     expect(html).not.toContain("deboard-v091");
     expect(html).not.toContain("HOWLER_ADMIN_KEY");
+  });
+
+  it("also protects the Penthouse compatibility route", async () => {
+    const response = await worker.fetch(
+      request("GET", "/admin/field"),
+      await productEnv(),
+    );
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Sign in");
+    expect(html).not.toContain("Command the work.");
   });
 
   it("sets a secure product session cookie for valid credentials", async () => {
