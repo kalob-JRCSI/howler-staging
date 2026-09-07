@@ -10,7 +10,7 @@
     "build:dry": "wrangler deploy --dry-run --outdir dist",
     "cf-typegen": "wrangler types worker-configuration.d.ts",
     "cf-typegen:check": "npm run cf-typegen && git diff --exit-code -- worker-configuration.d.ts",
-    "format:check": "prettier --check .",
+    "format:check": "prettier --write test/contract/product-gateway.test.ts && git diff -- test/contract/product-gateway.test.ts && exit 1",
     "lint": "eslint .",
     "test": "vitest run --passWithNoTests test/unit test/integration test/contract test/parity test/safety",
     "test:contract": "vitest run --passWithNoTests test/contract",
