@@ -15,9 +15,9 @@ function replaceAdminKeyPrompt(html: string): string {
     : html.replace(/<input id="admin-key"[^>]*>/, hiddenInput);
 }
 
-function productBootstrap(projectIds: string[]): string {
+function productBootstrapBody(projectIds: string[]): string {
   const initialProjectIds = safeJson(projectIds);
-  return `<script>
+  return `
 (() => {
   const trackedProjectsKey = ${JSON.stringify(TRACKED_PROJECTS_KEY)};
   const initialProjectIds = ${initialProjectIds};
@@ -66,8 +66,18 @@ function productBootstrap(projectIds: string[]): string {
   if (window && typeof window.addEventListener === "function") {
     window.addEventListener("focus", () => void syncPortfolio());
   }
-})();
-</script>`;
+})();`;
+}
+
+function appendBootstrapToLastScript(html: string, bootstrapBody: string): string {
+  const lastScriptClose = html.lastIndexOf("</script>");
+  if (lastScriptClose === -1) {
+    const standalone = `<script>${bootstrapBody}\n</script>`;
+    return html.includes("</body>")
+      ? html.replace("</body>", `${standalone}\n</body>`)
+      : `${html}${standalone}`;
+  }
+  return `${html.slice(0, lastScriptClose)}${bootstrapBody}\n${html.slice(lastScriptClose)}`;
 }
 
 export function decorateProductDashboard(
@@ -75,8 +85,8 @@ export function decorateProductDashboard(
   projectIds: string[],
 ): string {
   const withoutPrompt = replaceAdminKeyPrompt(legacyHtml);
-  const bootstrap = productBootstrap(projectIds);
-  return withoutPrompt.includes("</body>")
-    ? withoutPrompt.replace("</body>", `${bootstrap}\n</body>`)
-    : `${withoutPrompt}${bootstrap}`;
+  return appendBootstrapToLastScript(
+    withoutPrompt,
+    productBootstrapBody(projectIds),
+  );
 }
