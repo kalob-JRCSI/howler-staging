@@ -42,7 +42,7 @@ beforeEach(async () => {
 });
 
 describe("authenticated product gateway", () => {
-  it("renders Penthouse with the canonical roster and no visible admin credential", async () => {
+  it("renders Penthouse with the canonical roster and no admin-key field or credential", async () => {
     await env.HOWLER_DB.prepare(
       `INSERT INTO projects (project_id, name, revision, current_model_json, updated_at)
        VALUES (?, ?, 0, ?, ?)`,
@@ -65,13 +65,13 @@ describe("authenticated product gateway", () => {
 
     expect(response.status).toBe(200);
     expect(html).toContain("canonical-after-login");
-    expect(html).toContain('id="admin-key"');
-    expect(html).toContain('type="hidden"');
-    expect(html).toContain('value="product-session"');
+    expect(html).not.toContain('id="admin-key"');
+    expect(html).not.toContain('document.getElementById("admin-key")');
     expect(html).not.toContain(
       "Paste the staging admin key to load the portfolio",
     );
     expect(html).not.toContain(ADMIN_KEY);
+    expect(html).toContain('value: "product-session"');
   });
 
   it("uses the product session for approved operator routes without exposing bearer auth", async () => {
