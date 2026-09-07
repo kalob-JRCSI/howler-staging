@@ -1,8 +1,7 @@
-// Pre-deploy correction (Step 2 -- confirmation secret preflight). Plain-Node unit tests (see
-// ../vitest.config.ts) driving verifyRequiredSecretBindings() against a mocked
-// node:child_process.execFileSync -- proves this script only ever reads binding names (never
-// values, never a create/rotate command), and fails closed when a required binding is missing or
-// credentials are absent.
+// Pre-deploy secret preflight. Plain-Node unit tests (see ../vitest.config.ts) drive
+// verifyRequiredSecretBindings() against a mocked node:child_process.execFileSync. They prove the
+// script only reads binding names (never values, never a create/rotate command) and fails closed
+// when any secret required by the staging Worker is missing or credentials are absent.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { verifyRequiredSecretBindings } from "../preflight-worker-secrets.ts";
@@ -13,10 +12,17 @@ vi.mock("node:child_process", () => ({
   execFileSync: execFileSyncMock,
 }));
 
-function bothPresentJson(): string {
+const REQUIRED_SECRET_NAMES = [
+  "HOWLER_CONFIRMATION_SIGNING_SECRET",
+  "HOWLER_ADMIN_KEY",
+  "HOWLER_PILOT_USERNAME",
+  "HOWLER_PILOT_PASSWORD_HASH",
+  "HOWLER_SESSION_SIGNING_SECRET",
+] as const;
+
+function allPresentJson(): string {
   return JSON.stringify([
-    { name: "HOWLER_CONFIRMATION_SIGNING_SECRET", type: "secret_text" },
-    { name: "HOWLER_ADMIN_KEY", type: "secret_text" },
+    ...REQUIRED_SECRET_NAMES.map((name) => ({ name, type: "secret_text" })),
     { name: "HOWLER_MODE", type: "plain_text" },
   ]);
 }
@@ -31,15 +37,15 @@ afterEach(() => {
 });
 
 describe("verifyRequiredSecretBindings: only ever reads binding names, never values", () => {
-  it("passes when both required bindings are present", () => {
-    execFileSyncMock.mockReturnValue(bothPresentJson());
+  it("passes when every required staging secret binding is present", () => {
+    execFileSyncMock.mockReturnValue(allPresentJson());
     expect(() => {
       verifyRequiredSecretBindings("jarvis-voice-staging");
     }).not.toThrow();
   });
 
   it("calls wrangler with a read-only 'secret list' command, never a set/put/bulk command", () => {
-    execFileSyncMock.mockReturnValue(bothPresentJson());
+    execFileSyncMock.mockReturnValue(allPresentJson());
     verifyRequiredSecretBindings("jarvis-voice-staging");
     expect(execFileSyncMock).toHaveBeenCalledTimes(1);
     const [command, args] = execFileSyncMock.mock.calls[0] as [
@@ -58,27 +64,22 @@ describe("verifyRequiredSecretBindings: only ever reads binding names, never val
     ]);
   });
 
-  it("fails when HOWLER_CONFIRMATION_SIGNING_SECRET is missing, naming it, without creating/rotating anything", () => {
-    execFileSyncMock.mockReturnValue(
-      JSON.stringify([{ name: "HOWLER_ADMIN_KEY", type: "secret_text" }]),
-    );
-    expect(() => {
-      verifyRequiredSecretBindings("jarvis-voice-staging");
-    }).toThrow(/HOWLER_CONFIRMATION_SIGNING_SECRET/);
-    // Exactly the one read-only list call -- no follow-up "secret put" attempt.
-    expect(execFileSyncMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("fails when HOWLER_ADMIN_KEY is missing, naming it", () => {
-    execFileSyncMock.mockReturnValue(
-      JSON.stringify([
-        { name: "HOWLER_CONFIRMATION_SIGNING_SECRET", type: "secret_text" },
-      ]),
-    );
-    expect(() => {
-      verifyRequiredSecretBindings("jarvis-voice-staging");
-    }).toThrow(/HOWLER_ADMIN_KEY/);
-  });
+  it.each(REQUIRED_SECRET_NAMES)(
+    "fails closed when required secret %s is missing",
+    (missingName) => {
+      execFileSyncMock.mockReturnValue(
+        JSON.stringify(
+          REQUIRED_SECRET_NAMES.filter((name) => name !== missingName).map(
+            (name) => ({ name, type: "secret_text" }),
+          ),
+        ),
+      );
+      expect(() => {
+        verifyRequiredSecretBindings("jarvis-voice-staging");
+      }).toThrow(new RegExp(missingName));
+      expect(execFileSyncMock).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("fails closed without ever calling wrangler when CLOUDFLARE_API_TOKEN is not set", () => {
     delete process.env.CLOUDFLARE_API_TOKEN;
@@ -88,7 +89,7 @@ describe("verifyRequiredSecretBindings: only ever reads binding names, never val
     expect(execFileSyncMock).not.toHaveBeenCalled();
   });
 
-  it("fails clearly (never crashes uncaught) when wrangler itself fails", () => {
+  it("fails clearly when wrangler itself fails", () => {
     execFileSyncMock.mockImplementation(() => {
       throw Object.assign(new Error("wrangler exited with code 1"), {
         stderr: "Authentication error",
@@ -99,7 +100,7 @@ describe("verifyRequiredSecretBindings: only ever reads binding names, never val
     }).toThrow(/could not list secret bindings/);
   });
 
-  it("never includes a secret value anywhere in a failure message (there is none to leak, but the message shape is asserted)", () => {
+  it("never includes a secret value anywhere in a failure message", () => {
     execFileSyncMock.mockReturnValue(JSON.stringify([]));
     try {
       verifyRequiredSecretBindings("jarvis-voice-staging");
@@ -107,8 +108,9 @@ describe("verifyRequiredSecretBindings: only ever reads binding names, never val
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       expect(message).not.toMatch(/"text":/);
-      expect(message).toContain("HOWLER_CONFIRMATION_SIGNING_SECRET");
-      expect(message).toContain("HOWLER_ADMIN_KEY");
+      for (const name of REQUIRED_SECRET_NAMES) {
+        expect(message).toContain(name);
+      }
     }
   });
 });
