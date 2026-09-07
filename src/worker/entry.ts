@@ -1,3 +1,4 @@
+import { buildProjectSummary } from "../operator/project-summary";
 import legacyWorker from "./index";
 import {
   authenticatePilotUser,
@@ -7,8 +8,10 @@ import {
   pilotAuthConfigFromEnv,
   readSession,
 } from "./auth";
+import { projectHealth } from "./health";
 import { HttpError, json, readJson } from "./http";
 import { decorateProductDashboard } from "./product-shell";
+import { D1HowlerRepository } from "./repository";
 
 interface PortfolioProjectRow {
   project_id: string;
@@ -40,15 +43,30 @@ async function readPortfolioRows(env: Env): Promise<PortfolioProjectRow[]> {
 
 async function readPortfolio(env: Env): Promise<Response> {
   const rows = await readPortfolioRows(env);
+  const repo = new D1HowlerRepository(env.HOWLER_DB);
+  const projects = [];
+
+  // One browser request returns every currently-visible canonical project. The pilot repository
+  // does not yet have an archive/ownership field, so the repository boundary currently treats all
+  // canonical rows as visible. Keeping that decision server-side lets a later active/archive or
+  // organization filter change without rewriting the Penthouse contract.
+  for (const row of rows) {
+    const model = await repo.loadProject(row.project_id);
+    if (!model) {
+      throw new Error(
+        `Portfolio row ${row.project_id} disappeared while building its summary`,
+      );
+    }
+    const forecast = await repo.loadLatestForecast(row.project_id);
+    const health = await projectHealth(repo, model, forecast);
+    projects.push(buildProjectSummary(model, forecast, health));
+  }
+
   return json(
     {
       schemaVersion: "0.9.6",
-      projects: rows.map((row) => ({
-        projectId: row.project_id,
-        projectName: row.name,
-        revision: row.revision,
-        updatedAt: row.updated_at,
-      })),
+      generatedAt: new Date().toISOString(),
+      projects,
     },
     200,
     { "cache-control": "no-store" },
