@@ -80,9 +80,7 @@ beforeAll(() => {
       `real wrangler build failed (exit ${String(result.status)}):\n${result.stdout}\n${result.stderr}`,
     );
   }
-  const jsFiles = readdirSync(buildDir).filter((name) =>
-    name.endsWith(".js"),
-  );
+  const jsFiles = readdirSync(buildDir).filter((name) => name.endsWith(".js"));
   if (jsFiles.length !== 1) {
     throw new Error(
       `expected exactly one Worker JavaScript bundle in ${buildDir}, found: ${jsFiles.join(", ") || "none"}`,
