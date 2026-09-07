@@ -12,10 +12,7 @@ function replaceAdminKeyPrompt(html: string): string {
   const hiddenInput = `<input id="admin-key" type="hidden" value="${PRODUCT_SESSION_SENTINEL}">`;
   return sectionPattern.test(html)
     ? html.replace(sectionPattern, hiddenInput)
-    : html.replace(
-        /<input id="admin-key"[^>]*>/,
-        hiddenInput,
-      );
+    : html.replace(/<input id="admin-key"[^>]*>/, hiddenInput);
 }
 
 function productBootstrap(projectIds: string[]): string {
