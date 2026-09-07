@@ -48,6 +48,18 @@ function base64UrlToBytes(value: string): Uint8Array | null {
   }
 }
 
+function constantTimeBytesEqual(
+  actual: Uint8Array,
+  expected: Uint8Array,
+): boolean {
+  let mismatch = actual.length ^ expected.length;
+  const length = Math.max(actual.length, expected.length);
+  for (let index = 0; index < length; index += 1) {
+    mismatch |= (actual[index] ?? 0) ^ (expected[index] ?? 0);
+  }
+  return mismatch === 0;
+}
+
 async function timingSafeStringEqual(
   actual: string,
   expected: string,
@@ -56,7 +68,10 @@ async function timingSafeStringEqual(
     crypto.subtle.digest("SHA-256", encoder.encode(actual)),
     crypto.subtle.digest("SHA-256", encoder.encode(expected)),
   ]);
-  return crypto.subtle.timingSafeEqual(actualHash, expectedHash);
+  return constantTimeBytesEqual(
+    new Uint8Array(actualHash),
+    new Uint8Array(expectedHash),
+  );
 }
 
 export async function authenticatePilotUser(
