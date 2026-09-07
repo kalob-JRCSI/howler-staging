@@ -1,5 +1,12 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, copyFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import {
+  copyFileSync,
+  existsSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -38,6 +45,15 @@ const repoRoot = dirname(
   dirname(dirname(dirname(fileURLToPath(import.meta.url)))),
 );
 
+const PILOT_PASSWORD = "browser-artifact-pilot-password";
+const PRODUCT_ENV = {
+  HOWLER_PILOT_USERNAME: "kalob",
+  HOWLER_PILOT_PASSWORD_HASH: createHash("sha256")
+    .update(PILOT_PASSWORD)
+    .digest("hex"),
+  HOWLER_SESSION_SIGNING_SECRET: "browser-artifact-session-signing-secret",
+};
+
 let buildDir: string;
 let bundleUrl: string;
 
@@ -64,14 +80,20 @@ beforeAll(() => {
       `real wrangler build failed (exit ${String(result.status)}):\n${result.stdout}\n${result.stderr}`,
     );
   }
-  const jsPath = join(buildDir, "index.js");
+  const jsFiles = readdirSync(buildDir).filter((name) => name.endsWith(".js"));
+  if (jsFiles.length !== 1) {
+    throw new Error(
+      `expected exactly one Worker JavaScript bundle in ${buildDir}, found: ${jsFiles.join(", ") || "none"}`,
+    );
+  }
+  const jsPath = join(buildDir, jsFiles[0] ?? "");
   if (!existsSync(jsPath)) {
     throw new Error(`expected build output not found at ${jsPath}`);
   }
   // Force ESM interpretation regardless of any ambient package.json "type" -- the real bundle
   // uses `export { ... as default }` syntax, which only a `.mjs` (or "type":"module") file allows
   // Node to parse without a separate loader.
-  const mjsPath = join(buildDir, "index.mjs");
+  const mjsPath = join(buildDir, "worker.mjs");
   copyFileSync(jsPath, mjsPath);
   bundleUrl = pathToFileURL(mjsPath).href;
 }, 60_000);
@@ -84,11 +106,32 @@ interface WorkerModule {
   default: { fetch(request: Request, env: unknown): Promise<Response> };
 }
 
+async function authenticatedCookie(mod: WorkerModule): Promise<string> {
+  const response = await mod.default.fetch(
+    new Request("https://example.test/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username: "kalob", password: PILOT_PASSWORD }),
+    }),
+    PRODUCT_ENV,
+  );
+  if (response.status !== 204) {
+    throw new Error(`product login failed in browser artifact test: HTTP ${String(response.status)}`);
+  }
+  const cookie = (response.headers.get("set-cookie") ?? "").split(";", 1)[0];
+  if (!cookie) throw new Error("product login did not return a session cookie");
+  return cookie;
+}
+
 async function renderPage(path: string): Promise<string> {
   const mod = (await import(bundleUrl)) as WorkerModule;
+  const needsProductSession = path === "/" || path === "/admin/field";
+  const cookie = needsProductSession ? await authenticatedCookie(mod) : null;
   const response = await mod.default.fetch(
-    new Request(`https://example.test${path}`),
-    {},
+    new Request(`https://example.test${path}`, {
+      ...(cookie ? { headers: { cookie } } : {}),
+    }),
+    needsProductSession ? PRODUCT_ENV : {},
   );
   return response.text();
 }
