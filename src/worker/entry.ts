@@ -55,13 +55,26 @@ async function readPortfolio(env: Env): Promise<Response> {
   );
 }
 
+function isProjectsTableUnavailable(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("no such table: projects");
+}
+
 async function productDashboard(request: Request, env: Env): Promise<Response> {
-  const [legacyResponse, rows] = await Promise.all([
-    legacyWorker.fetch(request, env),
-    readPortfolioRows(env),
-  ]);
+  const legacyResponse = await legacyWorker.fetch(request, env);
   const contentType = legacyResponse.headers.get("content-type") ?? "";
   if (!contentType.includes("text/html")) return legacyResponse;
+
+  let rows: PortfolioProjectRow[] = [];
+  try {
+    rows = await readPortfolioRows(env);
+  } catch (error) {
+    // Authentication is independent of D1 schema readiness. The signed-in shell must still render
+    // when the product tables have not been initialized yet; the real /v1/portfolio endpoint stays
+    // strict and will surface that readiness problem to the synchronization layer instead of
+    // turning a valid login into a 500 page.
+    if (!isProjectsTableUnavailable(error)) throw error;
+  }
 
   const html = decorateProductDashboard(
     await legacyResponse.text(),
