@@ -29,53 +29,41 @@ const PROJECT_IDS = [
 ];
 
 describe("authenticated product dashboard decoration", () => {
-  it(
-    "hydrates the legacy dashboard from the canonical server roster instead of a seven-project constant",
-    () => {
-      const html = decorateProductDashboard(LEGACY_HTML, PROJECT_IDS);
+  it("hydrates the legacy dashboard from the canonical server roster instead of a seven-project constant", () => {
+    const html = decorateProductDashboard(LEGACY_HTML, PROJECT_IDS);
 
-      expect(html).toContain(JSON.stringify(PROJECT_IDS));
-      expect(html).toContain("howler_field_tracked_projects");
-      expect(html).toContain("portfolio-12");
-      expect(html).not.toContain("deboard-v091");
-    },
-  );
+    expect(html).toContain(JSON.stringify(PROJECT_IDS));
+    expect(html).toContain("howler_field_tracked_projects");
+    expect(html).toContain("portfolio-12");
+    expect(html).not.toContain("deboard-v091");
+  });
 
-  it(
-    "removes the visible admin-key prompt without embedding the real admin secret",
-    () => {
-      const html = decorateProductDashboard(LEGACY_HTML, PROJECT_IDS);
+  it("removes the visible admin-key prompt without embedding the real admin secret", () => {
+    const html = decorateProductDashboard(LEGACY_HTML, PROJECT_IDS);
 
-      expect(html).not.toContain(
-        "Paste the staging admin key to load the portfolio",
-      );
-      expect(html).not.toContain("HOWLER_ADMIN_KEY</label>");
-      expect(html).toContain('id="admin-key"');
-      expect(html).toContain('type="hidden"');
-      expect(html).toContain('value="product-session"');
-    },
-  );
+    expect(html).not.toContain(
+      "Paste the staging admin key to load the portfolio",
+    );
+    expect(html).not.toContain("HOWLER_ADMIN_KEY</label>");
+    expect(html).toContain('id="admin-key"');
+    expect(html).toContain('type="hidden"');
+    expect(html).toContain('value="product-session"');
+  });
 
-  it(
-    "synchronizes canonical portfolio membership every 15 seconds and when the window regains focus",
-    () => {
-      const html = decorateProductDashboard(LEGACY_HTML, PROJECT_IDS);
+  it("synchronizes canonical portfolio membership every 15 seconds and when the window regains focus", () => {
+    const html = decorateProductDashboard(LEGACY_HTML, PROJECT_IDS);
 
-      expect(html).toContain("/v1/portfolio");
-      expect(html).toContain("15000");
-      expect(html).toContain('addEventListener("focus"');
-      expect(html).toContain("location.reload()");
-    },
-  );
+    expect(html).toContain("/v1/portfolio");
+    expect(html).toContain("15000");
+    expect(html).toContain('addEventListener("focus"');
+    expect(html).toContain("location.reload()");
+  });
 
-  it(
-    "triggers the existing field-dashboard summary loader after installing the session sentinel",
-    () => {
-      const html = decorateProductDashboard(LEGACY_HTML, PROJECT_IDS);
+  it("triggers the existing field-dashboard summary loader after installing the session sentinel", () => {
+    const html = decorateProductDashboard(LEGACY_HTML, PROJECT_IDS);
 
-      expect(html).toContain("product-session");
-      expect(html).toContain('new Event("change")');
-      expect(html).toContain("dispatchEvent");
-    },
-  );
+    expect(html).toContain("product-session");
+    expect(html).toContain('new Event("change")');
+    expect(html).toContain("dispatchEvent");
+  });
 });
