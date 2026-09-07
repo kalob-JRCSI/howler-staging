@@ -9,6 +9,47 @@ import {
 } from "./auth";
 import { HttpError, json, readJson } from "./http";
 
+interface PortfolioProjectRow {
+  project_id: string;
+  name: string;
+  revision: number;
+  updated_at: string;
+}
+
+async function requireProductSession(
+  request: Request,
+  env: Env,
+): Promise<void> {
+  const secret = env.HOWLER_SESSION_SIGNING_SECRET;
+  if (!secret) {
+    throw new HttpError(500, "Product session signing is not configured");
+  }
+  const user = await readSession(request, secret);
+  if (!user) throw new HttpError(401, "Unauthorized");
+}
+
+async function readPortfolio(env: Env): Promise<Response> {
+  const result = await env.HOWLER_DB.prepare(
+    `SELECT project_id, name, revision, updated_at
+       FROM projects
+      ORDER BY name COLLATE NOCASE ASC, project_id ASC`,
+  ).all<PortfolioProjectRow>();
+
+  return json(
+    {
+      schemaVersion: "0.9.6",
+      projects: result.results.map((row) => ({
+        projectId: row.project_id,
+        projectName: row.name,
+        revision: row.revision,
+        updatedAt: row.updated_at,
+      })),
+    },
+    200,
+    { "cache-control": "no-store" },
+  );
+}
+
 async function handleProductBoundary(
   request: Request,
   env: Env,
@@ -22,6 +63,11 @@ async function handleProductBoundary(
     const secret = env.HOWLER_SESSION_SIGNING_SECRET;
     const user = secret ? await readSession(request, secret) : null;
     return user ? legacyWorker.fetch(request, env) : loginPage();
+  }
+
+  if (request.method === "GET" && url.pathname === "/v1/portfolio") {
+    await requireProductSession(request, env);
+    return await readPortfolio(env);
   }
 
   if (request.method === "POST" && url.pathname === "/auth/login") {
