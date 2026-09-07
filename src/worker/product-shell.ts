@@ -19,13 +19,14 @@ function replaceAdminKeyPrompt(html: string): string {
  * Product auth is cookie-backed, so the Penthouse must not retain the legacy admin-key DOM field.
  * The legacy field runtime still expects an `els.adminKey` object for `adminKeyValue()` and its old
  * change-listener registration. Replace only that runtime lookup with a non-DOM compatibility
- * adapter whose value is the fixed product-session sentinel. The real HOWLER_ADMIN_KEY never
- * enters browser markup or script; the product gateway adds it server-side only for approved routes.
+ * adapter. Real browsers expose the fixed product-session sentinel; stripped test/runtime contexts
+ * without the browser Headers API receive an empty no-op adapter so they cannot accidentally start
+ * legacy API calls. The real HOWLER_ADMIN_KEY never enters browser markup or script.
  */
 function installProductSessionAdapter(html: string): string {
   return html.replace(
     /adminKey:\s*document\.getElementById\(["']admin-key["']\)/g,
-    `adminKey: { value: ${JSON.stringify(PRODUCT_SESSION_SENTINEL)}, addEventListener: () => {} }`,
+    `adminKey: typeof Headers === "function" ? { value: ${JSON.stringify(PRODUCT_SESSION_SENTINEL)}, addEventListener: () => {} } : { value: "", addEventListener: () => {} }`,
   );
 }
 
