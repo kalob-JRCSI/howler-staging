@@ -16,7 +16,7 @@ async function productEnv(): Promise<Env> {
     HOWLER_PILOT_USERNAME: "kalob",
     HOWLER_PILOT_PASSWORD_HASH: await sha256Hex(PILOT_PASSWORD),
     HOWLER_SESSION_SIGNING_SECRET: SESSION_SECRET,
-  } as Env;
+  };
 }
 
 function request(
