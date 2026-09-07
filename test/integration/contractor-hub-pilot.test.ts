@@ -609,15 +609,24 @@ describe("Task 7: the complete v0.9.6 Contractor Hub pilot slice, end to end", (
     expect(updatedSummary.progressPercent).toBeGreaterThan(
       initialSummary.progressPercent,
     );
-    // nextMovement is genuinely recomputed on every read (GET summary never caches), but its
-    // VALUE legitimately stays "Kitchen forecast to start <today>" here: Kitchen's phase
-    // ("General") was never a recognized phase in Genesis's own PHASE_ORDER, so it never received
-    // a dependency on Demolition -- exactly the design's "only affected project elements should
-    // change" guarantee, proven by this value correctly NOT drifting from an unrelated activity's
-    // update, rather than changing for no real reason.
-    expect(updatedSummary.nextMovement).toBe(initialSummary.nextMovement);
+    // nextMovement is genuinely recomputed on every read (GET summary never caches). Task 8 pilot
+    // smoke correction: this used to assert nextMovement stayed pinned to "Kitchen forecast to
+    // start <anchor date>" both before and after the update, reasoning that Kitchen's phase
+    // ("General") was never recognized by Genesis's PHASE_ORDER so it could never be affected by
+    // anything Demolition-related. That was itself a symptom of the bug the correction fixes --
+    // Kitchen was genuinely unsequenced, forecast from the project's own anchor date with no
+    // regard for Demolition at all. With the guarded Demolition -> unrecognized-phase inference in
+    // place, Demolition -- not Kitchen -- is correctly the earliest-dated incomplete activity both
+    // before and after the update, so nextMovement now legitimately tracks Demolition's own state:
+    // before the update it reflects Demolition's committed start; after, Demolition's real
+    // actualStart (recorded by the update itself) makes it the new earliest date, so the two
+    // values are no longer expected to match -- unlike Kitchen's old, disconnected date, this one
+    // is correctly the same activity's own state genuinely advancing.
+    expect(initialSummary.nextMovement).toBe(
+      "Demolition forecast to start 2026-09-14.",
+    );
     expect(updatedSummary.nextMovement).toBe(
-      `Kitchen forecast to start ${FIXED_TODAY}.`,
+      `Demolition forecast to start ${FIXED_TODAY}.`,
     );
     expect(updatedSummary.projectedCompletion).not.toBeNull();
     expect(typeof updatedSummary.integrity.score).toBe("number");

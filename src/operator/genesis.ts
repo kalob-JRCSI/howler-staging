@@ -52,8 +52,8 @@ export interface GenesisProposalV096 {
 }
 
 // Recognized construction phase order -- used only to infer conservative, non-speculative
-// dependencies between adjacent recognized phases that are both actually present in the approved
-// baseline scope. Never used to invent a relationship between unrecognized phase labels.
+// dependencies between recognized phases that are both actually present in the approved baseline
+// scope. Never used to invent a relationship between unrecognized phase labels.
 const PHASE_ORDER = [
   "Demolition",
   "Foundation",
@@ -68,6 +68,24 @@ const PHASE_ORDER = [
   "Punch",
   "Closeout",
 ];
+
+// Task 8 pilot smoke correction: a scope item whose phase falls OUTSIDE PHASE_ORDER entirely
+// (most commonly "General" -- the default fallback phase for room-named scope like "Kitchen" or
+// "Primary bath" -- and "Envelope", which covers windows/doors/roofing) never participates in the
+// recognized-phase sequencing above at all, by design. Left with no relationship to Demolition
+// whatsoever, such an item forecasts from the project's own anchor date with no regard for a
+// committed Demolition start, which is exactly how the pilot smoke test caught Kitchen/Primary
+// bath/Windows forecast to start days before Demolition's committed date. The guarded conservative
+// inference in buildProjectFromGenesis below (every Demolition-phase item precedes every such
+// unrecognized-phase item, unless that item already carries its own explicit committed date)
+// applies only to these project types -- new construction has nothing being demolished away from
+// a room's prior use, and the plain/default "RESIDENTIAL" type carries no signal this inference is
+// appropriate.
+const DEMOLITION_INFERENCE_PROJECT_TYPES = new Set([
+  "RESIDENTIAL_REMODEL",
+  "RESIDENTIAL_RENOVATION",
+  "RESIDENTIAL_ADDITION",
+]);
 
 // Deliberately visible pilot baseline duration for a scope item with no explicit estimate. The
 // Genesis review UI must surface this assumption before approval (design: "The proposal UI must
@@ -360,8 +378,26 @@ export function buildProjectFromGenesis(
     }
   }
 
-  // Only connect adjacent recognized phases that are both actually present -- never invent a
-  // dependency relationship among unrecognized/unmatched phase labels.
+  // Connect recognized phases that are both actually present, walking the ordered SUBSET of
+  // recognized phases present in this scope rather than requiring literal PHASE_ORDER index
+  // adjacency. A small remodel routinely skips most of the 12-phase taxonomy (e.g. Demolition +
+  // MEP Rough-In + Finishes, with Foundation/Framing/Inspection/Insulation/Drywall/Paint all
+  // absent) -- the previous index-adjacency-only version silently generated zero dependencies for
+  // exactly this common shape, because it required Foundation and Framing (both absent) to bridge
+  // Demolition to MEP Rough-In (Task 8 pilot smoke: "Smith Residence forecast sequencing"). Never
+  // invents a relationship between two recognized phases unless BOTH are present, and never
+  // reorders PHASE_ORDER itself -- it only skips gaps.
+  //
+  // These dependencies (and the guarded conservative ones below) are marked hard: true, not the
+  // inert hard: false a purely-descriptive "recognized phase order" label might suggest --
+  // src/engine/solver.ts's solveScenario forward pass (`if (!dep.hard) continue`) only ever lets a
+  // HARD dependency's predecessor finish date push a successor's forecast start; a soft dependency
+  // is solver-invisible and only ever surfaces as driver-summary text, never actually affecting a
+  // computed date. Genesis's own recognized-phase sequencing is exactly the kind of
+  // strong-confidence, non-speculative inference the design calls for actually reflecting in the
+  // forecast a PM sees, not merely narrating in a details panel. A hard dependency never overrides
+  // an activity's own scheduleLock: solveScenario applies an explicit lock unconditionally AFTER
+  // computing the dependency-derived candidate date, so a PM's own commitment is always preserved.
   //
   // Dependency ids built below always carry the fixed, non-empty "dep-genesis-" prefix, so the
   // constructed key can never equal a reserved Record-prototype identifier
@@ -379,35 +415,91 @@ export function buildProjectFromGenesis(
     }
   }
   const dependencies: Record<string, DependencyV094> = {};
-  for (let i = 0; i < PHASE_ORDER.length - 1; i += 1) {
-    const currentPhase = PHASE_ORDER[i];
-    const nextPhase = PHASE_ORDER[i + 1];
+  const addDependency = (
+    predecessor: GenesisScopeItemV096,
+    successor: GenesisScopeItemV096,
+    reason: string,
+  ): void => {
+    const dependencyId = genesisDependencyId(predecessor.id, successor.id);
+    // Defense-in-depth: genesisDependencyId is deterministic and collision-free for any ordered
+    // pair, so this should never actually fire -- but if it ever did, silently overwriting an
+    // existing relationship would be far worse than failing loudly.
+    if (dependencies[dependencyId]) {
+      throw new Error(
+        `Generated dependency id collision: ${dependencyId} (predecessor ${predecessor.id}, successor ${successor.id})`,
+      );
+    }
+    dependencies[dependencyId] = {
+      id: dependencyId,
+      active: true,
+      predecessorId: predecessor.id,
+      successorId: successor.id,
+      type: "FINISH_TO_START",
+      lagWorkdays: 0,
+      hard: true,
+      reason,
+      sourceIds: [sourceId],
+    };
+  };
+
+  const presentRecognizedPhases = PHASE_ORDER.filter((phase) =>
+    itemsByPhase.has(phase),
+  );
+  for (let i = 0; i < presentRecognizedPhases.length - 1; i += 1) {
+    const currentPhase = presentRecognizedPhases[i];
+    const nextPhase = presentRecognizedPhases[i + 1];
     if (currentPhase === undefined || nextPhase === undefined) continue;
     const predecessors = itemsByPhase.get(currentPhase);
     const successors = itemsByPhase.get(nextPhase);
     if (!predecessors || !successors) continue;
     for (const predecessor of predecessors) {
       for (const successor of successors) {
-        const dependencyId = genesisDependencyId(predecessor.id, successor.id);
-        // Defense-in-depth: genesisDependencyId is deterministic and collision-free for any
-        // ordered pair, so this should never actually fire -- but if it ever did, silently
-        // overwriting an existing relationship would be far worse than failing loudly.
-        if (dependencies[dependencyId]) {
-          throw new Error(
-            `Generated dependency id collision: ${dependencyId} (predecessor ${predecessor.id}, successor ${successor.id})`,
-          );
-        }
-        dependencies[dependencyId] = {
-          id: dependencyId,
-          active: true,
-          predecessorId: predecessor.id,
-          successorId: successor.id,
-          type: "FINISH_TO_START",
-          lagWorkdays: 0,
-          hard: false,
-          reason: `${currentPhase} precedes ${nextPhase} (Genesis recognized phase order)`,
-          sourceIds: [sourceId],
-        };
+        addDependency(
+          predecessor,
+          successor,
+          `${currentPhase} precedes ${nextPhase} (Genesis recognized phase order)`,
+        );
+      }
+    }
+  }
+
+  // Guarded conservative inference (Task 8 pilot smoke correction, Part 2a): a remodel/
+  // renovation/addition project that includes Demolition routinely also has scope named by ROOM
+  // rather than trade ("Kitchen", "Primary bath") or otherwise outside the recognized PHASE_ORDER
+  // taxonomy ("Envelope") -- the loop above never touches those, by design, since it never invents
+  // a relationship unless BOTH phases are recognized. In practice, interior/envelope/finish work
+  // never genuinely precedes demolition in this project shape, so one conservative edge FROM every
+  // Demolition-phase item TO every such unrecognized-phase item is a safe, narrow inference --
+  // never among the unrecognized items themselves (that would still be inventing an ordering this
+  // code has no basis for), and never onto a target that already carries its own explicit
+  // committed date of either kind (an explicit PM commitment is always authoritative and is never
+  // silently reinterpreted or overridden by an inferred relationship -- it is simply left alone).
+  // Not applied to RESIDENTIAL_NEW_BUILD or any project type outside
+  // DEMOLITION_INFERENCE_PROJECT_TYPES, and not applied when no Demolition-phase item is present
+  // at all -- neither case has any real basis for this inference.
+  if (
+    DEMOLITION_INFERENCE_PROJECT_TYPES.has(proposal.projectType) &&
+    itemsByPhase.has("Demolition")
+  ) {
+    const demolitionItems = itemsByPhase.get("Demolition") ?? [];
+    const committedSubjectIds = new Set(
+      proposal.knownDates
+        .filter(
+          (known) =>
+            known.kind === "COMMITTED_START" ||
+            known.kind === "COMMITTED_FINISH",
+        )
+        .map((known) => known.subjectId),
+    );
+    for (const item of proposal.baselineScope) {
+      if (PHASE_ORDER.includes(item.phase)) continue;
+      if (committedSubjectIds.has(item.id)) continue;
+      for (const predecessor of demolitionItems) {
+        addDependency(
+          predecessor,
+          item,
+          `Demolition precedes ${item.label} (Genesis conservative inference -- ${item.phase} is not a recognized sequencing phase)`,
+        );
       }
     }
   }

@@ -6,6 +6,7 @@ import {
   type GenesisScopeItemV096,
 } from "../../src/operator/genesis";
 import { validateProjectModel } from "../../src/domain/validation";
+import { generateForecast } from "../../src/engine/solver";
 
 function proposal(): GenesisProposalV096 {
   return {
@@ -438,5 +439,175 @@ describe("Project Genesis canonical builder: adversarial review findings", () =>
     expect(validateGenesisProposal(ok)).toEqual([]);
     const model = buildProjectFromGenesis(ok, "2026-09-04T20:00:00.000Z");
     assertAllFourDependencyRelationships(model);
+  });
+
+  // Task 8 pilot smoke correction: live manual smoke against real staging D1 caught Kitchen,
+  // Primary bath, Flooring, Windows, Electrical service upgrade, and HVAC modifications all
+  // forecast to start days BEFORE Demolition's committed start -- canonical forecast output, not
+  // a UI-only issue. Root cause: the phase-sequencing loop above required literal PHASE_ORDER
+  // index adjacency, so any gap (Foundation/Framing absent between Demolition and MEP Rough-In)
+  // silently produced zero dependencies, and phases entirely outside PHASE_ORDER ("General",
+  // "Envelope") could never receive one regardless of adjacency. The five tests below are the
+  // exact regression matrix that correction round specified.
+
+  it("links across skipped recognized phases (Demolition -> MEP Rough-In -> Finishes) instead of requiring literal PHASE_ORDER adjacency", () => {
+    const ok: GenesisProposalV096 = {
+      ...proposal(),
+      baselineScope: [
+        { id: "demo", label: "Demolition", phase: "Demolition" },
+        { id: "electrical", label: "Electrical", phase: "MEP Rough-In" },
+        { id: "flooring", label: "Flooring", phase: "Finishes" },
+      ],
+      knownDates: [],
+    };
+    expect(validateGenesisProposal(ok)).toEqual([]);
+    const model = buildProjectFromGenesis(ok, "2026-09-04T20:00:00.000Z");
+    const pairs = Object.values(model.dependencies).map(
+      (d) => `${d.predecessorId}->${d.successorId}`,
+    );
+    expect(pairs).toEqual(
+      expect.arrayContaining(["demo->electrical", "electrical->flooring"]),
+    );
+    // Foundation and Framing were never present at all -- Demolition must not be linked directly
+    // to Finishes either, which would skip past the MEP Rough-In step this scope actually has.
+    expect(pairs).not.toContain("demo->flooring");
+    for (const dep of Object.values(model.dependencies)) {
+      expect(dep.hard).toBe(true);
+    }
+  });
+
+  it("Smith's exact seven-item intake forecasts no scope activity before Demolition's committed finish", () => {
+    const smith: GenesisProposalV096 = {
+      ...proposal(),
+      forecastAnchorDate: "2026-09-07",
+      baselineScope: [
+        { id: "kitchen", label: "Kitchen", phase: "General" },
+        { id: "primary-bath", label: "Primary bath", phase: "General" },
+        { id: "flooring", label: "Flooring", phase: "Finishes" },
+        { id: "windows", label: "Windows", phase: "Envelope" },
+        {
+          id: "electrical-service-upgrade",
+          label: "Electrical service upgrade",
+          phase: "MEP Rough-In",
+        },
+        {
+          id: "hvac-modifications",
+          label: "HVAC modifications",
+          phase: "MEP Rough-In",
+        },
+        { id: "demolition", label: "Demolition", phase: "Demolition" },
+      ],
+      knownDates: [
+        {
+          subjectId: "demolition",
+          kind: "COMMITTED_START",
+          date: "2026-09-14",
+          label: "Demolition start",
+        },
+      ],
+    };
+    expect(validateGenesisProposal(smith)).toEqual([]);
+    const model = buildProjectFromGenesis(smith, "2026-09-07T15:00:00.000Z");
+    const forecast = generateForecast(model, "2026-09-07T15:00:00.000Z", 1);
+    const demolitionForecast = forecast.activityForecasts.demolition;
+    expect(demolitionForecast?.start.likely).toBe("2026-09-14");
+    const demolitionFinishLikely = demolitionForecast?.finish.likely;
+    expect(typeof demolitionFinishLikely).toBe("string");
+    for (const id of [
+      "kitchen",
+      "primary-bath",
+      "flooring",
+      "windows",
+      "electrical-service-upgrade",
+      "hvac-modifications",
+    ]) {
+      const activityForecast = forecast.activityForecasts[id];
+      expect(activityForecast).toBeDefined();
+      expect(
+        (activityForecast?.start.likely ?? "") > (demolitionFinishLikely ?? ""),
+      ).toBe(true);
+    }
+  });
+
+  it("adds a guarded conservative Demolition -> unrecognized-phase dependency for General/Envelope scope in a remodel that has Demolition", () => {
+    const ok: GenesisProposalV096 = {
+      ...proposal(),
+      projectType: "RESIDENTIAL_REMODEL",
+      baselineScope: [
+        { id: "demo", label: "Demolition", phase: "Demolition" },
+        { id: "kitchen", label: "Kitchen", phase: "General" },
+        { id: "windows", label: "Windows", phase: "Envelope" },
+      ],
+      knownDates: [],
+    };
+    expect(validateGenesisProposal(ok)).toEqual([]);
+    const model = buildProjectFromGenesis(ok, "2026-09-04T20:00:00.000Z");
+    const pairs = Object.values(model.dependencies).map(
+      (d) => `${d.predecessorId}->${d.successorId}`,
+    );
+    expect(pairs).toEqual(
+      expect.arrayContaining(["demo->kitchen", "demo->windows"]),
+    );
+    // Never invents an ordering among the unrecognized items themselves.
+    expect(pairs).not.toContain("kitchen->windows");
+    expect(pairs).not.toContain("windows->kitchen");
+    const kitchenDep = Object.values(model.dependencies).find(
+      (d) => d.predecessorId === "demo" && d.successorId === "kitchen",
+    );
+    expect(kitchenDep?.hard).toBe(true);
+    // Sourced/reasoned as a Genesis assumption, never worded as a user-confirmed commitment.
+    expect(kitchenDep?.reason).toMatch(/conservative inference/i);
+  });
+
+  it("never adds an inferred dependency onto a target that already has its own explicit committed date -- that commitment is preserved untouched, not silently overridden", () => {
+    const ok: GenesisProposalV096 = {
+      ...proposal(),
+      projectType: "RESIDENTIAL_REMODEL",
+      forecastAnchorDate: "2026-09-01",
+      baselineScope: [
+        { id: "demo", label: "Demolition", phase: "Demolition" },
+        { id: "windows", label: "Windows", phase: "Envelope" },
+      ],
+      knownDates: [
+        {
+          subjectId: "demo",
+          kind: "COMMITTED_START",
+          date: "2026-09-14",
+          label: "Demo start",
+        },
+        {
+          subjectId: "windows",
+          kind: "COMMITTED_START",
+          date: "2026-09-10",
+          label: "Windows start (PM-committed, before demolition)",
+        },
+      ],
+    };
+    expect(validateGenesisProposal(ok)).toEqual([]);
+    const model = buildProjectFromGenesis(ok, "2026-09-04T20:00:00.000Z");
+    const pairs = Object.values(model.dependencies).map(
+      (d) => `${d.predecessorId}->${d.successorId}`,
+    );
+    expect(pairs).not.toContain("demo->windows");
+    expect(model.activities.windows?.scheduleLock?.startDate).toBe(
+      "2026-09-10",
+    );
+    const forecast = generateForecast(model, "2026-09-04T20:00:00.000Z", 1);
+    expect(forecast.activityForecasts.windows?.start.likely).toBe("2026-09-10");
+  });
+
+  it("never invents a dependency for General/Envelope scope when the project has no Demolition item at all", () => {
+    const ok: GenesisProposalV096 = {
+      ...proposal(),
+      projectType: "RESIDENTIAL_REMODEL",
+      baselineScope: [
+        { id: "kitchen", label: "Kitchen", phase: "General" },
+        { id: "windows", label: "Windows", phase: "Envelope" },
+      ],
+      knownDates: [],
+    };
+    expect(validateGenesisProposal(ok)).toEqual([]);
+    const model = buildProjectFromGenesis(ok, "2026-09-04T20:00:00.000Z");
+    expect(model.dependencies).toEqual({});
   });
 });
