@@ -10,10 +10,23 @@ function replaceAdminKeyPrompt(html: string): string {
   const sectionPattern =
     /<section class="ph-connect card"[\s\S]*?<input id="admin-key"[\s\S]*?<\/section>/;
   const productControls = `<div id="howler-product-session-controls"><div id="howler-live-status" role="status" aria-live="polite">Stale · Last synced never</div><button id="howler-logout" type="button">Log out</button></div>`;
-  const hiddenInput = `<input id="admin-key" type="hidden" value="${PRODUCT_SESSION_SENTINEL}">${productControls}`;
   return sectionPattern.test(html)
-    ? html.replace(sectionPattern, hiddenInput)
-    : html.replace(/<input id="admin-key"[^>]*>/, hiddenInput);
+    ? html.replace(sectionPattern, productControls)
+    : html.replace(/<input id="admin-key"[^>]*>/, productControls);
+}
+
+/**
+ * Product auth is cookie-backed, so the Penthouse must not retain the legacy admin-key DOM field.
+ * The legacy field runtime still expects an `els.adminKey` object for `adminKeyValue()` and its old
+ * change-listener registration. Replace only that runtime lookup with a non-DOM compatibility
+ * adapter whose value is the fixed product-session sentinel. The real HOWLER_ADMIN_KEY never
+ * enters browser markup or script; the product gateway adds it server-side only for approved routes.
+ */
+function installProductSessionAdapter(html: string): string {
+  return html.replace(
+    /adminKey:\s*document\.getElementById\(["']admin-key["']\)/g,
+    `adminKey: { value: ${JSON.stringify(PRODUCT_SESSION_SENTINEL)}, addEventListener: () => {} }`,
+  );
 }
 
 /**
@@ -76,11 +89,6 @@ function productBootstrapBody(projectIds: string[]): string {
   const trackedProjectsKey = ${JSON.stringify(TRACKED_PROJECTS_KEY)};
   const initialProjectIds = ${initialProjectIds};
   sessionStorage.setItem(trackedProjectsKey, JSON.stringify(initialProjectIds));
-
-  const adminKey = document.getElementById("admin-key");
-  if (adminKey && typeof Headers === "function") {
-    adminKey.value = ${JSON.stringify(PRODUCT_SESSION_SENTINEL)};
-  }
 
   let syncInFlight = false;
   let lastSuccessfulSync = null;
@@ -195,7 +203,8 @@ export function decorateProductDashboard(
   projectIds: string[],
 ): string {
   const withoutPrompt = replaceAdminKeyPrompt(legacyHtml);
-  const withPortfolioHook = installPortfolioApplyHook(withoutPrompt);
+  const withSessionAdapter = installProductSessionAdapter(withoutPrompt);
+  const withPortfolioHook = installPortfolioApplyHook(withSessionAdapter);
   const withMutationSync = installPostMutationSyncHooks(withPortfolioHook);
   return appendBootstrapToLastScript(
     withMutationSync,
