@@ -26,7 +26,8 @@ function productBootstrap(projectIds: string[]): string {
   const adminKey = document.getElementById("admin-key");
   if (adminKey) {
     adminKey.value = ${JSON.stringify(PRODUCT_SESSION_SENTINEL)};
-    adminKey.dispatchEvent(new Event("change"));
+    const changeEvent = typeof Event === "function" ? new Event("change") : { type: "change" };
+    adminKey.dispatchEvent(changeEvent);
   }
 
   async function syncPortfolio() {
