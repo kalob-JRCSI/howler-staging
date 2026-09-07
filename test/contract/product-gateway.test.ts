@@ -68,7 +68,9 @@ describe("authenticated product gateway", () => {
     expect(html).toContain('id="admin-key"');
     expect(html).toContain('type="hidden"');
     expect(html).toContain('value="product-session"');
-    expect(html).not.toContain("Paste the staging admin key to load the portfolio");
+    expect(html).not.toContain(
+      "Paste the staging admin key to load the portfolio",
+    );
     expect(html).not.toContain(ADMIN_KEY);
   });
 
