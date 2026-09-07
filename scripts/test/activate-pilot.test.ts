@@ -225,16 +225,28 @@ function alreadyActivatedHandlers(): Record<string, (call: Call) => Response> {
       jsonResponse(409, { error: "Project stewart-v1 already exists" }),
     "POST /v1/projects/deboard-v091/seed": () =>
       jsonResponse(409, { error: "DeBoard v0.9.1 is already seeded" }),
+    // Steady state: reconciliation was already applied in a previous run, so its event id is
+    // already in the ledger -- the correct, current activation flow never even reads the live
+    // revision or submits a mutation in this shape (see the dedicated "adapts to the project's
+    // live revision" describe block below for the not-yet-reconciled cases).
     "GET /v1/projects/deboard-v091/events": () =>
       jsonResponse(200, {
-        events: [{ id: "deboard-v091-baseline-evidence-2026-08-26" }],
+        events: [
+          { id: "deboard-v091-baseline-evidence-2026-08-26" },
+          { id: "deboard-v091-reconciliation-2026-09-03" },
+        ],
       }),
+    "GET /v1/projects/deboard-v091/forecast": () =>
+      jsonResponse(200, { modelRevision: 1, latest: null, published: null }),
     "POST /v1/intents:EVIDENCE_PREVIEW": multiProjectEvidencePreviewHandler({
       "stewart-v1": exactMatchConfig("stewart-v1"),
       ...allOtherProjectsExactMatchConfig(),
     }),
-    "POST /v1/intents:EVIDENCE_APPLY_SHADOW": () =>
-      jsonResponse(200, { replayed: true }),
+    // Defensive fallback only -- the events handler above means this steady-state fixture never
+    // actually reaches a mutation call for DeBoard reconciliation. A full SUCCEEDED shape (not the
+    // old bare {replayed:true}) so a test that overrides only part of this fixture and does reach
+    // it still exercises a realistic response rather than an unrecognized one.
+    "POST /v1/intents:EVIDENCE_APPLY_SHADOW": succeededIntent,
     "POST /v1/intents:FORECAST_QUERY": succeededIntent,
     "POST /v1/intents:FORECAST_HEALTH_QUERY": succeededIntent,
   };
@@ -413,32 +425,130 @@ describe("activatePilot: 409 existing project + newer-looking state with UNPROVA
   });
 });
 
-describe("activatePilot: DeBoard reconciliation is not duplicated", () => {
-  it("treats a replayed:true response as success without ever re-submitting a second reconciliation intent", async () => {
-    const { calls } = stubFetch(alreadyActivatedHandlers());
-    await activatePilot(OPTS);
-    const reconciliationCalls = calls.filter(
-      (c) =>
-        c.path === "/v1/intents" &&
-        (c.body as { kind?: unknown } | undefined)?.kind ===
-          "EVIDENCE_APPLY_SHADOW",
-    );
-    expect(reconciliationCalls).toHaveLength(1);
-  });
+// A real, lineage-proven DeBoard descendant that has advanced past the reconciliation fixture's
+// own baseRevision (1) through genuine field updates, but has NOT yet received the reconciliation
+// event itself -- the exact live staging shape that exposed the fixed-intentId/fixed-baseRevision
+// defect: reconciliation must never be submitted against a hardcoded revision, only the project's
+// real, current one.
+const DEBOARD_DESCENDANT_EVENTS_NO_RECONCILIATION = [
+  { id: "deboard-v091-baseline-evidence-2026-08-26" },
+  { id: "deboard-v091-field-update-1" },
+  { id: "deboard-v091-field-update-2" },
+];
 
-  it("submits the exact same fixed intentId/idempotencyKey every run, never a fresh one", async () => {
-    const { calls } = stubFetch(alreadyActivatedHandlers());
-    await activatePilot(OPTS);
+const OLD_BLOCKED_RECONCILIATION_INTENT_ID =
+  "b244404f-93e2-4410-adc8-1eb027cf0635";
+const OLD_BLOCKED_RECONCILIATION_IDEMPOTENCY_KEY =
+  "d61605b4-ddea-4244-bd3c-8aee0f1b070a";
+
+describe("activatePilot: DeBoard reconciliation is not duplicated, and adapts to the project's live revision", () => {
+  it("submits reconciliation against the project's live model revision (never a hardcoded one) when a lineage-proven descendant predates reconciliation, and never reuses the already-BLOCKED historical intent identity", async () => {
+    const handlers = {
+      ...alreadyActivatedHandlers(),
+      "GET /v1/projects/deboard-v091/events": () =>
+        jsonResponse(200, {
+          events: DEBOARD_DESCENDANT_EVENTS_NO_RECONCILIATION,
+        }),
+      "GET /v1/projects/deboard-v091/forecast": () =>
+        jsonResponse(200, { modelRevision: 3, latest: null, published: null }),
+      "POST /v1/intents:EVIDENCE_APPLY_SHADOW": succeededIntent,
+    };
+    const { calls } = stubFetch(handlers);
+    const rows = await activatePilot(OPTS);
+    expect(rows).toHaveLength(7);
+
     const reconciliationCall = calls.find(
       (c) =>
         c.path === "/v1/intents" &&
         (c.body as { kind?: unknown } | undefined)?.kind ===
           "EVIDENCE_APPLY_SHADOW",
     );
-    const body = reconciliationCall?.body as
-      { intentId?: unknown; idempotencyKey?: unknown } | undefined;
-    expect(body?.intentId).toBe("b244404f-93e2-4410-adc8-1eb027cf0635");
-    expect(body?.idempotencyKey).toBe("d61605b4-ddea-4244-bd3c-8aee0f1b070a");
+    expect(reconciliationCall).toBeDefined();
+    const body = reconciliationCall?.body as {
+      intentId?: unknown;
+      idempotencyKey?: unknown;
+      expectedProjectRevision?: unknown;
+      payload?: { event?: { baseRevision?: unknown } };
+    };
+    expect(body.expectedProjectRevision).toBe(3);
+    expect(body.payload?.event?.baseRevision).toBe(3);
+    expect(body.intentId).not.toBe(OLD_BLOCKED_RECONCILIATION_INTENT_ID);
+    expect(body.idempotencyKey).not.toBe(
+      OLD_BLOCKED_RECONCILIATION_IDEMPOTENCY_KEY,
+    );
+  });
+
+  it("aborts when a replayed response reports a BLOCKED run/result rather than SUCCEEDED -- replayed:true alone is never accepted as success", async () => {
+    const handlers = {
+      ...alreadyActivatedHandlers(),
+      "GET /v1/projects/deboard-v091/events": () =>
+        jsonResponse(200, {
+          events: DEBOARD_DESCENDANT_EVENTS_NO_RECONCILIATION,
+        }),
+      "GET /v1/projects/deboard-v091/forecast": () =>
+        jsonResponse(200, { modelRevision: 3, latest: null, published: null }),
+      "POST /v1/intents:EVIDENCE_APPLY_SHADOW": () =>
+        jsonResponse(200, {
+          replayed: true,
+          run: { state: "BLOCKED" },
+          result: { status: "BLOCKED" },
+        }),
+    };
+    stubFetch(handlers);
+    await expect(activatePilot(OPTS)).rejects.toThrow();
+  });
+
+  it("accepts a replay as success only when both run.state and result.status are SUCCEEDED", async () => {
+    const handlers = {
+      ...alreadyActivatedHandlers(),
+      "GET /v1/projects/deboard-v091/events": () =>
+        jsonResponse(200, {
+          events: DEBOARD_DESCENDANT_EVENTS_NO_RECONCILIATION,
+        }),
+      "GET /v1/projects/deboard-v091/forecast": () =>
+        jsonResponse(200, { modelRevision: 3, latest: null, published: null }),
+      "POST /v1/intents:EVIDENCE_APPLY_SHADOW": () =>
+        jsonResponse(200, {
+          replayed: true,
+          run: { state: "SUCCEEDED" },
+          result: { status: "SUCCEEDED" },
+        }),
+    };
+    const { calls } = stubFetch(handlers);
+    const rows = await activatePilot(OPTS);
+    expect(rows).toHaveLength(7);
+    const reconciliationCalls = calls.filter(
+      (c) =>
+        c.path === "/v1/intents" &&
+        (c.body as { kind?: unknown } | undefined)?.kind ===
+          "EVIDENCE_APPLY_SHADOW",
+    );
+    // A replay is a real submission attempt (the executor's own dedup answers it) -- exactly one
+    // call is made, it is just answered with a cached result rather than reapplied.
+    expect(reconciliationCalls).toHaveLength(1);
+  });
+
+  it("makes ZERO EVIDENCE_APPLY_SHADOW calls and proceeds directly to verification when the reconciliation event id is already in the event ledger (steady-state idempotent rerun)", async () => {
+    const handlers = {
+      ...alreadyActivatedHandlers(),
+      "GET /v1/projects/deboard-v091/events": () =>
+        jsonResponse(200, {
+          events: [
+            ...DEBOARD_DESCENDANT_EVENTS_NO_RECONCILIATION,
+            { id: "deboard-v091-reconciliation-2026-09-03" },
+          ],
+        }),
+    };
+    const { calls } = stubFetch(handlers);
+    const rows = await activatePilot(OPTS);
+    expect(rows).toHaveLength(7);
+    const reconciliationCalls = calls.filter(
+      (c) =>
+        c.path === "/v1/intents" &&
+        (c.body as { kind?: unknown } | undefined)?.kind ===
+          "EVIDENCE_APPLY_SHADOW",
+    );
+    expect(reconciliationCalls).toHaveLength(0);
   });
 
   it("aborts before ever attempting reconciliation when DeBoard's existing 409 cannot be proven to be the expected DeBoard lineage", async () => {
@@ -557,6 +667,14 @@ describe("activatePilot: fresh activation (nothing exists yet)", () => {
         jsonResponse(200, { ok: true, expected: [], found: [] }),
       "POST /v1/projects/deboard-v091/seed": () =>
         jsonResponse(201, { project: {}, stagingOnly: true }),
+      // A freshly-seeded DeBoard has no reconciliation event yet, and starts at revision 1
+      // (src/worker/deboard-seed.ts) -- exactly what the reconciliation fixture's own baseRevision
+      // has always assumed, which is why this clean-environment path is unaffected by the
+      // revision-adaptation fix.
+      "GET /v1/projects/deboard-v091/events": () =>
+        jsonResponse(200, { events: [] }),
+      "GET /v1/projects/deboard-v091/forecast": () =>
+        jsonResponse(200, { modelRevision: 1, latest: null, published: null }),
       "POST /v1/intents:EVIDENCE_APPLY_SHADOW": () => succeededIntent(),
       "POST /v1/intents:FORECAST_QUERY": succeededIntent,
       "POST /v1/intents:FORECAST_HEALTH_QUERY": succeededIntent,

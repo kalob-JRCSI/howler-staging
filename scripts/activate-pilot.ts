@@ -83,7 +83,7 @@
 // production, a differently-named/staging-adjacent Worker, or any arbitrary remote URL -- is
 // refused immediately, before the first HTTP call this script makes.
 
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { PILOT_PROJECTS, buildPilotSeedProject } from "./pilot-seed.ts";
 import { deboardReconciliationEvent } from "./deboard-reconciliation.ts";
@@ -493,25 +493,98 @@ async function seedDeboard(
   return "already-activated";
 }
 
+const DEBOARD_RECONCILIATION_EVENT_ID = deboardReconciliationEvent.id;
+
+/** Deterministic, revision-scoped UUID for the DeBoard reconciliation intent -- a hash of a fixed
+ * seed string formatted into the shape src/operator/intent.ts's UUID_PATTERN requires (any
+ * 8-4-4-4-12 hex string; it does not require a real v4/v5 version nibble). A retry against the
+ * SAME live revision reuses this exact id and replays safely through the executor's own
+ * per-(projectId, idempotencyKey) dedup; a DIFFERENT revision -- e.g. once real field updates have
+ * advanced the project past the revision this script last saw -- gets a completely different
+ * identity, so it can never collide with (and never replay) an attempt recorded against a stale
+ * revision, including the one already recorded BLOCKED forever in deboard-v091's history at
+ * revision 1. */
+function deboardReconciliationIntentIdFor(revision: number): string {
+  const hex = createHash("sha256")
+    .update(`deboard-v091-reconciliation-r${String(revision)}`)
+    .digest("hex")
+    .slice(0, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
+function deboardReconciliationIdempotencyKeyFor(revision: number): string {
+  return `deboard-v091-reconciliation-r${String(revision)}`;
+}
+
+/** DeBoard's canonical, current live model revision -- via the existing, read-only
+ * GET .../forecast route only. Never inferred from event-array position/length (an event array's
+ * length can diverge from the model's true revision, e.g. after an attempt that was BLOCKED and
+ * never actually advanced it) and never read from D1 directly. */
+async function readDeboardLiveRevision(
+  opts: ActivationOptions,
+): Promise<number> {
+  const result = await callApi(
+    opts,
+    "GET",
+    `/v1/projects/${DEBOARD_PROJECT_ID}/forecast`,
+  );
+  const modelRevision = (result.body as { modelRevision?: unknown } | null)
+    ?.modelRevision;
+  if (result.status !== 200 || typeof modelRevision !== "number") {
+    abort(
+      "could not read deboard-v091's live model revision to build a safe reconciliation intent",
+      result,
+    );
+  }
+  return modelRevision;
+}
+
 async function applyDeboardReconciliation(
   opts: ActivationOptions,
 ): Promise<void> {
-  // Fixed, never-changing ids -- the exact same ones
-  // test/integration/deboard-reconciliation.test.ts proves apply cleanly through the real HTTP
-  // boundary. Keeping them fixed here (not freshly generated) is what makes a second run of this
-  // script replay instead of reapplying: the executor's own existing per-(projectId,
-  // idempotencyKey) dedup, not a new mechanism this script invents.
+  // The reconciliation event's own id is immutable and deterministic (../deboard-reconciliation.ts)
+  // -- its presence in the project's real event ledger (the existing, read-only GET .../events
+  // route) is proof reconciliation was already applied in a previous run, regardless of what
+  // revision the project has since advanced to. When present, this is the steady-state idempotent
+  // rerun path: skip mutation entirely, never even read the live revision.
+  const eventsResult = await callApi(
+    opts,
+    "GET",
+    `/v1/projects/${DEBOARD_PROJECT_ID}/events?limit=500`,
+  );
+  const events = (eventsResult.body as { events?: { id?: unknown }[] } | null)
+    ?.events;
+  if (eventsResult.status !== 200 || !Array.isArray(events)) {
+    abort(
+      "could not read deboard-v091's event ledger to check reconciliation status",
+      eventsResult,
+    );
+  }
+  if (events.some((e) => e.id === DEBOARD_RECONCILIATION_EVENT_ID)) {
+    log(
+      "DeBoard reconciliation: already applied (event already present in the ledger).",
+    );
+    return;
+  }
+
+  // Not yet applied -- read the project's real, current revision rather than trusting the
+  // reconciliation fixture's own baseRevision (1, correct only against a freshly-seeded DeBoard --
+  // never mutated here; test/integration/deboard-reconciliation.test.ts still proves that exact
+  // fixture applies cleanly against a fresh seed). A copy is adapted for THIS activation attempt
+  // only.
+  const liveRevision = await readDeboardLiveRevision(opts);
+  const event = { ...deboardReconciliationEvent, baseRevision: liveRevision };
   const intent = {
     schemaVersion: "1",
-    intentId: "b244404f-93e2-4410-adc8-1eb027cf0635",
-    idempotencyKey: "d61605b4-ddea-4244-bd3c-8aee0f1b070a",
+    intentId: deboardReconciliationIntentIdFor(liveRevision),
+    idempotencyKey: deboardReconciliationIdempotencyKeyFor(liveRevision),
     projectId: DEBOARD_PROJECT_ID,
     kind: "EVIDENCE_APPLY_SHADOW",
     requestedEffect: "APPLY_SHADOW",
-    expectedProjectRevision: deboardReconciliationEvent.baseRevision,
-    submittedAt: "2026-09-03T12:00:00.000Z",
+    expectedProjectRevision: liveRevision,
+    submittedAt: new Date().toISOString(),
     source: { channel: "API" },
-    payload: { type: "EVIDENCE", event: deboardReconciliationEvent },
+    payload: { type: "EVIDENCE", event },
   };
   const result = await callApi(opts, "POST", "/v1/intents", intent);
   const body = result.body as {
@@ -519,20 +592,28 @@ async function applyDeboardReconciliation(
     run?: { state?: unknown };
     result?: { status?: unknown };
   } | null;
+  const succeeded =
+    body?.run?.state === "SUCCEEDED" && body.result?.status === "SUCCEEDED";
   if (result.status === 200 && body?.replayed === true) {
+    // A replay is the executor's own dedup answering an identical resubmission with its cached
+    // outcome -- that outcome must itself be SUCCEEDED to be treated as success. A replayed
+    // BLOCKED/FAILED result is still BLOCKED/FAILED; claiming it applied would silently report a
+    // conflicting/unapplied reconciliation as done.
+    if (!succeeded) {
+      abort(
+        "DeBoard reconciliation replay reported a non-SUCCEEDED outcome (BLOCKED/FAILED) -- refusing to treat a replayed failure as success",
+        result,
+      );
+    }
     log("DeBoard reconciliation: already applied (replayed, not reapplied).");
     return;
   }
-  if (
-    result.status === 201 &&
-    body?.run?.state === "SUCCEEDED" &&
-    body.result?.status === "SUCCEEDED"
-  ) {
+  if (result.status === 201 && succeeded) {
     log("DeBoard reconciliation: applied.");
     return;
   }
   abort(
-    "DeBoard reconciliation did not reach a recognized success shape (SUCCEEDED or a replay) -- refusing to claim it applied",
+    "DeBoard reconciliation did not reach a recognized success shape (SUCCEEDED or a successful replay) -- refusing to claim it applied",
     result,
   );
 }
