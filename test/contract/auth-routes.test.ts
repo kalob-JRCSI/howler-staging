@@ -25,13 +25,17 @@ function request(
   options: { body?: unknown; cookie?: string; admin?: boolean } = {},
 ): Request {
   const headers = new Headers();
-  if (options.body !== undefined) headers.set("content-type", "application/json");
+  if (options.body !== undefined) {
+    headers.set("content-type", "application/json");
+  }
   if (options.cookie) headers.set("cookie", options.cookie);
   if (options.admin) headers.set("authorization", `Bearer ${ADMIN_KEY}`);
   return new Request(`https://example.test${path}`, {
     method,
     headers,
-    ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+    ...(options.body === undefined
+      ? {}
+      : { body: JSON.stringify(options.body) }),
   });
 }
 
@@ -52,7 +56,10 @@ async function login(): Promise<{ response: Response; cookie: string }> {
 
 describe("pilot product authentication routes", () => {
   it("shows only the login surface at the unauthenticated root", async () => {
-    const response = await worker.fetch(request("GET", "/"), await productEnv());
+    const response = await worker.fetch(
+      request("GET", "/"),
+      await productEnv(),
+    );
     const html = await response.text();
 
     expect(response.status).toBe(200);
