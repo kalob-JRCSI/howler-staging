@@ -3,7 +3,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { env } from "cloudflare:workers";
 import worker from "../../src/worker/entry";
-import { sha256Hex } from "../../src/worker/hash";
+import { pilotPasswordHash } from "../../src/worker/auth";
 import {
   applySchema,
   baselineMigrationSql,
@@ -14,7 +14,7 @@ const PILOT_PASSWORD = "portfolio-contract-password";
 const PRODUCT_ENV = {
   ...env,
   HOWLER_PILOT_USERNAME: "kalob",
-  HOWLER_PILOT_PASSWORD_HASH: await sha256Hex(PILOT_PASSWORD),
+  HOWLER_PILOT_PASSWORD_HASH: await pilotPasswordHash(PILOT_PASSWORD),
   HOWLER_SESSION_SIGNING_SECRET: "portfolio-contract-session-secret",
 } satisfies Env;
 
