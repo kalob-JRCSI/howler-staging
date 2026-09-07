@@ -101,10 +101,7 @@ function adminImportRequest(projectId: string, fixture: unknown): Request {
   );
 }
 
-async function seedProjects(
-  count: number,
-  productEnv: Env,
-): Promise<string[]> {
+async function seedProjects(count: number, productEnv: Env): Promise<string[]> {
   const ids: string[] = [];
   for (let index = 0; index < count; index += 1) {
     const projectId = `portfolio-${String(index + 1).padStart(2, "0")}`;
@@ -156,35 +153,41 @@ beforeEach(async () => {
 
 describe("dynamic authenticated portfolio", () => {
   for (const count of [0, 1, 7, 12, 16]) {
-    it(`derives a ${String(count)}-project portfolio from canonical D1 contents`, async () => {
-      const productEnv = await testEnv();
-      const expectedIds = await seedProjects(count, productEnv);
-      const portfolio = await readPortfolio(productEnv);
+    it(
+      `derives a ${String(count)}-project portfolio from canonical D1 contents`,
+      async () => {
+        const productEnv = await testEnv();
+        const expectedIds = await seedProjects(count, productEnv);
+        const portfolio = await readPortfolio(productEnv);
 
-      expect(portfolio.projects).toHaveLength(count);
-      expect(
-        portfolio.projects.map((project) => project.projectId).sort(),
-      ).toEqual(expectedIds.sort());
-    });
+        expect(portfolio.projects).toHaveLength(count);
+        expect(
+          portfolio.projects.map((project) => project.projectId).sort(),
+        ).toEqual(expectedIds.sort());
+      },
+    );
   }
 
-  it("discovers a project created after the original portfolio without browser registration", async () => {
-    const productEnv = await testEnv();
-    await seedProjects(7, productEnv);
-    const before = await readPortfolio(productEnv);
-    expect(before.projects).toHaveLength(7);
+  it(
+    "discovers a project created after the original portfolio without browser registration",
+    async () => {
+      const productEnv = await testEnv();
+      await seedProjects(7, productEnv);
+      const before = await readPortfolio(productEnv);
+      expect(before.projects).toHaveLength(7);
 
-    const newProjectId = "portfolio-newly-created";
-    const createResponse = await worker.fetch(
-      adminImportRequest(newProjectId, importFixture(newProjectId, 99)),
-      productEnv,
-    );
-    expect(createResponse.status).toBe(201);
+      const newProjectId = "portfolio-newly-created";
+      const createResponse = await worker.fetch(
+        adminImportRequest(newProjectId, importFixture(newProjectId, 99)),
+        productEnv,
+      );
+      expect(createResponse.status).toBe(201);
 
-    const after = await readPortfolio(productEnv);
-    expect(after.projects).toHaveLength(8);
-    expect(after.projects.map((project) => project.projectId)).toContain(
-      newProjectId,
-    );
-  });
+      const after = await readPortfolio(productEnv);
+      expect(after.projects).toHaveLength(8);
+      expect(after.projects.map((project) => project.projectId)).toContain(
+        newProjectId,
+      );
+    },
+  );
 });
