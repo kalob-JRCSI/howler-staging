@@ -13,6 +13,22 @@ const PRODUCT_ENV = {
   HOWLER_SESSION_SIGNING_SECRET: "portfolio-contract-session-secret",
 } satisfies Env;
 
+interface PortfolioBody {
+  schemaVersion: string;
+  projects: unknown[];
+}
+
+function isPortfolioBody(value: unknown): value is PortfolioBody {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "schemaVersion" in value &&
+    typeof value.schemaVersion === "string" &&
+    "projects" in value &&
+    Array.isArray(value.projects)
+  );
+}
+
 async function loginCookie(): Promise<string> {
   const response = await worker.fetch(
     new Request("https://example.test/auth/login", {
@@ -48,6 +64,8 @@ describe("GET /v1/portfolio", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
     const body = await response.json();
+    expect(isPortfolioBody(body)).toBe(true);
+    if (!isPortfolioBody(body)) throw new Error("invalid portfolio response");
     expect(body.schemaVersion).toBe("0.9.6");
     expect(Array.isArray(body.projects)).toBe(true);
   });
