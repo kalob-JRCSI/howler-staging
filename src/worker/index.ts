@@ -15,7 +15,10 @@ async function handleProductBoundary(
 ): Promise<Response | null> {
   const url = new URL(request.url);
 
-  if (request.method === "GET" && url.pathname === "/") {
+  if (
+    request.method === "GET" &&
+    (url.pathname === "/" || url.pathname === "/admin/field")
+  ) {
     const secret = env.HOWLER_SESSION_SIGNING_SECRET;
     const user = secret ? await readSession(request, secret) : null;
     return user ? legacyWorker.fetch(request, env) : loginPage();
