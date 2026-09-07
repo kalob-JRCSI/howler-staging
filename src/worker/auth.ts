@@ -48,7 +48,10 @@ function base64UrlToBytes(value: string): Uint8Array | null {
   }
 }
 
-async function timingSafeStringEqual(actual: string, expected: string): Promise<boolean> {
+async function timingSafeStringEqual(
+  actual: string,
+  expected: string,
+): Promise<boolean> {
   const [actualHash, expectedHash] = await Promise.all([
     crypto.subtle.digest("SHA-256", encoder.encode(actual)),
     crypto.subtle.digest("SHA-256", encoder.encode(expected)),
@@ -63,12 +66,17 @@ export async function authenticatePilotUser(
 ): Promise<AuthenticatedUser | null> {
   const [usernameMatches, passwordMatches] = await Promise.all([
     timingSafeStringEqual(username, config.username),
-    sha256Hex(password).then((hash) => timingSafeStringEqual(hash, config.passwordHash)),
+    sha256Hex(password).then((hash) =>
+      timingSafeStringEqual(hash, config.passwordHash),
+    ),
   ]);
   return usernameMatches && passwordMatches ? config.user : null;
 }
 
-function sessionPayload(user: AuthenticatedUser, nowMs: number): SessionPayload {
+function sessionPayload(
+  user: AuthenticatedUser,
+  nowMs: number,
+): SessionPayload {
   const issuedAt = Math.floor(nowMs / 1000);
   return {
     ...user,
@@ -77,7 +85,10 @@ function sessionPayload(user: AuthenticatedUser, nowMs: number): SessionPayload 
   };
 }
 
-async function signPayload(encodedPayload: string, secret: string): Promise<string> {
+async function signPayload(
+  encodedPayload: string,
+  secret: string,
+): Promise<string> {
   return hmacSha256Hex(secret, encodedPayload);
 }
 
@@ -87,7 +98,9 @@ export async function createSessionCookie(
   nowMs = Date.now(),
 ): Promise<string> {
   const payload = sessionPayload(user, nowMs);
-  const encodedPayload = bytesToBase64Url(encoder.encode(JSON.stringify(payload)));
+  const encodedPayload = bytesToBase64Url(
+    encoder.encode(JSON.stringify(payload)),
+  );
   const signature = await signPayload(encodedPayload, secret);
   return `${SESSION_COOKIE}=${encodedPayload}.${signature}; Path=/; Max-Age=${String(SESSION_TTL_SECONDS)}; HttpOnly; Secure; SameSite=Strict`;
 }
@@ -157,7 +170,9 @@ export async function requireProductSession(
   request: Request,
   secret: string | undefined,
 ): Promise<AuthenticatedUser> {
-  if (!secret) throw new HttpError(500, "Product session signing is not configured");
+  if (!secret) {
+    throw new HttpError(500, "Product session signing is not configured");
+  }
   const user = await readSession(request, secret);
   if (!user) throw new HttpError(401, "Unauthorized");
   return user;
