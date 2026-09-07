@@ -643,6 +643,31 @@ describe("buildProjectSummary: committed vs forecast schedule", () => {
     expect(summary.schedule.committed[0]?.startDate).toBe("2026-09-14");
     expect(summary.schedule.forecast).toEqual([]);
   });
+
+  // Task 8 pilot smoke correction: once an activity has actually started, its schedule lock is
+  // settled history, not a still-pending commitment -- continuing to list it in `committed` would
+  // present it as simultaneously awaiting a future start and already under way (the exact
+  // contradiction the pilot smoke test caught after "Demolition started today"). Never moved into
+  // `forecast` either -- a probabilistic forecast date for a settled fact is its own dishonesty.
+  it("an activity with both a prior schedule lock and an actualStart no longer appears in committed (nor forecast)", () => {
+    const model = baseModel({
+      activities: {
+        a: activity("a", {
+          state: "IN_PROGRESS",
+          scheduleLock: { startDate: "2026-09-14", sourceId: "src-1" },
+          actualStart: "2026-09-06",
+        }),
+      },
+    });
+    const forecast = baseForecast({
+      activityForecasts: {
+        a: activityForecast("a", "2026-09-06", "2026-09-10"),
+      },
+    });
+    const summary = buildProjectSummary(model, forecast, baseHealth());
+    expect(summary.schedule.committed).toEqual([]);
+    expect(summary.schedule.forecast).toEqual([]);
+  });
 });
 
 describe("buildProjectSummary: primary exposure", () => {
@@ -795,6 +820,58 @@ describe("buildProjectSummary: next movement", () => {
     });
     const summary = buildProjectSummary(model, undefined, baseHealth());
     expect(summary.nextMovement.length).toBeGreaterThan(0);
+    expect(summary.nextMovement).not.toContain("Committed");
+  });
+
+  // Task 8 pilot smoke correction: an activity's own forecast is frequently derived FROM its
+  // schedule lock (solveScenario applies the lock as the activity's candidate start), so an exact
+  // tie between the earliest committed date and the earliest forecast date is common, not a rare
+  // edge case -- and is not evidence the forecast is somehow more authoritative. Previously the
+  // strict `<` comparison let a tie fall through to the forecast phrasing, mislabeling a real
+  // commitment as a mere forecast.
+  it("treats a committed start that exactly ties the earliest forecast start as Committed, not forecast", () => {
+    const model = baseModel({
+      activities: {
+        a: activity("a", {
+          state: "NOT_STARTED",
+          scheduleLock: { startDate: "2026-09-14", sourceId: "src-1" },
+        }),
+      },
+    });
+    const forecast = baseForecast({
+      activityForecasts: {
+        a: activityForecast("a", "2026-09-14", "2026-09-18"),
+      },
+    });
+    const summary = buildProjectSummary(model, forecast, baseHealth());
+    expect(summary.nextMovement).toBe("Committed: a starts 2026-09-14.");
+  });
+
+  // Task 8 pilot smoke correction: describing an already-started activity as "forecast to start"
+  // its own actualStart date directly contradicts the accepted fact that it started. It also must
+  // never be relabeled "Committed" (the old commitment is settled history, not upcoming) and it
+  // takes priority over any still-not-started candidate, however much earlier that candidate's
+  // date might be labeled -- something already under way is the most immediately relevant fact.
+  it("describes an IN_PROGRESS activity truthfully instead of as 'forecast to start' or 'Committed', ahead of any not-started candidate", () => {
+    const model = baseModel({
+      activities: {
+        a: activity("a", {
+          state: "IN_PROGRESS",
+          scheduleLock: { startDate: "2026-09-14", sourceId: "src-1" },
+          actualStart: "2026-09-06",
+        }),
+        b: activity("b", { state: "NOT_STARTED" }),
+      },
+    });
+    const forecast = baseForecast({
+      activityForecasts: {
+        a: activityForecast("a", "2026-09-06", "2026-09-10"),
+        b: activityForecast("b", "2026-09-20", "2026-09-25"),
+      },
+    });
+    const summary = buildProjectSummary(model, forecast, baseHealth());
+    expect(summary.nextMovement).toBe("a is in progress (started 2026-09-06).");
+    expect(summary.nextMovement).not.toContain("forecast to start");
     expect(summary.nextMovement).not.toContain("Committed");
   });
 });

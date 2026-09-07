@@ -151,6 +151,17 @@ function computeScope(model: ProjectModelV094): ProjectSummaryV096["scope"] {
 // forecast.activityForecasts. An activity with a lock is never also listed in `forecast` --
 // the committed lock wins presentation, and a forecast date can never be relabeled as a
 // commitment.
+//
+// Task 8 pilot smoke correction: a schedule lock records what was committed for a FUTURE start --
+// once an activity has actually started (activity.actualStart set, by an accepted evidence event),
+// that commitment is settled history, not a still-pending promise. Continuing to list it here
+// would present the same activity as simultaneously "committed to start" some date and evidenced
+// as already under way -- exactly the contradiction the pilot smoke test caught after "Demolition
+// started today". The lock itself is left completely untouched on the activity (it remains real
+// provenance/history); only whether it is surfaced here as a pending commitment changes. An
+// activity with actualStart is also never moved into `forecast` instead -- a probabilistic
+// forecast date for something that is a settled fact would be its own, different dishonesty.
+// computeNextMovement is where an in-progress activity's real state is now surfaced truthfully.
 function computeSchedule(
   model: ProjectModelV094,
   forecast: ForecastSnapshotV094 | undefined,
@@ -158,6 +169,7 @@ function computeSchedule(
   const committed: ProjectScheduleItemV096[] = [];
   const forecastItems: ProjectScheduleItemV096[] = [];
   for (const activity of Object.values(model.activities)) {
+    if (activity.actualStart) continue;
     if (activity.scheduleLock) {
       committed.push({
         activityId: activity.id,
@@ -185,8 +197,12 @@ function computeSchedule(
 }
 
 // Incomplete activities only. Default candidate: earliest forecast likely start. A committed
-// start lock only overrides that default when it is strictly earlier -- a committed finish is
-// never treated as a start, and a forecast date is never silently promoted into a commitment.
+// start lock overrides that default whenever it is at least as early -- a tie prefers the
+// COMMITTED framing (Task 8 pilot smoke correction: an activity's own forecast is frequently
+// derived FROM its committed lock, e.g. via solveScenario applying the lock as its candidate
+// start, so an exact tie is not evidence the forecast is somehow the more authoritative of the
+// two -- the commitment is). A committed finish is never treated as a start, and a forecast date
+// is never silently promoted into a commitment.
 function computeNextMovement(
   model: ProjectModelV094,
   forecast: ForecastSnapshotV094 | undefined,
@@ -195,6 +211,26 @@ function computeNextMovement(
     (a) => a.state !== "COMPLETE",
   );
   if (incomplete.length === 0) return "No incomplete activities remain.";
+
+  // Task 8 pilot smoke correction: an activity that has actually started is a settled, present-
+  // tense fact -- describing it as "forecast to start" or "committed to start" some date (its own
+  // actualStart included) directly contradicts the very evidence that started it. This takes
+  // priority over both the forecast and committed candidates below: something already under way
+  // is more immediately relevant to a PM than anything still in the future, and it is never
+  // itself a candidate for either loop (both are scoped to activities with no actualStart).
+  let inProgressCandidate: { activity: ActivityV094; date: string } | undefined;
+  for (const activity of incomplete) {
+    if (!activity.actualStart) continue;
+    if (
+      !inProgressCandidate ||
+      activity.actualStart < inProgressCandidate.date
+    ) {
+      inProgressCandidate = { activity, date: activity.actualStart };
+    }
+  }
+  if (inProgressCandidate) {
+    return `${inProgressCandidate.activity.name} is in progress (started ${inProgressCandidate.date}).`;
+  }
 
   let forecastCandidate: { activity: ActivityV094; date: string } | undefined;
   for (const activity of incomplete) {
@@ -216,7 +252,7 @@ function computeNextMovement(
 
   if (
     committedCandidate &&
-    (!forecastCandidate || committedCandidate.date < forecastCandidate.date)
+    (!forecastCandidate || committedCandidate.date <= forecastCandidate.date)
   ) {
     return `Committed: ${committedCandidate.activity.name} starts ${committedCandidate.date}.`;
   }

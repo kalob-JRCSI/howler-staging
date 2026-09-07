@@ -610,23 +610,29 @@ describe("Task 7: the complete v0.9.6 Contractor Hub pilot slice, end to end", (
       initialSummary.progressPercent,
     );
     // nextMovement is genuinely recomputed on every read (GET summary never caches). Task 8 pilot
-    // smoke correction: this used to assert nextMovement stayed pinned to "Kitchen forecast to
-    // start <anchor date>" both before and after the update, reasoning that Kitchen's phase
-    // ("General") was never recognized by Genesis's PHASE_ORDER so it could never be affected by
-    // anything Demolition-related. That was itself a symptom of the bug the correction fixes --
-    // Kitchen was genuinely unsequenced, forecast from the project's own anchor date with no
-    // regard for Demolition at all. With the guarded Demolition -> unrecognized-phase inference in
-    // place, Demolition -- not Kitchen -- is correctly the earliest-dated incomplete activity both
-    // before and after the update, so nextMovement now legitimately tracks Demolition's own state:
-    // before the update it reflects Demolition's committed start; after, Demolition's real
-    // actualStart (recorded by the update itself) makes it the new earliest date, so the two
-    // values are no longer expected to match -- unlike Kitchen's old, disconnected date, this one
-    // is correctly the same activity's own state genuinely advancing.
+    // smoke correction (sequencing round): this used to assert nextMovement stayed pinned to
+    // "Kitchen forecast to start <anchor date>" both before and after the update, reasoning that
+    // Kitchen's phase ("General") was never recognized by Genesis's PHASE_ORDER so it could never
+    // be affected by anything Demolition-related. That was itself a symptom of the sequencing bug
+    // -- Kitchen was genuinely unsequenced, forecast with no regard for Demolition at all. With
+    // the guarded Demolition -> unrecognized-phase inference in place, Demolition -- not Kitchen
+    // -- is correctly the earliest-dated incomplete activity both before and after the update.
+    //
+    // Task 8 pilot smoke correction (truth-boundary round): this next caught a second, live P1 --
+    // before this round, an exact tie between Demolition's committed start and its own
+    // solver-derived forecast start (the forecast is derived FROM the lock) fell through to the
+    // forecast phrasing instead of the committed one, and after the accepted "Demolition started
+    // today" fact, nextMovement described the now-IN_PROGRESS Demolition as "forecast to start"
+    // its own actualStart date -- directly contradicting the fact just accepted, while
+    // schedule.committed simultaneously still presented it as awaiting a future Sep 14 start. Both
+    // are fixed: a tie now prefers the Committed framing, and an activity with actualStart is
+    // described as genuinely in progress and removed from schedule.committed/forecast entirely
+    // (the lock itself is untouched -- only its presentation as a still-pending promise changes).
     expect(initialSummary.nextMovement).toBe(
-      "Demolition forecast to start 2026-09-14.",
+      "Committed: Demolition starts 2026-09-14.",
     );
     expect(updatedSummary.nextMovement).toBe(
-      `Demolition forecast to start ${FIXED_TODAY}.`,
+      `Demolition is in progress (started ${FIXED_TODAY}).`,
     );
     expect(updatedSummary.projectedCompletion).not.toBeNull();
     expect(typeof updatedSummary.integrity.score).toBe("number");
@@ -634,10 +640,13 @@ describe("Task 7: the complete v0.9.6 Contractor Hub pilot slice, end to end", (
     // Approved baseline unaffected by an ordinary field update.
     expect(updatedSummary.budget.baseline).toBe(310000);
     expect(updatedSummary.scope).toEqual(initialSummary.scope);
-    const updatedCommittedDemo = updatedSummary.schedule.committed.find(
-      (item) => item.activityId === "demolition",
-    );
-    expect(updatedCommittedDemo?.basis).toBe("COMMITTED");
+    // Demolition graduated out of schedule.committed the moment it actually started -- it is
+    // settled history, not a still-pending commitment, and is never relabeled as a forecast either.
+    expect(
+      updatedSummary.schedule.committed.some(
+        (item) => item.activityId === "demolition",
+      ),
+    ).toBe(false);
     expect(
       updatedSummary.schedule.forecast.some(
         (item) => item.activityId === "demolition",
