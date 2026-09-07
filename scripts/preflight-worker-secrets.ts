@@ -1,18 +1,17 @@
-// Pre-deploy correction (Step 2 -- confirmation secret preflight): the repaired conversation path
-// (src/worker/index.ts's confirmation signing/verification) requires
-// HOWLER_CONFIRMATION_SIGNING_SECRET to be configured on the deployed Worker; without it, every
-// confirmation attempt fails closed with a 500 (by design -- see src/worker/env.d.ts's own comment
-// on that binding). We must never deploy a candidate whose conversation route would fail closed
-// this way. This script verifies, BY NAME ONLY, that the required secret bindings already exist on
-// the target Worker before deployment proceeds -- it never reads, prints, or otherwise exposes any
-// secret's value (wrangler's own `secret list` command never returns values either, only
-// {name, type}), and it never creates, sets, or rotates a secret itself. A missing required
-// binding fails this script (non-zero exit) rather than silently deploying anyway.
+// Pre-deploy required-secret preflight. The staging Worker has two existing privileged secrets
+// (admin access and server-bound confirmation signing) plus three v0.9.6 product-auth secrets
+// (pilot username, pilot password verifier, and product-session signing). Missing any one of these
+// bindings would leave an accepted route failing closed at runtime, so deployment must stop before
+// publishing a candidate whose required secret boundary is incomplete.
+//
+// This script verifies, BY NAME ONLY, that every required secret binding already exists on the
+// target Worker before deployment proceeds. It never reads, prints, creates, sets, or rotates any
+// secret value. Wrangler's `secret list` returns only binding metadata ({name, type}); a missing
+// required binding fails this script with a non-zero exit rather than silently deploying anyway.
 //
 // Uses the exact same Cloudflare credentials .github/workflows/deploy.yml already has as GitHub
-// encrypted secrets (CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID) -- no new secret is introduced,
-// and this script is not itself capable of writing anything to the Cloudflare account (it shells
-// out only to `wrangler secret list`, a read-only command).
+// encrypted secrets (CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID). This script itself performs
+// only the read-only `wrangler secret list` command.
 //
 // Usage (from repo root, with the same env deploy.yml's wrangler-action already has):
 //   CLOUDFLARE_API_TOKEN=<token> CLOUDFLARE_ACCOUNT_ID=<id> \
@@ -24,6 +23,9 @@ import { pathToFileURL } from "node:url";
 const REQUIRED_SECRET_BINDINGS = [
   "HOWLER_CONFIRMATION_SIGNING_SECRET",
   "HOWLER_ADMIN_KEY",
+  "HOWLER_PILOT_USERNAME",
+  "HOWLER_PILOT_PASSWORD_HASH",
+  "HOWLER_SESSION_SIGNING_SECRET",
 ];
 
 function log(line: string): void {
