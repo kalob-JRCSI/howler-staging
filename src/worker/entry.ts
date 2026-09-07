@@ -8,6 +8,7 @@ import {
   readSession,
 } from "./auth";
 import { HttpError, json, readJson } from "./http";
+import { decorateProductDashboard } from "./product-shell";
 
 interface PortfolioProjectRow {
   project_id: string;
@@ -28,17 +29,21 @@ async function requireProductSession(
   if (!user) throw new HttpError(401, "Unauthorized");
 }
 
-async function readPortfolio(env: Env): Promise<Response> {
+async function readPortfolioRows(env: Env): Promise<PortfolioProjectRow[]> {
   const result = await env.HOWLER_DB.prepare(
     `SELECT project_id, name, revision, updated_at
        FROM projects
       ORDER BY name COLLATE NOCASE ASC, project_id ASC`,
   ).all<PortfolioProjectRow>();
+  return result.results;
+}
 
+async function readPortfolio(env: Env): Promise<Response> {
+  const rows = await readPortfolioRows(env);
   return json(
     {
       schemaVersion: "0.9.6",
-      projects: result.results.map((row) => ({
+      projects: rows.map((row) => ({
         projectId: row.project_id,
         projectName: row.name,
         revision: row.revision,
@@ -48,6 +53,74 @@ async function readPortfolio(env: Env): Promise<Response> {
     200,
     { "cache-control": "no-store" },
   );
+}
+
+async function productDashboard(request: Request, env: Env): Promise<Response> {
+  const [legacyResponse, rows] = await Promise.all([
+    legacyWorker.fetch(request, env),
+    readPortfolioRows(env),
+  ]);
+  const contentType = legacyResponse.headers.get("content-type") ?? "";
+  if (!contentType.includes("text/html")) return legacyResponse;
+
+  const html = decorateProductDashboard(
+    await legacyResponse.text(),
+    rows.map((row) => row.project_id),
+  );
+  const headers = new Headers(legacyResponse.headers);
+  headers.set("cache-control", "no-store");
+  headers.delete("content-length");
+  return new Response(html, {
+    status: legacyResponse.status,
+    statusText: legacyResponse.statusText,
+    headers,
+  });
+}
+
+function isProductOperatorRoute(request: Request, pathname: string): boolean {
+  if (request.method === "POST" && pathname === "/v1/intents") return true;
+  if (
+    request.method === "POST" &&
+    /^\/v1\/workflows\/[^/]+\/resume$/.test(pathname)
+  ) {
+    return true;
+  }
+  if (
+    request.method === "GET" &&
+    /^\/v1\/projects\/[^/]+\/summary$/.test(pathname)
+  ) {
+    return true;
+  }
+  if (
+    request.method === "POST" &&
+    /^\/v1\/projects\/[^/]+\/conversation\/turn$/.test(pathname)
+  ) {
+    return true;
+  }
+  return (
+    request.method === "POST" &&
+    (pathname === "/v1/projects/genesis/preview" ||
+      pathname === "/v1/projects/genesis/commit")
+  );
+}
+
+async function handleProductOperatorRoute(
+  request: Request,
+  env: Env,
+): Promise<Response | null> {
+  const pathname = new URL(request.url).pathname;
+  if (!isProductOperatorRoute(request, pathname)) return null;
+
+  const secret = env.HOWLER_SESSION_SIGNING_SECRET;
+  const user = secret ? await readSession(request, secret) : null;
+  if (!user) return null;
+
+  if (!env.HOWLER_ADMIN_KEY) {
+    throw new HttpError(500, "Product operator gateway is not configured");
+  }
+  const headers = new Headers(request.headers);
+  headers.set("authorization", `Bearer ${env.HOWLER_ADMIN_KEY}`);
+  return await legacyWorker.fetch(new Request(request, { headers }), env);
 }
 
 async function handleProductBoundary(
@@ -62,7 +135,7 @@ async function handleProductBoundary(
   ) {
     const secret = env.HOWLER_SESSION_SIGNING_SECRET;
     const user = secret ? await readSession(request, secret) : null;
-    return user ? legacyWorker.fetch(request, env) : loginPage();
+    return user ? await productDashboard(request, env) : loginPage();
   }
 
   if (request.method === "GET" && url.pathname === "/v1/portfolio") {
@@ -114,7 +187,7 @@ async function handleProductBoundary(
     });
   }
 
-  return null;
+  return await handleProductOperatorRoute(request, env);
 }
 
 export default {
