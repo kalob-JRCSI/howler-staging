@@ -101,7 +101,10 @@ function adminImportRequest(projectId: string, fixture: unknown): Request {
   );
 }
 
-async function seedProjects(count: number, productEnv: Env): Promise<string[]> {
+async function seedProjects(
+  count: number,
+  productEnv: Env,
+): Promise<string[]> {
   const ids: string[] = [];
   for (let index = 0; index < count; index += 1) {
     const projectId = `portfolio-${String(index + 1).padStart(2, "0")}`;
@@ -159,9 +162,9 @@ describe("dynamic authenticated portfolio", () => {
       const portfolio = await readPortfolio(productEnv);
 
       expect(portfolio.projects).toHaveLength(count);
-      expect(portfolio.projects.map((project) => project.projectId).sort()).toEqual(
-        expectedIds.sort(),
-      );
+      expect(
+        portfolio.projects.map((project) => project.projectId).sort(),
+      ).toEqual(expectedIds.sort());
     });
   }
 
