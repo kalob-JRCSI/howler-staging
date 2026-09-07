@@ -133,8 +133,27 @@ async function loginCookie(productEnv: Env): Promise<string> {
   return cookie ?? "";
 }
 
+interface PortfolioProject {
+  projectId: string;
+  projectName: string;
+  progressPercent: number;
+  integrity: { score: number; condition: string; primaryDriver: string };
+  budget: {
+    baseline: number | null;
+    spent: number | null;
+    remaining: number | null;
+    spentPercent: number | null;
+  };
+  primaryExposure: string;
+  nextMovement: string;
+  projectedCompletion: string | null;
+  schedule: { committed: unknown[]; forecast: unknown[] };
+  scope: { id: string; label: string; phase: string }[];
+}
+
 async function readPortfolio(productEnv: Env): Promise<{
-  projects: { projectId: string; projectName: string }[];
+  generatedAt: string;
+  projects: PortfolioProject[];
 }> {
   const cookie = await loginCookie(productEnv);
   const response = await worker.fetch(
@@ -165,6 +184,31 @@ describe("dynamic authenticated portfolio", () => {
       ).toEqual(expectedIds.sort());
     });
   }
+
+  it("returns canonical derived project summaries, not a metadata-only second portfolio model", async () => {
+    const productEnv = await testEnv();
+    await seedProjects(1, productEnv);
+
+    const portfolio = await readPortfolio(productEnv);
+    expect(portfolio.generatedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    const project = portfolio.projects[0];
+    expect(project).toBeDefined();
+    expect(project?.projectName).toBe("Portfolio Project 01");
+    expect(project?.progressPercent).toBe(0);
+    expect(project?.integrity.score).toBeGreaterThanOrEqual(0);
+    expect(project?.integrity.condition).toBeTruthy();
+    expect(project?.budget).toEqual({
+      baseline: 100000,
+      spent: 0,
+      remaining: 100000,
+      spentPercent: 0,
+    });
+    expect(project?.scope).toEqual([
+      { id: "scope-0", label: "Scope 1", phase: "Construction" },
+    ]);
+    expect(Array.isArray(project?.schedule.committed)).toBe(true);
+    expect(Array.isArray(project?.schedule.forecast)).toBe(true);
+  });
 
   it("discovers projects created after the initial portfolio", async () => {
     const productEnv = await testEnv();
