@@ -61,7 +61,7 @@ function productBootstrapBody(projectIds: string[]): string {
   sessionStorage.setItem(trackedProjectsKey, JSON.stringify(initialProjectIds));
 
   const adminKey = document.getElementById("admin-key");
-  if (adminKey) {
+  if (adminKey && typeof Headers === "function") {
     adminKey.value = ${JSON.stringify(PRODUCT_SESSION_SENTINEL)};
   }
 
