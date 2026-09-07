@@ -1,7 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "jarvis-voice-staging",
-  "main": "src/worker/index.ts",
+  "main": "src/worker/entry.ts",
   "compatibility_date": "2026-08-26",
   // esbuild's keep_names transform (Wrangler default: true) injects a `__name(fn, "name")` call
   // after every named function/class declaration so `.name` survives bundler renaming. This repo
@@ -16,7 +16,7 @@
   // Task 19: serves the Penthouse atmosphere images (public/assets/*.webp) as real, independently
   // cacheable static files instead of base64 data URIs. With no `run_worker_first`, Cloudflare's
   // Asset Worker serves any request that matches a file under `public/` directly -- it never
-  // reaches src/worker/index.ts, so there is no new route/path-handling code in this Worker and
+  // reaches src/worker/entry.ts, so there is no new route/path-handling code in this Worker and
   // no interaction with admin auth, D1, or any other binding. Any request that doesn't match a
   // file (every existing route) falls through to the User Worker exactly as before.
   "assets": {
