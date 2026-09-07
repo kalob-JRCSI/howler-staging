@@ -23,7 +23,10 @@ async function testEnv(): Promise<Env> {
   };
 }
 
-function importFixture(projectId: string, index: number): {
+function importFixture(
+  projectId: string,
+  index: number,
+): {
   project: Record<string, unknown>;
   provenance: Record<string, { sourceId: string; section: string }>;
 } {
@@ -159,9 +162,9 @@ describe("dynamic authenticated portfolio", () => {
       const portfolio = await readPortfolio(productEnv);
 
       expect(portfolio.projects).toHaveLength(count);
-      expect(portfolio.projects.map((project) => project.projectId).sort()).toEqual(
-        expectedIds.sort(),
-      );
+      expect(
+        portfolio.projects.map((project) => project.projectId).sort(),
+      ).toEqual(expectedIds.sort());
     });
   }
 
