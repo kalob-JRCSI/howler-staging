@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { sha256Hex } from "../../src/worker/hash";
 import {
   authenticatePilotUser,
   clearSessionCookie,
   createSessionCookie,
+  pilotPasswordHash,
   readSession,
   type AuthenticatedUser,
 } from "../../src/worker/auth";
@@ -28,7 +28,7 @@ describe("pilot authentication", () => {
     const password = "correct horse battery staple pilot";
     const result = await authenticatePilotUser("kalob", password, {
       username: "kalob",
-      passwordHash: await sha256Hex(password),
+      passwordHash: await pilotPasswordHash(password),
       user: USER,
     });
 
@@ -39,7 +39,7 @@ describe("pilot authentication", () => {
     const password = "correct horse battery staple pilot";
     const config = {
       username: "kalob",
-      passwordHash: await sha256Hex(password),
+      passwordHash: await pilotPasswordHash(password),
       user: USER,
     };
 
