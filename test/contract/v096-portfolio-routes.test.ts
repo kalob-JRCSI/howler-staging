@@ -47,10 +47,7 @@ describe("GET /v1/portfolio", () => {
 
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    const body = (await response.json()) as {
-      schemaVersion: string;
-      projects: unknown[];
-    };
+    const body = await response.json();
     expect(body.schemaVersion).toBe("0.9.6");
     expect(Array.isArray(body.projects)).toBe(true);
   });
