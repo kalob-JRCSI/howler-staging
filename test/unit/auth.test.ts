@@ -67,7 +67,7 @@ describe("signed product session", () => {
   it("rejects a tampered session", async () => {
     const setCookie = await createSessionCookie(USER, SESSION_SECRET, NOW_MS);
     const cookie = setCookie.split(";", 1)[0] ?? "";
-    const [name, value = ""] = cookie.split("=", 2);
+    const [name = "howler_session", value = ""] = cookie.split("=", 2);
     const chars = value.split("");
     chars[5] = chars[5] === "a" ? "b" : "a";
     const tampered = `${name}=${chars.join("")}`;
