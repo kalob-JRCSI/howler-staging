@@ -644,12 +644,14 @@ describe("buildProjectSummary: committed vs forecast schedule", () => {
     expect(summary.schedule.forecast).toEqual([]);
   });
 
-  // Task 8 pilot smoke correction: once an activity has actually started, its schedule lock is
-  // settled history, not a still-pending commitment -- continuing to list it in `committed` would
-  // present it as simultaneously awaiting a future start and already under way (the exact
-  // contradiction the pilot smoke test caught after "Demolition started today"). Never moved into
-  // `forecast` either -- a probabilistic forecast date for a settled fact is its own dishonesty.
-  it("an activity with both a prior schedule lock and an actualStart no longer appears in committed (nor forecast)", () => {
+  // Task 8 pilot smoke correction: once an activity has actually started, a committed START on
+  // that activity is settled history, not a still-pending commitment -- continuing to list it in
+  // `committed` would present it as simultaneously awaiting a future start and already under way
+  // (the exact contradiction the pilot smoke test caught after "Demolition started today"). This
+  // is the start-ONLY lock case: nothing else on the lock remains pending, so the row is omitted
+  // entirely. Never moved into `forecast` either -- a probabilistic forecast date for a settled
+  // fact is its own dishonesty.
+  it("an activity with a start-only schedule lock and an actualStart no longer appears in committed (nor forecast)", () => {
     const model = baseModel({
       activities: {
         a: activity("a", {
@@ -665,6 +667,80 @@ describe("buildProjectSummary: committed vs forecast schedule", () => {
       },
     });
     const summary = buildProjectSummary(model, forecast, baseHealth());
+    expect(summary.schedule.committed).toEqual([]);
+    expect(summary.schedule.forecast).toEqual([]);
+  });
+
+  // Task 8 pilot smoke correction (narrower round): the fix above originally suppressed the
+  // ENTIRE committed row the moment actualStart existed -- correct for a start-only lock, but it
+  // also silently hid a still-active committed FINISH on a lock that carries both fields. Locked
+  // start Sep 14 / finish Sep 18, actual start Sep 12: Sep 14 is settled, but Sep 18 remains a
+  // live, unsatisfied commitment that must stay visible.
+  it("an activity with a start+finish schedule lock and only an actualStart keeps the row, with startDate settled to null and the original finishDate intact", () => {
+    const model = baseModel({
+      activities: {
+        a: activity("a", {
+          state: "IN_PROGRESS",
+          scheduleLock: {
+            startDate: "2026-09-14",
+            finishDate: "2026-09-18",
+            sourceId: "src-1",
+          },
+          actualStart: "2026-09-12",
+        }),
+      },
+    });
+    const summary = buildProjectSummary(model, undefined, baseHealth());
+    expect(summary.schedule.committed).toHaveLength(1);
+    expect(summary.schedule.committed[0]).toMatchObject({
+      activityId: "a",
+      startDate: null,
+      finishDate: "2026-09-18",
+      basis: "COMMITTED",
+    });
+    expect(summary.schedule.forecast).toEqual([]);
+  });
+
+  // A finish-only lock never had a committed start to begin with, so actualStart settles nothing
+  // that was pending -- the committed finish simply remains, exactly as if actualStart were absent.
+  it("an activity with a finish-only schedule lock and an actualStart still shows the committed finish", () => {
+    const model = baseModel({
+      activities: {
+        a: activity("a", {
+          state: "IN_PROGRESS",
+          scheduleLock: { finishDate: "2026-09-18", sourceId: "src-1" },
+          actualStart: "2026-09-12",
+        }),
+      },
+    });
+    const summary = buildProjectSummary(model, undefined, baseHealth());
+    expect(summary.schedule.committed).toHaveLength(1);
+    expect(summary.schedule.committed[0]).toMatchObject({
+      activityId: "a",
+      startDate: null,
+      finishDate: "2026-09-18",
+      basis: "COMMITTED",
+    });
+  });
+
+  // Once actualFinish also exists, the committed finish is settled too -- with both locked fields
+  // now retired by their own matching actual fact, no pending committed row remains at all.
+  it("an activity with a start+finish schedule lock and both actualStart and actualFinish has no pending committed row", () => {
+    const model = baseModel({
+      activities: {
+        a: activity("a", {
+          state: "COMPLETE",
+          scheduleLock: {
+            startDate: "2026-09-14",
+            finishDate: "2026-09-18",
+            sourceId: "src-1",
+          },
+          actualStart: "2026-09-12",
+          actualFinish: "2026-09-19",
+        }),
+      },
+    });
+    const summary = buildProjectSummary(model, undefined, baseHealth());
     expect(summary.schedule.committed).toEqual([]);
     expect(summary.schedule.forecast).toEqual([]);
   });

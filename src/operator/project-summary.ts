@@ -152,16 +152,20 @@ function computeScope(model: ProjectModelV094): ProjectSummaryV096["scope"] {
 // the committed lock wins presentation, and a forecast date can never be relabeled as a
 // commitment.
 //
-// Task 8 pilot smoke correction: a schedule lock records what was committed for a FUTURE start --
-// once an activity has actually started (activity.actualStart set, by an accepted evidence event),
-// that commitment is settled history, not a still-pending promise. Continuing to list it here
-// would present the same activity as simultaneously "committed to start" some date and evidenced
-// as already under way -- exactly the contradiction the pilot smoke test caught after "Demolition
-// started today". The lock itself is left completely untouched on the activity (it remains real
-// provenance/history); only whether it is surfaced here as a pending commitment changes. An
-// activity with actualStart is also never moved into `forecast` instead -- a probabilistic
-// forecast date for something that is a settled fact would be its own, different dishonesty.
-// computeNextMovement is where an in-progress activity's real state is now surfaced truthfully.
+// Task 8 pilot smoke correction: a schedule lock's start and finish fields are retired
+// INDEPENDENTLY, each by its own matching actual fact -- a committed START is settled history
+// once activity.actualStart exists, but a committed FINISH on that SAME activity remains a live,
+// unsatisfied commitment until activity.actualFinish exists too. An earlier version of this fix
+// suppressed the entire row the moment actualStart existed, which correctly retired a satisfied
+// committed start but also silently hid a still-active committed finish (e.g. locked start Sep 14
+// / finish Sep 18, actual start Sep 12: Sep 14 is settled, but Sep 18 is still a live commitment
+// that must remain visible). The row is omitted only once every locked field it actually carries
+// has been settled by its matching actual fact -- the lock itself is always left completely
+// untouched on the activity (it remains real provenance/history); only whether each field is
+// still surfaced here as a pending commitment changes. Neither field is ever moved into
+// `forecast` instead -- a probabilistic forecast date for something that is a settled fact would
+// be its own, different dishonesty. computeNextMovement is where an in-progress activity's real
+// state is surfaced truthfully.
 function computeSchedule(
   model: ProjectModelV094,
   forecast: ForecastSnapshotV094 | undefined,
@@ -169,18 +173,28 @@ function computeSchedule(
   const committed: ProjectScheduleItemV096[] = [];
   const forecastItems: ProjectScheduleItemV096[] = [];
   for (const activity of Object.values(model.activities)) {
-    if (activity.actualStart) continue;
     if (activity.scheduleLock) {
-      committed.push({
-        activityId: activity.id,
-        activityName: activity.name,
-        phase: activity.phase,
-        startDate: activity.scheduleLock.startDate ?? null,
-        finishDate: activity.scheduleLock.finishDate ?? null,
-        basis: "COMMITTED",
-      });
+      const startDate = activity.actualStart
+        ? null
+        : (activity.scheduleLock.startDate ?? null);
+      const finishDate = activity.actualFinish
+        ? null
+        : (activity.scheduleLock.finishDate ?? null);
+      if (startDate !== null || finishDate !== null) {
+        committed.push({
+          activityId: activity.id,
+          activityName: activity.name,
+          phase: activity.phase,
+          startDate,
+          finishDate,
+          basis: "COMMITTED",
+        });
+      }
       continue;
     }
+    // An unlocked activity that has nonetheless actually started is never relabeled as a
+    // forecast -- a probabilistic date for a settled fact would be its own dishonesty.
+    if (activity.actualStart) continue;
     const activityForecast = forecast?.activityForecasts[activity.id];
     if (activityForecast) {
       forecastItems.push({
