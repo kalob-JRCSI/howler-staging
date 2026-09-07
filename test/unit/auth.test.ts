@@ -26,15 +26,11 @@ function requestWithCookie(setCookie: string): Request {
 describe("pilot authentication", () => {
   it("accepts the configured pilot username and password hash", async () => {
     const password = "correct horse battery staple pilot";
-    const result = await authenticatePilotUser(
-      "kalob",
-      password,
-      {
-        username: "kalob",
-        passwordHash: await sha256Hex(password),
-        user: USER,
-      },
-    );
+    const result = await authenticatePilotUser("kalob", password, {
+      username: "kalob",
+      passwordHash: await sha256Hex(password),
+      user: USER,
+    });
 
     expect(result).toEqual(USER);
   });
