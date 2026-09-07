@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { env } from "cloudflare:workers";
 import worker from "../../src/worker/entry";
-import { sha256Hex } from "../../src/worker/hash";
+import { pilotPasswordHash } from "../../src/worker/auth";
 
 const ADMIN_KEY = "auth-route-admin-key";
 const PILOT_PASSWORD = "pilot-route-password";
@@ -14,7 +14,7 @@ async function productEnv(): Promise<Env> {
     ...env,
     HOWLER_ADMIN_KEY: ADMIN_KEY,
     HOWLER_PILOT_USERNAME: "kalob",
-    HOWLER_PILOT_PASSWORD_HASH: await sha256Hex(PILOT_PASSWORD),
+    HOWLER_PILOT_PASSWORD_HASH: await pilotPasswordHash(PILOT_PASSWORD),
     HOWLER_SESSION_SIGNING_SECRET: SESSION_SECRET,
   };
 }
