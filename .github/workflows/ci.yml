@@ -64,7 +64,12 @@ jobs:
         run: npm run build:dry
 
       - name: Generate dry-run bundle manifest (SHA-256)
-        run: sha256sum dist/index.js > dist/manifest.sha256.txt
+        shell: bash
+        run: |
+          find dist -type f ! -name 'manifest.sha256.txt' -print0 \
+            | sort -z \
+            | xargs -0 sha256sum > dist/manifest.sha256.txt
+          test -s dist/manifest.sha256.txt
 
       - name: Upload dry-run bundle and manifest
         uses: actions/upload-artifact@v4.6.2
