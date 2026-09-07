@@ -13,6 +13,38 @@ const LEGACY_HTML = `<!doctype html>
 </body>
 </html>`;
 
+const MUTATION_HTML = `<!doctype html>
+<html>
+<body>
+  <section class="ph-connect card" aria-labelledby="ph-connect-heading">
+    <label id="ph-connect-heading" for="admin-key">HOWLER_ADMIN_KEY</label>
+    <input id="admin-key" type="password">
+  </section>
+  <script>
+  const summaryByProject = new Map();
+  let trackedProjects = [];
+  let selectedProjectId = null;
+  function looksLikeProjectSummary() { return true; }
+  function saveTrackedProjects() {}
+  function renderPortfolioOverview() {}
+  function renderIndexCard() {}
+  function refreshSummary() { return Promise.resolve(); }
+  function selectProject() {}
+  function handleApplied(outcome, projectId) {
+    if (outcome.outcome === "APPLIED") {
+      void refreshSummary(projectId);
+    }
+  }
+  function handleGenesis(projectId) {
+    void refreshSummary(projectId).then(() => {
+      selectProject(projectId);
+    });
+  }
+  function renderProjects() {}
+  </script>
+</body>
+</html>`;
+
 const PROJECT_IDS = [
   "portfolio-01",
   "portfolio-02",
@@ -84,5 +116,26 @@ describe("authenticated product dashboard decoration", () => {
 
     expect(html).toContain("response.status === 401");
     expect(html).toContain("location.reload()");
+  });
+
+  it("provides a normal-flow logout control that clears the product session", () => {
+    const html = decorateProductDashboard(LEGACY_HTML, PROJECT_IDS);
+
+    expect(html).toContain('id="howler-logout"');
+    expect(html).toContain("Log out");
+    expect(html).toContain('fetch("/auth/logout"');
+    expect(html).toContain('method: "POST"');
+  });
+
+  it("immediately requests an aggregate portfolio sync after applied updates and Genesis completion", () => {
+    const html = decorateProductDashboard(MUTATION_HTML, PROJECT_IDS);
+
+    expect(html).toContain("globalThis.__howlerSyncPortfolio");
+    expect(html).toMatch(
+      /if \(outcome\.outcome === "APPLIED"\)[\s\S]*?refreshSummary\(projectId\);[\s\S]*?__howlerSyncPortfolio/,
+    );
+    expect(html).toMatch(
+      /refreshSummary\(projectId\)\.then[\s\S]*?selectProject\(projectId\);[\s\S]*?__howlerSyncPortfolio/,
+    );
   });
 });
