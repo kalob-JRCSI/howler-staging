@@ -9,8 +9,8 @@ function safeJson(value: unknown): string {
 function replaceAdminKeyPrompt(html: string): string {
   const sectionPattern =
     /<section class="ph-connect card"[\s\S]*?<input id="admin-key"[\s\S]*?<\/section>/;
-  const productStatus = `<div id="howler-live-status" role="status" aria-live="polite">Stale · Last synced never</div>`;
-  const hiddenInput = `<input id="admin-key" type="hidden" value="${PRODUCT_SESSION_SENTINEL}">${productStatus}`;
+  const productControls = `<div id="howler-product-session-controls"><div id="howler-live-status" role="status" aria-live="polite">Stale · Last synced never</div><button id="howler-logout" type="button">Log out</button></div>`;
+  const hiddenInput = `<input id="admin-key" type="hidden" value="${PRODUCT_SESSION_SENTINEL}">${productControls}`;
   return sectionPattern.test(html)
     ? html.replace(sectionPattern, hiddenInput)
     : html.replace(/<input id="admin-key"[^>]*>/, hiddenInput);
@@ -50,6 +50,23 @@ function installPortfolioApplyHook(html: string): string {
 
 `;
   return html.replace(marker, `${hook}${marker}`);
+}
+
+/**
+ * The legacy field dashboard already refreshes the affected project immediately after an applied
+ * natural-language update and after Genesis. The product shell complements those reads with one
+ * aggregate portfolio synchronization so the Penthouse summary and membership are refreshed from
+ * canonical server state immediately too, without locally patching derived metrics.
+ */
+function installPostMutationSyncHooks(html: string): string {
+  const afterApplied = html.replace(
+    /(if\s*\(outcome\.outcome\s*===\s*"APPLIED"\)\s*\{\s*void refreshSummary\(projectId\);)(\s*\})/g,
+    `$1\n      globalThis.__howlerSyncPortfolio?.();$2`,
+  );
+  return afterApplied.replace(
+    /(void\s+refreshSummary\(projectId\)\.then\(\(\)\s*=>\s*\{\s*selectProject\(projectId\);)(\s*\}\);)/g,
+    `$1\n        globalThis.__howlerSyncPortfolio?.();$2`,
+  );
 }
 
 function productBootstrapBody(projectIds: string[]): string {
@@ -120,6 +137,28 @@ function productBootstrapBody(projectIds: string[]): string {
     }
   }
 
+  globalThis.__howlerSyncPortfolio = () => void syncPortfolio();
+
+  const logoutButton = document.getElementById("howler-logout");
+  if (logoutButton && typeof logoutButton.addEventListener === "function") {
+    logoutButton.addEventListener("click", async () => {
+      try {
+        const response = await fetch("/auth/logout", {
+          method: "POST",
+          credentials: "same-origin",
+          cache: "no-store",
+        });
+        if (response.ok) {
+          location.reload();
+          return;
+        }
+      } catch {
+        // Keep the current protected view and surface stale status if logout could not complete.
+      }
+      setSyncStatus("Stale");
+    });
+  }
+
   void syncPortfolio();
   if (typeof setInterval === "function") {
     setInterval(() => void syncPortfolio(), ${String(PORTFOLIO_SYNC_INTERVAL_MS)});
@@ -157,8 +196,9 @@ export function decorateProductDashboard(
 ): string {
   const withoutPrompt = replaceAdminKeyPrompt(legacyHtml);
   const withPortfolioHook = installPortfolioApplyHook(withoutPrompt);
+  const withMutationSync = installPostMutationSyncHooks(withPortfolioHook);
   return appendBootstrapToLastScript(
-    withPortfolioHook,
+    withMutationSync,
     productBootstrapBody(projectIds),
   );
 }
