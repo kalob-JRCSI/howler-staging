@@ -247,7 +247,9 @@ export function validateProjectModel(model: ProjectModelV094): void {
       throw new Error(`Scope item ${item.id} is missing a description`);
     }
     if (!SCOPE_STATUSES.has(item.status)) {
-      throw new Error(`Scope item ${item.id} has invalid status ${item.status}`);
+      throw new Error(
+        `Scope item ${item.id} has invalid status ${item.status}`,
+      );
     }
     for (const activityId of item.activityIds) {
       if (!model.activities[activityId])

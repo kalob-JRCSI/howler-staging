@@ -305,9 +305,7 @@ export function applyEventMutations(
         break;
       }
       case "UPSERT_SCOPE_ITEM":
-        scopeItems[mutation.scopeItem.id] = cloneScopeItem(
-          mutation.scopeItem,
-        );
+        scopeItems[mutation.scopeItem.id] = cloneScopeItem(mutation.scopeItem);
         break;
       case "DEACTIVATE_SCOPE_ITEM": {
         const scopeItem = scopeItems[mutation.scopeItemId];

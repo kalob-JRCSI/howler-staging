@@ -13,12 +13,13 @@ Do not skip the audit/plan step on future phases — the user explicitly require
 it before "substantial implementation."
 
 **Governance rules that apply to all future work, not just this phase:**
+
 - The Dashboard → Project Index Card → Modules architecture is **frozen**. Do not
   reinterpret it. The 14 functional areas (13 modules + Howler Intelligence) are
   fixed; see the module-completion matrix below.
-- No second source of truth, ever. Every new feature extends the *existing*
+- No second source of truth, ever. Every new feature extends the _existing_
   event-sourced `ProjectModelV094` (one JSON blob per project in D1's `projects`
-  table) through the *existing* reducer/mutation/event-ledger pipeline. Never a
+  table) through the _existing_ reducer/mutation/event-ledger pipeline. Never a
   new SQL table, never a parallel state store.
 - Manual PM controls are mandatory; AI/intelligence is additive, never a
   substitute. Every module needs direct edit UI, not just conversational commands.
@@ -41,22 +42,22 @@ it before "substantial implementation."
 
 ## Module completion matrix (current, as of this handoff)
 
-| Module | Status |
-|---|---|
-| Overview | FUNCTIONAL |
-| Schedule | FUNCTIONAL |
-| Scope | FUNCTIONAL (implementation done, **CI not yet green — see blocker below**) |
-| Plans | PLACEHOLDER |
-| Photos | PLACEHOLDER |
-| Budget | PLACEHOLDER |
-| Documents | PLACEHOLDER |
-| Change Orders | PLACEHOLDER |
-| Selections | PLACEHOLDER |
-| Trades / Vendors / Contacts | PLACEHOLDER |
-| Materials / Procurement | PLACEHOLDER |
-| Inspections / Permits | PLACEHOLDER |
-| Activity / History | FUNCTIONAL |
-| Howler Intelligence | PARTIAL — real CPM solver output surfaced in Overview/Schedule (priority actions, protection actions, critical path/float); Scope adds 4 factual observations (no-schedule-activity, added-after-baseline, complete-but-activity-incomplete, unscoped-activity). No new algorithms added. Not cross-cutting into modules that don't exist yet. |
+| Module                      | Status                                                                                                                                                                                                                                                                                                                                         |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Overview                    | FUNCTIONAL                                                                                                                                                                                                                                                                                                                                     |
+| Schedule                    | FUNCTIONAL                                                                                                                                                                                                                                                                                                                                     |
+| Scope                       | FUNCTIONAL (implementation done, **CI not yet green — see blocker below**)                                                                                                                                                                                                                                                                     |
+| Plans                       | PLACEHOLDER                                                                                                                                                                                                                                                                                                                                    |
+| Photos                      | PLACEHOLDER                                                                                                                                                                                                                                                                                                                                    |
+| Budget                      | PLACEHOLDER                                                                                                                                                                                                                                                                                                                                    |
+| Documents                   | PLACEHOLDER                                                                                                                                                                                                                                                                                                                                    |
+| Change Orders               | PLACEHOLDER                                                                                                                                                                                                                                                                                                                                    |
+| Selections                  | PLACEHOLDER                                                                                                                                                                                                                                                                                                                                    |
+| Trades / Vendors / Contacts | PLACEHOLDER                                                                                                                                                                                                                                                                                                                                    |
+| Materials / Procurement     | PLACEHOLDER                                                                                                                                                                                                                                                                                                                                    |
+| Inspections / Permits       | PLACEHOLDER                                                                                                                                                                                                                                                                                                                                    |
+| Activity / History          | FUNCTIONAL                                                                                                                                                                                                                                                                                                                                     |
+| Howler Intelligence         | PARTIAL — real CPM solver output surfaced in Overview/Schedule (priority actions, protection actions, critical path/float); Scope adds 4 factual observations (no-schedule-activity, added-after-baseline, complete-but-activity-incomplete, unscoped-activity). No new algorithms added. Not cross-cutting into modules that don't exist yet. |
 
 ## Branch map
 
@@ -86,17 +87,18 @@ This is a **real** failure, not the known pre-existing Windows-CRLF-checkout
 artifact that's been showing up locally all session (CI runs on Linux with LF
 checkout, so if prettier fails there, a real file has real formatting
 problems). One of the Phase 3 files almost certainly has a formatting issue
-that slipped past local verification — likely because it was edited *after* the
+that slipped past local verification — likely because it was edited _after_ the
 last local `prettier --write` pass on it, or a file wasn't included in one of
 the targeted `prettier --write <file list>` calls during the session (multiple
 new/changed files were formatted individually rather than via `prettier --write
 .`, so it's easy for one to have been missed after a later edit).
 
 **To fix:**
+
 1. `cd` into the `v096-phase3-scope-workspace` worktree (or check it out fresh).
 2. Run `npx prettier --write .` — but **do not** blindly commit the result: this
    repo has a known, pre-existing, Windows-only CRLF checkout issue that makes
-   ~211 *unrelated, untouched* files also show as failing `prettier --check .`
+   ~211 _unrelated, untouched_ files also show as failing `prettier --check .`
    locally (confirmed harmless — they fail identically on the clean parent
    commit before any of this session's work, and CI itself is LF/Linux so it
    never sees this). So: run `git status --short` after `prettier --write .`
@@ -106,7 +108,7 @@ new/changed files were formatted individually rather than via `prettier --write
    the full list). Revert everything else with `git checkout -- <file>` before
    committing.
 3. Commit as a small follow-up fix (e.g. `fix: prettier formatting on Phase 3
-   scope files`), push, and re-watch CI. Once "Format check" passes, confirm
+scope files`), push, and re-watch CI. Once "Format check" passes, confirm
    Lint / Typecheck / Test / etc. all pass too (they were never reached yet, so
    don't assume they're clean — though local runs earlier in the session were
    all green with the same content, so this should just be the one formatting
@@ -136,7 +138,7 @@ Full design rationale is in the Phase 3 commit message (`git log -1` on
   `scopeAddedAfterBaselineCount` for Overview sync. `progressPercent` is
   deliberately left untouched by scope (don't blend the two).
 - New routes in `src/worker/index.ts`: `GET /v1/projects/:id/scope`,
-  `POST /v1/projects/:id/scope/commands/preview`. Apply reuses the *existing*
+  `POST /v1/projects/:id/scope/commands/preview`. Apply reuses the _existing_
   `POST /v1/projects/:id/events/apply-shadow` route verbatim — no new apply
   path. Both added to `src/worker/entry.ts`'s `isProductOperatorRoute`
   allowlist.
@@ -180,7 +182,7 @@ Two things will show up locally on Windows and are **not** real bugs — do not
 "fix" them by changing repo config, and do not waste time chasing them:
 
 1. `test/safety/repository-policy.test.ts`'s `"ci.yml's pull_request trigger
-   has no branch restriction"` test fails locally on Windows due to a CRLF
+has no branch restriction"` test fails locally on Windows due to a CRLF
    checkout mismatch in `.github/workflows/ci.yml` (the file itself is
    untouched; git checks it out with CRLF on Windows, the test's regex
    expects LF). Passes fine in real CI (Linux/LF). Confirmed present
@@ -192,7 +194,7 @@ Two things will show up locally on Windows and are **not** real bugs — do not
    CRLF line endings on Windows, shifting a byte-budget threshold). Also
    confirmed pre-existing on the clean Phase 1 baseline.
 3. Running `npm run test:context-pack` also has a **side effect**: one of its
-   tests (`baseline-report.test.ts`) legitimately *rewrites*
+   tests (`baseline-report.test.ts`) legitimately _rewrites_
    `tools/context-pack/test/fixtures/baseline-vs-routed-report.json` with
    fresh real-repo measurements every time it runs. This is intentional
    (a snapshot-report mechanism), but don't accidentally commit that
@@ -201,13 +203,13 @@ Two things will show up locally on Windows and are **not** real bugs — do not
 4. If you ever run the app locally with `wrangler dev` and create a
    `.dev.vars` file for a pilot username/password/secrets, **remove it (or
    move it aside) before running `npm run cf-typegen:check`** — `wrangler
-   types` will pick up those local-only secrets and regenerate
+types` will pick up those local-only secrets and regenerate
    `worker-configuration.d.ts` with extra bogus Env fields, which then looks
    like a real binding-drift failure but isn't. `git checkout --
-   worker-configuration.d.ts` to discard if this happens.
+worker-configuration.d.ts` to discard if this happens.
 5. Every worktree needs its own `npm ci` — `node_modules` is not shared
    across worktrees, and if you skip this, commands silently fall back to
-   whatever's in a *different* worktree/checkout up the directory tree
+   whatever's in a _different_ worktree/checkout up the directory tree
    (Node's module resolution walks up), which can be a stale/wrong dependency
    set. Always run `npm ci` fresh in a new worktree before trusting any
    lint/test/build result from it.
@@ -237,7 +239,7 @@ starting point grounded in the actual codebase):
   for an offline/pinned copy.
 - **Documents → hybrid by lifecycle stage.** A draft proposal/contract still
   being negotiated benefits from Drive's live co-editing (reference it). Once
-  *executed* (signed), pull an immutable copy into R2 as the authoritative
+  _executed_ (signed), pull an immutable copy into R2 as the authoritative
   record — a signed contract is a fact that gets locked in, matching the
   event-sourced philosophy, not a live pointer that could silently change.
 - **Cross-cutting metadata layer**: one canonical `FileRefV097`-shaped record
@@ -246,7 +248,7 @@ starting point grounded in the actual codebase):
   — this is exactly why Phase 3's `ScopeItemV096.planDocumentRefs` field
   already exists as an empty-for-now, forward-compatible placeholder. Extend
   that pattern, don't invent a second one.
-- **Permissions**: recommend a Howler-managed *service account* for Drive
+- **Permissions**: recommend a Howler-managed _service account_ for Drive
   access (Howler fetches server-side, gates through its own existing session
   model) over per-user OAuth — matches the exact "server holds the secret,
   browser never does" pattern already established for `HOWLER_ADMIN_KEY`.

@@ -144,7 +144,10 @@ function viewRowFromScopeItem(
 export function buildScopeView(model: ProjectModelV094): ProjectScopeV096 {
   const baselineEntries = model.projectProfile?.baselineScope ?? [];
   const baselineById = new Map(
-    baselineEntries.map((b) => [b.id, { description: b.label, phase: b.phase }]),
+    baselineEntries.map((b) => [
+      b.id,
+      { description: b.label, phase: b.phase },
+    ]),
   );
 
   const rows: ScopeItemViewV096[] = [];
@@ -167,15 +170,18 @@ export function buildScopeView(model: ProjectModelV094): ProjectScopeV096 {
       activityIds: defaultActivityIds(model, baseline.id),
       planDocumentRefs: [],
       sourceIds: [],
-      createdAt: model.projectProfile?.genesisApprovedAt ?? model.forecastAnchorDate,
-      updatedAt: model.projectProfile?.genesisApprovedAt ?? model.forecastAnchorDate,
+      createdAt:
+        model.projectProfile?.genesisApprovedAt ?? model.forecastAnchorDate,
+      updatedAt:
+        model.projectProfile?.genesisApprovedAt ?? model.forecastAnchorDate,
     };
     rows.push(viewRowFromScopeItem(model, transient, baselineById));
   }
 
   rows.sort(
     (a, b) =>
-      a.phase.localeCompare(b.phase) || a.description.localeCompare(b.description),
+      a.phase.localeCompare(b.phase) ||
+      a.description.localeCompare(b.description),
   );
 
   return {
@@ -197,7 +203,8 @@ function buildScopeInsights(
   const referencedActivityIds = new Set<string>();
 
   for (const row of rows) {
-    for (const activity of row.activities) referencedActivityIds.add(activity.activityId);
+    for (const activity of row.activities)
+      referencedActivityIds.add(activity.activityId);
 
     if (row.included && row.activities.length === 0) {
       insights.push({
@@ -430,7 +437,11 @@ export function buildScopeEvent(
   }
 
   const current = resolveScopeItem(model, command.scopeItemId, now);
-  const updated: ScopeItemV096 = { ...current, updatedAt: now, sourceIds: [sourceId] };
+  const updated: ScopeItemV096 = {
+    ...current,
+    updatedAt: now,
+    sourceIds: [sourceId],
+  };
 
   switch (command.kind) {
     case "SET_DESCRIPTION": {

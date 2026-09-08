@@ -536,7 +536,10 @@ const SCOPE_STATUSES = new Set([
   "NOT_APPLICABLE",
 ]);
 
-function checkAllowanceShape(record: Record<string, unknown>, errors: string[]): void {
+function checkAllowanceShape(
+  record: Record<string, unknown>,
+  errors: string[],
+): void {
   const allowance = record.allowance;
   if (allowance === null) return;
   if (!allowance || typeof allowance !== "object" || Array.isArray(allowance)) {
@@ -544,7 +547,8 @@ function checkAllowanceShape(record: Record<string, unknown>, errors: string[]):
     return;
   }
   const a = allowance as Record<string, unknown>;
-  if (typeof a.amount !== "number") errors.push("allowance.amount must be a number");
+  if (typeof a.amount !== "number")
+    errors.push("allowance.amount must be a number");
   if (typeof a.currency !== "string" || !a.currency) {
     errors.push("allowance.currency is required");
   }
@@ -565,8 +569,13 @@ function validateScopeCommandShape(raw: unknown): string[] {
     return ["command must be a JSON object"];
   }
   const record = raw as Record<string, unknown>;
-  if (typeof record.kind !== "string" || !SCOPE_COMMAND_KINDS.has(record.kind)) {
-    return [`command.kind must be one of: ${[...SCOPE_COMMAND_KINDS].join(", ")}`];
+  if (
+    typeof record.kind !== "string" ||
+    !SCOPE_COMMAND_KINDS.has(record.kind)
+  ) {
+    return [
+      `command.kind must be one of: ${[...SCOPE_COMMAND_KINDS].join(", ")}`,
+    ];
   }
   switch (record.kind) {
     case "ADD_SCOPE_ITEM":
@@ -575,7 +584,10 @@ function validateScopeCommandShape(raw: unknown): string[] {
       checkString(record, "trade", errors, false);
       checkString(record, "responsibleVendor", errors, false);
       checkString(record, "notes", errors, false);
-      if (record.included !== undefined && typeof record.included !== "boolean") {
+      if (
+        record.included !== undefined &&
+        typeof record.included !== "boolean"
+      ) {
         errors.push("included must be a boolean when present");
       }
       break;
@@ -607,7 +619,10 @@ function validateScopeCommandShape(raw: unknown): string[] {
       break;
     case "SET_STATUS":
       checkString(record, "scopeItemId", errors);
-      if (typeof record.status !== "string" || !SCOPE_STATUSES.has(record.status)) {
+      if (
+        typeof record.status !== "string" ||
+        !SCOPE_STATUSES.has(record.status)
+      ) {
         errors.push(`status must be one of: ${[...SCOPE_STATUSES].join(", ")}`);
       }
       break;

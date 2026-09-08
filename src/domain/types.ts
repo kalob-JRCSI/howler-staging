@@ -180,11 +180,7 @@ export interface ProjectProfileV096 {
 // now actually building" both remain independently traceable. A scope item whose id also appears
 // in baselineScope descended from that baseline entry; one that doesn't was added after baseline.
 export type ScopeStatusV096 =
-  | "NOT_STARTED"
-  | "IN_PROGRESS"
-  | "COMPLETE"
-  | "BLOCKED"
-  | "NOT_APPLICABLE";
+  "NOT_STARTED" | "IN_PROGRESS" | "COMPLETE" | "BLOCKED" | "NOT_APPLICABLE";
 
 export interface ScopeAllowanceV096 {
   amount: number;
