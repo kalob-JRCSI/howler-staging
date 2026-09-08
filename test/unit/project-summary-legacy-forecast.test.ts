@@ -58,7 +58,11 @@ const legacyForecast = {
   impactActivityIds: [],
   activityForecasts: {},
   pmActions: [],
-  completion: null,
+  completion: {
+    optimistic: "2026-09-01",
+    likely: "2026-09-03",
+    conservative: "2026-09-08",
+  },
   supersededSources: [],
 } as unknown as ForecastSnapshotV094;
 
@@ -69,5 +73,6 @@ describe("buildProjectSummary legacy forecast compatibility", () => {
     const summary = buildProjectSummary(model, legacyForecast, health);
     expect(summary.projectId).toBe("legacy-deboard");
     expect(summary.projectName).toBe("Legacy DeBoard");
+    expect(summary.projectedCompletion).toBe("2026-09-03");
   });
 });
