@@ -24,6 +24,13 @@ async function productEnv(): Promise<Env> {
   };
 }
 
+// `Response.json()` is typed `Promise<any>`; routing it through an explicit `unknown` return type
+// here means the casts at each call site narrow from `unknown` (a real narrowing) rather than from
+// `any` (which @typescript-eslint/no-unnecessary-type-assertion flags as a no-op).
+function jsonBody(response: Response): Promise<unknown> {
+  return response.json();
+}
+
 async function loginCookie(productEnv: Env): Promise<string> {
   const response = await worker.fetch(
     new Request("https://example.test/auth/login", {
@@ -124,6 +131,65 @@ describe("authenticated product gateway", () => {
     expect(html).not.toContain("Command the work.");
   });
 
+  // Phase 2 recovery: src/app/router.ts owns every client-side route (/projects/:id,
+  // /projects/:id/:moduleId, ...) with no matching server route table. Before this fallback, a
+  // hard reload or direct link on any of those deep paths 404d -- exactly the browser action this
+  // phase's own acceptance test performs after a schedule edit ("reload the browser, confirm the
+  // edit persisted"). This proves the fix without a real browser: the server must answer the same
+  // app shell, not a bare 404, for a deep client route.
+  it("serves the app shell (not a 404) on a hard reload of a deep client-side route", async () => {
+    const product = await productEnv();
+    const cookie = await loginCookie(product);
+
+    const response = await worker.fetch(
+      new Request("https://example.test/projects/deboard-v091/schedule", {
+        headers: { cookie },
+      }),
+      product,
+    );
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain('id="app-root"');
+    expect(html).toContain('src="/app.js"');
+  });
+
+  it("still shows the login page for a deep client-side route with no session", async () => {
+    const product = await productEnv();
+    const response = await worker.fetch(
+      new Request("https://example.test/projects/deboard-v091/schedule"),
+      product,
+    );
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Sign in");
+    expect(html).not.toContain('id="app-root"');
+  });
+
+  it("never applies the SPA fallback to /v1, /admin, or /health -- their exact existing contracts are unchanged", async () => {
+    const product = await productEnv();
+    const cookie = await loginCookie(product);
+
+    // A /v1 path outside the product allowlist falls through to the legacy worker exactly as
+    // before -- requireAdmin's Bearer check (401 for a cookie-only request), never the app shell.
+    const unknownApiRoute = await worker.fetch(
+      new Request("https://example.test/v1/this-route-does-not-exist", {
+        headers: { cookie },
+      }),
+      product,
+    );
+    expect(unknownApiRoute.status).toBe(401);
+    expect(await unknownApiRoute.text()).not.toContain('id="app-root"');
+
+    const health = await worker.fetch(
+      new Request("https://example.test/health"),
+      product,
+    );
+    expect(health.status).toBe(200);
+    expect(await health.text()).not.toContain('id="app-root"');
+  });
+
   it("uses the product session for approved operator routes without exposing bearer auth", async () => {
     const product = await productEnv();
     const cookie = await loginCookie(product);
@@ -154,5 +220,74 @@ describe("authenticated product gateway", () => {
     );
 
     expect(response.status).toBe(401);
+  });
+
+  // Phase 2 recovery (Editable Project Schedule): the Schedule module's own read view and its
+  // preview -> apply save model must be reachable through the product session -- the same cookie
+  // auth every other Index Card fetch already uses -- never the raw Bearer admin key a browser
+  // session never holds.
+  it("exposes the Schedule module's read view and save flow to a product session, without a bearer admin key", async () => {
+    const product = await productEnv();
+    await legacyWorker.fetch(
+      new Request("https://example.test/v1/projects/deboard-v091/seed", {
+        method: "POST",
+        headers: { authorization: `Bearer ${ADMIN_KEY}` },
+      }),
+      product,
+    );
+    const cookie = await loginCookie(product);
+
+    const scheduleResponse = await worker.fetch(
+      new Request("https://example.test/v1/projects/deboard-v091/schedule", {
+        headers: { cookie },
+      }),
+      product,
+    );
+    expect(scheduleResponse.status).toBe(200);
+    const schedule = (await jsonBody(scheduleResponse)) as {
+      activities: { activityId: string }[];
+    };
+    expect(schedule.activities.some((a) => a.activityId === "framing")).toBe(
+      true,
+    );
+
+    const previewResponse = await worker.fetch(
+      new Request(
+        "https://example.test/v1/projects/deboard-v091/schedule/commands/preview",
+        {
+          method: "POST",
+          headers: { cookie, "content-type": "application/json" },
+          body: JSON.stringify({
+            command: {
+              kind: "SET_ACTIVITY_STATE",
+              activityId: "framing",
+              state: "IN_PROGRESS",
+            },
+          }),
+        },
+      ),
+      product,
+    );
+    expect(previewResponse.status).toBe(200);
+    const preview = (await jsonBody(previewResponse)) as {
+      event: unknown;
+      reviewToken: string;
+    };
+
+    const applyResponse = await worker.fetch(
+      new Request(
+        "https://example.test/v1/projects/deboard-v091/events/apply-shadow",
+        {
+          method: "POST",
+          headers: { cookie, "content-type": "application/json" },
+          body: JSON.stringify({
+            event: preview.event,
+            reviewToken: preview.reviewToken,
+          }),
+        },
+      ),
+      product,
+    );
+    expect(applyResponse.status).toBe(201);
   });
 });

@@ -142,6 +142,29 @@ function isProductOperatorRoute(request: Request, pathname: string): boolean {
   ) {
     return true;
   }
+  // Phase 2 recovery (Editable Project Schedule): the Schedule module's read view, plus the two
+  // steps of the existing preview -> confirm -> apply save model. `schedule/commands/preview`
+  // translates a typed PM edit into the exact same canonical event format `events/apply-shadow`
+  // already commits -- both routes existed (or were added) specifically so a manual schedule
+  // edit never needs raw JSON or a second mutation path.
+  if (
+    request.method === "GET" &&
+    /^\/v1\/projects\/[^/]+\/schedule$/.test(pathname)
+  ) {
+    return true;
+  }
+  if (
+    request.method === "POST" &&
+    /^\/v1\/projects\/[^/]+\/schedule\/commands\/preview$/.test(pathname)
+  ) {
+    return true;
+  }
+  if (
+    request.method === "POST" &&
+    /^\/v1\/projects\/[^/]+\/events\/apply-shadow$/.test(pathname)
+  ) {
+    return true;
+  }
   if (
     request.method === "POST" &&
     /^\/v1\/projects\/[^/]+\/conversation\/turn$/.test(pathname)
@@ -246,7 +269,31 @@ async function handleProductBoundary(
     });
   }
 
-  return await handleProductOperatorRoute(request, env);
+  const operatorResponse = await handleProductOperatorRoute(request, env);
+  if (operatorResponse) return operatorResponse;
+
+  // Phase 2 recovery: standard SPA fallback. src/app/router.ts (Router.render) owns all
+  // client-side navigation -- the server holds no route table to keep in sync with it, and never
+  // did even in Phase 1. Without this, a hard reload or direct link on any deep route (e.g.
+  // /projects/:id/schedule, exercised by this phase's own browser acceptance test) 404s, because
+  // the server previously only ever served the app shell at exactly "/". Every real route this
+  // gateway owns (/v1/*, /admin*, /health) is excluded and keeps its exact existing behavior;
+  // this only ever answers a GET that isn't one of those, with the same shell-or-login choice "/"
+  // itself already makes. An unauthenticated request still only ever sees the login page; an
+  // authenticated request landing on a path the client router doesn't recognize gets the app
+  // shell's own honest "Not found." (Router.render's existing fallback), never fabricated content.
+  if (
+    request.method === "GET" &&
+    !url.pathname.startsWith("/v1/") &&
+    !url.pathname.startsWith("/admin") &&
+    url.pathname !== "/health"
+  ) {
+    const secret = env.HOWLER_SESSION_SIGNING_SECRET;
+    const user = secret ? await readSession(request, secret) : null;
+    return user ? productAppShell() : loginPage();
+  }
+
+  return null;
 }
 
 export default {

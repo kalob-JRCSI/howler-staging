@@ -12,6 +12,7 @@ import type { Router } from "../../router";
 import type { ProjectSummaryLike } from "../../types";
 import { renderOverview } from "./overview";
 import { renderActivity } from "./activity";
+import { renderSchedule } from "./schedule";
 import { renderPlaceholder } from "./placeholder";
 
 type ModuleRenderer = (
@@ -28,7 +29,7 @@ interface ModuleDefinition {
 
 export const INDEX_CARD_MODULES: ModuleDefinition[] = [
   { id: "overview", label: "Overview", render: renderOverview },
-  { id: "schedule", label: "Schedule", render: renderPlaceholder },
+  { id: "schedule", label: "Schedule", render: renderSchedule },
   { id: "scope", label: "Scope", render: renderPlaceholder },
   { id: "plans", label: "Plans", render: renderPlaceholder },
   { id: "photos", label: "Photos", render: renderPlaceholder },

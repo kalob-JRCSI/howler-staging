@@ -59,6 +59,12 @@ import {
 } from "../operator/genesis";
 import type { GenesisProposalV096 } from "../operator/genesis";
 import { buildProjectSummary } from "../operator/project-summary";
+import {
+  buildScheduleEvent,
+  buildScheduleView,
+  ScheduleCommandError,
+} from "../operator/schedule";
+import type { ScheduleCommandV096 } from "../operator/schedule";
 
 // Engine/admin-page compatibility version. Distinct from GET /health's own `version` field, which
 // buildHealthReport (src/worker/health.ts) now owns and reports as "0.9.5" with an additive
@@ -350,6 +356,156 @@ async function reviewedRun(
     oversight: run.oversight,
   });
   return { model, baseline, latest, comparisonBaseline, run, reviewToken };
+}
+
+const SCHEDULE_COMMAND_KINDS = new Set([
+  "ADD_ACTIVITY",
+  "RENAME_ACTIVITY",
+  "SET_PHASE",
+  "SET_DURATION",
+  "SET_COMMITTED_DATES",
+  "CLEAR_COMMITTED_DATES",
+  "ADD_DEPENDENCY",
+  "REMOVE_DEPENDENCY",
+  "EDIT_DEPENDENCY",
+  "SET_ACTUAL_START",
+  "SET_ACTUAL_FINISH",
+  "SET_ACTIVITY_STATE",
+]);
+
+const ACTIVITY_STATES = new Set(["NOT_STARTED", "IN_PROGRESS", "COMPLETE"]);
+
+function checkString(
+  record: Record<string, unknown>,
+  key: string,
+  errors: string[],
+  required = true,
+): void {
+  const value = record[key];
+  if (value === undefined) {
+    if (required) errors.push(`${key} is required`);
+    return;
+  }
+  if (typeof value !== "string" || value.trim().length === 0) {
+    errors.push(`${key} must be a non-empty string`);
+  }
+}
+
+function checkThreePointDuration(
+  record: Record<string, unknown>,
+  errors: string[],
+): void {
+  const duration = record.duration;
+  if (!duration || typeof duration !== "object" || Array.isArray(duration)) {
+    errors.push(
+      "duration must be an object with optimistic/likely/conservative",
+    );
+    return;
+  }
+  const d = duration as Record<string, unknown>;
+  for (const key of ["optimistic", "likely", "conservative"]) {
+    if (typeof d[key] !== "number") {
+      errors.push(`duration.${key} must be a number`);
+    }
+  }
+}
+
+/**
+ * Structural-only validation of a ScheduleCommandV096 from untrusted request JSON, run before
+ * the value is ever cast and handed to buildScheduleEvent (src/operator/schedule.ts) --
+ * mirrors this file's own existing validateGenesisProposalShape pattern: a malformed field is
+ * always reported as a clean 400 here, never a raw TypeError surfacing as a 500. Domain-level
+ * checks (does the referenced activity/dependency actually exist, is finish before start, etc.)
+ * remain buildScheduleEvent's own job -- this only confirms the shape is safe to read.
+ */
+function validateScheduleCommandShape(raw: unknown): string[] {
+  const errors: string[] = [];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return ["command must be a JSON object"];
+  }
+  const record = raw as Record<string, unknown>;
+  if (
+    typeof record.kind !== "string" ||
+    !SCHEDULE_COMMAND_KINDS.has(record.kind)
+  ) {
+    return [
+      `command.kind must be one of: ${[...SCHEDULE_COMMAND_KINDS].join(", ")}`,
+    ];
+  }
+  switch (record.kind) {
+    case "ADD_ACTIVITY":
+      checkString(record, "name", errors);
+      checkString(record, "phase", errors);
+      checkThreePointDuration(record, errors);
+      break;
+    case "RENAME_ACTIVITY":
+      checkString(record, "activityId", errors);
+      checkString(record, "name", errors);
+      break;
+    case "SET_PHASE":
+      checkString(record, "activityId", errors);
+      checkString(record, "phase", errors);
+      break;
+    case "SET_DURATION":
+      checkString(record, "activityId", errors);
+      checkThreePointDuration(record, errors);
+      break;
+    case "SET_COMMITTED_DATES":
+      checkString(record, "activityId", errors);
+      checkString(record, "startDate", errors, false);
+      checkString(record, "finishDate", errors, false);
+      if (record.startDate === undefined && record.finishDate === undefined) {
+        errors.push("at least one of startDate or finishDate is required");
+      }
+      break;
+    case "CLEAR_COMMITTED_DATES":
+      checkString(record, "activityId", errors);
+      break;
+    case "ADD_DEPENDENCY":
+      checkString(record, "predecessorId", errors);
+      checkString(record, "successorId", errors);
+      checkString(record, "type", errors);
+      checkString(record, "reason", errors);
+      if (typeof record.lagWorkdays !== "number") {
+        errors.push("lagWorkdays must be a number");
+      }
+      if (typeof record.hard !== "boolean") {
+        errors.push("hard must be a boolean");
+      }
+      break;
+    case "REMOVE_DEPENDENCY":
+      checkString(record, "dependencyId", errors);
+      break;
+    case "EDIT_DEPENDENCY":
+      checkString(record, "dependencyId", errors);
+      checkString(record, "type", errors, false);
+      checkString(record, "reason", errors, false);
+      if (
+        record.lagWorkdays !== undefined &&
+        typeof record.lagWorkdays !== "number"
+      ) {
+        errors.push("lagWorkdays must be a number when present");
+      }
+      if (record.hard !== undefined && typeof record.hard !== "boolean") {
+        errors.push("hard must be a boolean when present");
+      }
+      break;
+    case "SET_ACTUAL_START":
+    case "SET_ACTUAL_FINISH":
+      checkString(record, "activityId", errors);
+      checkString(record, "date", errors);
+      break;
+    case "SET_ACTIVITY_STATE":
+      checkString(record, "activityId", errors);
+      if (
+        typeof record.state !== "string" ||
+        !ACTIVITY_STATES.has(record.state)
+      ) {
+        errors.push(`state must be one of: ${[...ACTIVITY_STATES].join(", ")}`);
+      }
+      break;
+  }
+  return errors;
 }
 
 /**
@@ -1272,6 +1428,20 @@ async function handle(request: Request, env: Env): Promise<Response> {
     return json(buildProjectSummary(model, forecast, health));
   }
 
+  // Phase 2 (Editable Project Schedule): read-only, derived state, exactly like /summary above --
+  // reuses buildScheduleView() verbatim (src/operator/schedule.ts). No mutation, no second
+  // canonical schedule store; every field comes straight from `model`/`forecast`.
+  if (
+    request.method === "GET" &&
+    parts.length === 4 &&
+    parts[3] === "schedule"
+  ) {
+    const model = await repo.loadProject(projectId);
+    if (!model) throw new HttpError(404, `Project ${projectId} not found`);
+    const forecast = await repo.loadLatestForecast(projectId);
+    return json(buildScheduleView(model, forecast));
+  }
+
   if (
     request.method === "GET" &&
     parts.length === 5 &&
@@ -1546,6 +1716,67 @@ async function handle(request: Request, env: Env): Promise<Response> {
     // moment of issuance.
     await signPendingConfirmations(confirmationSigningSecret, result);
     return json({ session: nextSession, turn: result, timing });
+  }
+
+  // Phase 2 (Editable Project Schedule): the one typed constructor a PM's manual schedule edit
+  // goes through -- translates a small ScheduleCommandV096 into the exact same well-formed
+  // ProjectEventV094 the raw /events/preview route below already accepts, then hands it to that
+  // same reviewedRun (no second review/forecast path). The response carries the built `event`
+  // back to the caller so the *existing* POST .../events/apply-shadow route (already exposed to
+  // the product gateway's allowlist) can apply it verbatim -- committing a schedule change never
+  // needs a second, bespoke apply route.
+  if (
+    request.method === "POST" &&
+    parts.length === 6 &&
+    parts[3] === "schedule" &&
+    parts[4] === "commands" &&
+    parts[5] === "preview"
+  ) {
+    const body = (await readJson(request)) as {
+      command?: unknown;
+    } | null;
+    const commandErrors = validateScheduleCommandShape(body?.command);
+    if (commandErrors.length > 0) {
+      throw new HttpError(400, "Invalid schedule command", {
+        errors: commandErrors,
+      });
+    }
+    const command = body?.command as ScheduleCommandV096;
+    const model = await repo.loadProject(projectId);
+    if (!model) throw new HttpError(404, `Project ${projectId} not found`);
+    let built;
+    try {
+      built = buildScheduleEvent(model, command, new Date().toISOString(), () =>
+        crypto.randomUUID(),
+      );
+    } catch (error) {
+      if (error instanceof ScheduleCommandError) {
+        throw new HttpError(400, error.message);
+      }
+      throw error;
+    }
+    const result = await reviewedRun(repo, projectId, built.event);
+    return json({
+      projectRevision: result.model.revision,
+      baselineVersion: result.baseline?.version ?? null,
+      latestVersion: result.latest?.version ?? null,
+      comparisonVersion: result.comparisonBaseline?.version ?? null,
+      candidate: result.run.candidate,
+      delta: result.run.candidate.delta ?? null,
+      recoveryAnalysis: result.run.candidate.recoveryAnalysis,
+      supersededSources: result.run.candidate.supersededSources,
+      impactActivityIds: result.run.candidate.impactActivityIds,
+      oversight: result.run.oversight,
+      forecastable: result.run.forecastable,
+      commitmentEligible: result.run.commitmentEligible,
+      oversightPublishable: result.run.publishable,
+      reviewToken: result.reviewToken,
+      historyNote: built.historyNote,
+      event: built.event,
+      persisted: false,
+      mode,
+      stagingOnly: mode === "shadow",
+    });
   }
 
   if (

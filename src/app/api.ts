@@ -6,14 +6,30 @@
 import type {
   ForecastSnapshotLike,
   ProjectEventLike,
+  ProjectScheduleLike,
   ProjectSummaryLike,
+  ScheduleCommandLike,
+  ScheduleCommandPreviewLike,
 } from "./types";
 
 export class UnauthorizedError extends Error {}
 
-async function apiFetch<T>(path: string): Promise<T> {
+export class ApiRequestError extends Error {
+  readonly status: number;
+  readonly details: unknown;
+  constructor(message: string, status: number, details: unknown) {
+    super(message);
+    this.status = status;
+    this.details = details;
+  }
+}
+
+async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers);
+  headers.set("accept", "application/json");
   const response = await fetch(path, {
-    headers: { accept: "application/json" },
+    ...init,
+    headers,
     credentials: "same-origin",
     cache: "no-store",
   });
@@ -21,9 +37,25 @@ async function apiFetch<T>(path: string): Promise<T> {
     throw new UnauthorizedError(`unauthorized: ${path}`);
   }
   if (!response.ok) {
-    throw new Error(`request failed: ${path} (${String(response.status)})`);
+    const body = (await response.json().catch(() => null)) as {
+      error?: string;
+      details?: unknown;
+    } | null;
+    throw new ApiRequestError(
+      body?.error ?? `request failed: ${path} (${String(response.status)})`,
+      response.status,
+      body?.details,
+    );
   }
   return (await response.json()) as T;
+}
+
+function postJson<T>(path: string, body: unknown): Promise<T> {
+  return apiFetch<T>(path, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 export interface PortfolioResponse {
@@ -73,4 +105,43 @@ export function fetchProjectEvents(
 
 export async function logout(): Promise<void> {
   await fetch("/auth/logout", { method: "POST", credentials: "same-origin" });
+}
+
+// Phase 2 (Editable Project Schedule): the Schedule module's read view, plus the two-step
+// preview -> apply save model already used by every canonical event in this codebase (see
+// src/worker/entry.ts's isProductOperatorRoute and src/operator/schedule.ts). Applying an event
+// goes through the *existing* /events/apply-shadow route -- no second mutation endpoint.
+
+export function fetchProjectSchedule(
+  projectId: string,
+): Promise<ProjectScheduleLike> {
+  return apiFetch<ProjectScheduleLike>(
+    `/v1/projects/${encodeURIComponent(projectId)}/schedule`,
+  );
+}
+
+export function previewScheduleCommand(
+  projectId: string,
+  command: ScheduleCommandLike,
+): Promise<ScheduleCommandPreviewLike> {
+  return postJson<ScheduleCommandPreviewLike>(
+    `/v1/projects/${encodeURIComponent(projectId)}/schedule/commands/preview`,
+    { command },
+  );
+}
+
+export interface ApplyScheduleEventResult {
+  applied: boolean;
+  projectRevision: number;
+}
+
+export function applyScheduleEvent(
+  projectId: string,
+  event: unknown,
+  reviewToken: string,
+): Promise<ApplyScheduleEventResult> {
+  return postJson<ApplyScheduleEventResult>(
+    `/v1/projects/${encodeURIComponent(projectId)}/events/apply-shadow`,
+    { event, reviewToken },
+  );
 }

@@ -43,6 +43,14 @@ const ACCEPTED_MUTATION_ROUTES = [
   // repo.createProject verbatim, the same machinery the deboard-v091/seed and :id/import routes
   // above already use.
   "/v1/projects/genesis/commit",
+  // Phase 2 (Editable Project Schedule): POST /v1/projects/:id/schedule/commands/preview is
+  // pure analysis, exactly like understanding/preview and events/preview above -- it never
+  // constructs a repository write. It translates a typed ScheduleCommandV096 into a
+  // ProjectEventV094 (src/operator/schedule.ts's buildScheduleEvent) and hands it to the same
+  // reviewedRun every other preview route already uses. Not a new mutation mechanism, and not a
+  // second schedule source of truth: the actual write still only ever happens through the
+  // existing events/apply-shadow route above.
+  "SEGMENTS(len=6){3=schedule,4=commands,5=preview}",
 ];
 
 describe("extractMutationRoutes: fixture behavior", () => {
