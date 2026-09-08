@@ -19,13 +19,42 @@ jobs:
           cache: npm
       - run: npm ci
 
-      - name: Inspect actual remote staging D1 project summary prerequisites
+      - name: Export actual staging models and latest forecasts
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          npx wrangler d1 execute howler-intelligence-staging --remote --command "SELECT p.project_id, p.name, p.revision, json_valid(p.current_model_json) AS model_json_valid, json_type(p.current_model_json, '$.activities') AS activities_type, json_type(p.current_model_json, '$.constraints') AS constraints_type, (SELECT COUNT(*) FROM forecast_snapshots f WHERE f.project_id = p.project_id) AS forecast_count, (SELECT COUNT(*) FROM prediction_outcomes o WHERE o.project_id = p.project_id) AS outcome_count FROM projects p ORDER BY p.project_id;"
-          echo '=== PILOT VS EXTRA ROWS ==='
-          npx wrangler d1 execute howler-intelligence-staging --remote --command "SELECT project_id, CASE WHEN project_id IN ('deboard-v091','stewart-v1','swiderski-v1','pratt-v1','carver-v1','ciurlizza-v1','mcmillan-v1') THEN 'PILOT' ELSE 'EXTRA' END AS portfolio_class FROM projects ORDER BY project_id;"
+          npx wrangler d1 execute howler-intelligence-staging --remote --json --command "SELECT p.project_id, p.current_model_json, (SELECT f.snapshot_json FROM forecast_snapshots f WHERE f.project_id = p.project_id ORDER BY f.version DESC LIMIT 1) AS snapshot_json FROM projects p ORDER BY p.project_id;" > /tmp/howler-rows.json
+
+      - name: Replay production summary builder over every actual staging project
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --import tsx --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import { buildProjectSummary } from './src/operator/project-summary.ts';
+          import { projectHealth } from './src/worker/health.ts';
+
+          const raw = JSON.parse(fs.readFileSync('/tmp/howler-rows.json', 'utf8'));
+          const rows = Array.isArray(raw) ? (raw[0]?.results ?? []) : [];
+          let failed = false;
+          for (const row of rows) {
+            try {
+              const model = JSON.parse(row.current_model_json);
+              const forecast = row.snapshot_json ? JSON.parse(row.snapshot_json) : undefined;
+              const health = await projectHealth(
+                { loadPredictionOutcomes: async () => [] },
+                model,
+                forecast,
+              );
+              const summary = buildProjectSummary(model, forecast, health);
+              console.log(`SUMMARY_OK ${row.project_id} | ${summary.projectName} | ${summary.progressPercent} | ${summary.primaryExposure} | ${summary.nextMovement}`);
+            } catch (error) {
+              failed = true;
+              console.error(`SUMMARY_FAIL ${row.project_id}: ${error?.stack ?? error}`);
+            }
+          }
+          if (failed) process.exit(1);
+          NODE
