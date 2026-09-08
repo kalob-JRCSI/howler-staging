@@ -32,12 +32,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          node --import tsx --input-type=module <<'NODE'
-          import fs from 'node:fs';
-          import { buildProjectSummary } from './src/operator/project-summary.ts';
-          import { projectHealth } from './src/worker/health.ts';
+          cat > diagnose-summary.ts <<'TS'
+          import fs from "node:fs";
+          import { buildProjectSummary } from "./src/operator/project-summary";
+          import { projectHealth } from "./src/worker/health";
 
-          const raw = JSON.parse(fs.readFileSync('/tmp/howler-rows.json', 'utf8'));
+          const raw = JSON.parse(fs.readFileSync("/tmp/howler-rows.json", "utf8"));
           const rows = Array.isArray(raw) ? (raw[0]?.results ?? []) : [];
           let failed = false;
           for (const row of rows) {
@@ -53,8 +53,10 @@ jobs:
               console.log(`SUMMARY_OK ${row.project_id} | ${summary.projectName} | ${summary.progressPercent} | ${summary.primaryExposure} | ${summary.nextMovement}`);
             } catch (error) {
               failed = true;
-              console.error(`SUMMARY_FAIL ${row.project_id}: ${error?.stack ?? error}`);
+              console.error(`SUMMARY_FAIL ${row.project_id}: ${error instanceof Error ? error.stack : String(error)}`);
             }
           }
           if (failed) process.exit(1);
-          NODE
+          TS
+          npx vite-node diagnose-summary.ts
+          rm -f diagnose-summary.ts
