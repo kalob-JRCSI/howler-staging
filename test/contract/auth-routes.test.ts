@@ -105,7 +105,7 @@ describe("pilot product authentication routes", () => {
     expect(response.headers.get("set-cookie")).toBeNull();
   });
 
-  it("renders Penthouse only when the product session is valid", async () => {
+  it("renders the product app shell only when the product session is valid", async () => {
     const { cookie } = await login();
     const response = await worker.fetch(
       request("GET", "/", { cookie }),
@@ -114,8 +114,8 @@ describe("pilot product authentication routes", () => {
     const html = await response.text();
 
     expect(response.status).toBe(200);
-    expect(html).toContain("Command the work.");
-    expect(html).toContain("New project");
+    expect(html).toContain('id="app-root"');
+    expect(html).toContain('src="/app.js"');
   });
 
   it("logout expires the product session", async () => {

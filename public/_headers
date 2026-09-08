@@ -3,3 +3,15 @@
 
 /assets/penthouse-atmosphere-mobile.24a2efed46.webp
   Cache-Control: public, max-age=31556952, immutable
+
+# Phase 1 recovery: the built product app bundle (scripts/build-frontend.mjs) is not
+# fingerprinted, so it must always revalidate -- otherwise a deploy could be silently masked by a
+# stale cached bundle in a returning visitor's browser.
+/app.js
+  Cache-Control: no-cache
+
+/app.js.map
+  Cache-Control: no-cache
+
+/styles.css
+  Cache-Control: no-cache

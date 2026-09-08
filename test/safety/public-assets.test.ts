@@ -15,16 +15,24 @@ describe("repository policy: public/ contains only non-sensitive presentation as
     expect(relativePaths().length).toBeGreaterThan(0);
   });
 
-  it("every file under public/ is an allowlisted, fingerprinted presentation asset or the cache-header config", () => {
+  it("every file under public/ is an allowlisted, fingerprinted presentation asset, the built product app bundle, or the cache-header config", () => {
     const isHeadersConfig = (path: string) => path === "_headers";
     const isFingerprintedAtmosphereWebp = (path: string) =>
       /^assets\/penthouse-atmosphere(-mobile)?\.[0-9a-f]{6,}\.webp$/.test(path);
+    // Phase 1 recovery: the built product app bundle (scripts/build-frontend.mjs, from
+    // src/app/**) -- UI code only, no project data, exactly like the atmosphere artwork above.
+    // Served with Cache-Control: no-cache (see public/_headers) rather than fingerprinting, so a
+    // new deploy is never masked by a stale cached bundle.
+    const isBuiltAppBundle = (path: string) =>
+      path === "app.js" || path === "app.js.map" || path === "styles.css";
     for (const path of relativePaths()) {
       const allowed =
-        isHeadersConfig(path) || isFingerprintedAtmosphereWebp(path);
+        isHeadersConfig(path) ||
+        isFingerprintedAtmosphereWebp(path) ||
+        isBuiltAppBundle(path);
       expect(
         allowed,
-        `unexpected file in public/: "${path}" -- public/ is served to any visitor with no admin authentication, so it may only ever contain non-sensitive presentation assets (fingerprinted Penthouse atmosphere artwork) and the _headers cache-control config. Never client documents, plans, estimates, exports, evidence, credentials, or other private operational data.`,
+        `unexpected file in public/: "${path}" -- public/ is served to any visitor with no admin authentication, so it may only ever contain non-sensitive presentation assets (fingerprinted Penthouse atmosphere artwork, the built product app bundle) and the _headers cache-control config. Never client documents, plans, estimates, exports, evidence, credentials, or other private operational data.`,
       ).toBe(true);
     }
   });

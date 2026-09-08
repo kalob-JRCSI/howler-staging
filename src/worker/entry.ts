@@ -1,5 +1,6 @@
 import { buildProjectSummary } from "../operator/project-summary";
 import legacyWorker from "./index";
+import { appShellHtml } from "./app-shell";
 import {
   authenticatePilotUser,
   clearSessionCookie,
@@ -10,7 +11,6 @@ import {
 } from "./auth";
 import { projectHealth } from "./health";
 import { HttpError, json, readJson } from "./http";
-import { decorateProductDashboard } from "./product-shell";
 import { D1HowlerRepository } from "./repository";
 
 interface PortfolioProjectRow {
@@ -73,37 +73,40 @@ async function readPortfolio(env: Env): Promise<Response> {
   );
 }
 
-function isProjectsTableUnavailable(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return message.includes("no such table: projects");
+/**
+ * Phase 1 recovery: the authenticated product root is now the real Dashboard/Index Card
+ * application (src/app/, built to public/app.js) rather than the legacy field-dashboard HTML.
+ * The shell itself carries no project data -- src/app/main.ts fetches GET /v1/portfolio and the
+ * per-project routes below on its own, client-side, exactly like any other authenticated fetch
+ * this gateway already gates.
+ */
+function productAppShell(): Response {
+  return new Response(appShellHtml(), {
+    status: 200,
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+    },
+  });
 }
 
-async function productDashboard(request: Request, env: Env): Promise<Response> {
-  const legacyResponse = await legacyWorker.fetch(request, env);
-  const contentType = legacyResponse.headers.get("content-type") ?? "";
-  if (!contentType.includes("text/html")) return legacyResponse;
-
-  let rows: PortfolioProjectRow[] = [];
-  const shellDb = (env as Partial<Env>).HOWLER_DB;
-  if (shellDb) {
-    try {
-      rows = await readPortfolioRows(env);
-    } catch (error) {
-      // Authentication is independent of D1 schema readiness. The signed-in shell must still
-      // render when the product tables have not been initialized yet; the real /v1/portfolio
-      // endpoint stays strict and surfaces that readiness problem to the synchronization layer.
-      if (!isProjectsTableUnavailable(error)) throw error;
-    }
-  }
-
-  const html = decorateProductDashboard(
-    await legacyResponse.text(),
-    rows.map((row) => row.project_id),
+/**
+ * Phase 1 recovery: the legacy field-dashboard HTML (Penthouse, Genesis intake, the
+ * conversational-update box, Admin & diagnostics) is preserved byte-for-byte and relocated here --
+ * never patched, never linked from the product app above. /admin/field is kept as a
+ * backward-compatible alias for anyone with it bookmarked; both require the same product session
+ * the rest of this gateway already requires.
+ */
+async function diagnosticsPage(request: Request, env: Env): Promise<Response> {
+  const legacyUrl = new URL(request.url);
+  legacyUrl.pathname = "/admin/field";
+  const legacyResponse = await legacyWorker.fetch(
+    new Request(legacyUrl, request),
+    env,
   );
   const headers = new Headers(legacyResponse.headers);
   headers.set("cache-control", "no-store");
-  headers.delete("content-length");
-  return new Response(html, {
+  return new Response(legacyResponse.body, {
     status: legacyResponse.status,
     statusText: legacyResponse.statusText,
     headers,
@@ -121,6 +124,21 @@ function isProductOperatorRoute(request: Request, pathname: string): boolean {
   if (
     request.method === "GET" &&
     /^\/v1\/projects\/[^/]+\/summary$/.test(pathname)
+  ) {
+    return true;
+  }
+  // Phase 1 recovery: the Index Card's Overview and Activity modules read a project's forecast
+  // (priority actions, recovery/risk analysis) and its event ledger (recent activity) directly --
+  // the same two existing, read-only routes the legacy admin diagnostics panel already used.
+  if (
+    request.method === "GET" &&
+    /^\/v1\/projects\/[^/]+\/forecast$/.test(pathname)
+  ) {
+    return true;
+  }
+  if (
+    request.method === "GET" &&
+    /^\/v1\/projects\/[^/]+\/events$/.test(pathname)
   ) {
     return true;
   }
@@ -162,13 +180,21 @@ async function handleProductBoundary(
 ): Promise<Response | null> {
   const url = new URL(request.url);
 
+  if (request.method === "GET" && url.pathname === "/") {
+    const secret = env.HOWLER_SESSION_SIGNING_SECRET;
+    const user = secret ? await readSession(request, secret) : null;
+    return user ? productAppShell() : loginPage();
+  }
+
+  // Phase 1 recovery: the legacy field-dashboard UI is relocated to its own explicit path, never
+  // linked from the product app above. /admin/field is kept only as a backward-compatible alias.
   if (
     request.method === "GET" &&
-    (url.pathname === "/" || url.pathname === "/admin/field")
+    (url.pathname === "/admin/diagnostics" || url.pathname === "/admin/field")
   ) {
     const secret = env.HOWLER_SESSION_SIGNING_SECRET;
     const user = secret ? await readSession(request, secret) : null;
-    return user ? await productDashboard(request, env) : loginPage();
+    return user ? await diagnosticsPage(request, env) : loginPage();
   }
 
   if (request.method === "GET" && url.pathname === "/v1/portfolio") {

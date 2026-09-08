@@ -3,6 +3,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { env } from "cloudflare:workers";
 import worker from "../../src/worker/entry";
+import legacyWorker from "../../src/worker/index";
 import { pilotPasswordHash } from "../../src/worker/auth";
 import {
   applySchema,
@@ -42,7 +43,13 @@ beforeEach(async () => {
 });
 
 describe("authenticated product gateway", () => {
-  it("renders Penthouse with the canonical roster and no admin-key field or credential", async () => {
+  // Phase 1 recovery: the authenticated root now serves the real Dashboard/Index Card app shell
+  // (src/app/, built to public/app.js) rather than the legacy field-dashboard HTML with the
+  // canonical roster embedded server-side. The shell carries no project data of its own -- the
+  // app fetches GET /v1/portfolio itself, client-side, exactly like every other authenticated
+  // read this gateway gates (proven separately by the v096-portfolio-routes contract test). This
+  // test now only proves the shell is genuinely the new app, not the old admin-key-bearing page.
+  it("serves the product app shell with no admin-key field or credential, never the legacy roster-embedded HTML", async () => {
     await env.HOWLER_DB.prepare(
       `INSERT INTO projects (project_id, name, revision, current_model_json, updated_at)
        VALUES (?, ?, 0, ?, ?)`,
@@ -64,14 +71,57 @@ describe("authenticated product gateway", () => {
     const html = await response.text();
 
     expect(response.status).toBe(200);
-    expect(html).toContain("canonical-after-login");
+    expect(html).toContain('id="app-root"');
+    expect(html).toContain('src="/app.js"');
+    // The shell never embeds project data server-side -- it is fetched by the app itself.
+    expect(html).not.toContain("canonical-after-login");
+    expect(html).not.toContain("Command the work.");
     expect(html).not.toContain('id="admin-key"');
     expect(html).not.toContain('document.getElementById("admin-key")');
     expect(html).not.toContain(
       "Paste the staging admin key to load the portfolio",
     );
     expect(html).not.toContain(ADMIN_KEY);
-    expect(html).toContain('value: "product-session"');
+  });
+
+  // Regression guard: /admin/diagnostics must always be byte-for-byte identical to the legacy
+  // worker's own /admin/field output -- proving the isolation in src/worker/entry.ts really is a
+  // plain, unpatched proxy (no more product-shell.ts-style regex surgery on this HTML) and can
+  // never silently drift from the legacy page it is supposed to preserve.
+  it("serves /admin/diagnostics byte-for-byte identical to the legacy worker's own /admin/field, unpatched", async () => {
+    const product = await productEnv();
+    const cookie = await loginCookie(product);
+
+    const response = await worker.fetch(
+      new Request("https://example.test/admin/diagnostics", {
+        headers: { cookie },
+      }),
+      product,
+    );
+    const html = await response.text();
+
+    const legacyResponse = await legacyWorker.fetch(
+      new Request("https://example.test/admin/field"),
+      product,
+    );
+    const legacyHtml = await legacyResponse.text();
+
+    expect(response.status).toBe(legacyResponse.status);
+    expect(html).toBe(legacyHtml);
+    expect(html).toContain("Command the work.");
+  });
+
+  it("still protects /admin/diagnostics behind the product session, same as /admin/field", async () => {
+    const product = await productEnv();
+    const response = await worker.fetch(
+      new Request("https://example.test/admin/diagnostics"),
+      product,
+    );
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("Sign in");
+    expect(html).not.toContain("Command the work.");
   });
 
   it("uses the product session for approved operator routes without exposing bearer auth", async () => {

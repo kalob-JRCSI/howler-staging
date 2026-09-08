@@ -4,3 +4,9 @@ node_modules/
 tools/context-pack/.local/
 .dev.vars
 .wrangler/
+
+# Phase 1 recovery: built by `npm run build:frontend` (scripts/build-frontend.mjs) from
+# src/app/*.ts / src/app/styles.css -- generated output, not source.
+public/app.js
+public/app.js.map
+public/styles.css
