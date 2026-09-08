@@ -1,0 +1,49 @@
+name: Apply Legacy Summary Compatibility Fix
+
+on:
+  push:
+    branches:
+      - fix/v096-pilot-portfolio-legacy
+    paths:
+      - .github/workflows/apply-legacy-summary-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/v096-pilot-portfolio-legacy
+      - uses: actions/setup-node@v6.0.0
+        with:
+          node-version: 24.20.0
+          cache: npm
+      - run: npm ci
+      - name: Apply exact legacy recoveryAnalysis compatibility guard
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('src/operator/project-summary.ts')
+          text = p.read_text()
+          old = 'forecast?.recoveryAnalysis.criticalExposureCount'
+          expected = text.count(old)
+          if expected != 2:
+              raise SystemExit(f'expected exactly 2 legacy-unsafe accesses, found {expected}')
+          text = text.replace(old, 'forecast?.recoveryAnalysis?.criticalExposureCount')
+          p.write_text(text)
+          PY
+      - name: Prove regression green
+        run: npx vitest run test/unit/project-summary-legacy-forecast.test.ts
+      - name: Commit minimal fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/operator/project-summary.ts
+          git commit -m "fix: tolerate legacy forecasts in portfolio summaries"
+          git push origin HEAD:fix/v096-pilot-portfolio-legacy
