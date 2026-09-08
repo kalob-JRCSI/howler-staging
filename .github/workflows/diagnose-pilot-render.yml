@@ -19,95 +19,14 @@ jobs:
           cache: npm
       - run: npm ci
 
-      - name: Inspect real Wrangler-built product shell
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf /tmp/howler-bundle
-          npx wrangler deploy --dry-run --outdir /tmp/howler-bundle >/tmp/build.log 2>&1
-          bundle="$(find /tmp/howler-bundle -maxdepth 1 -type f -name '*.js' | head -1)"
-          cp "$bundle" /tmp/howler-bundle/worker.mjs
-          node --input-type=module <<'NODE'
-          import { createHash } from 'node:crypto';
-          import { pathToFileURL } from 'node:url';
-          const mod = await import(pathToFileURL('/tmp/howler-bundle/worker.mjs').href);
-          const password = 'diagnostic-password';
-          const env = {
-            HOWLER_PILOT_USERNAME: 'diagnostic-user',
-            HOWLER_PILOT_PASSWORD_HASH: createHash('sha256').update(password).digest('hex'),
-            HOWLER_SESSION_SIGNING_SECRET: 'diagnostic-session-secret-at-least-32-bytes-long',
-          };
-          const login = await mod.default.fetch(new Request('https://example.test/auth/login', {
-            method: 'POST',
-            headers: {'content-type':'application/json'},
-            body: JSON.stringify({username:'diagnostic-user', password}),
-          }), env);
-          const cookie = (login.headers.get('set-cookie') || '').split(';',1)[0];
-          if (login.status !== 204 || !cookie) throw new Error(`login failed: ${login.status}`);
-          const page = await mod.default.fetch(new Request('https://example.test/admin/field', {headers:{cookie}}), env);
-          const html = await page.text();
-          const flags = {
-            status: page.status,
-            hasPortfolioApplyHook: html.includes('__howlerApplyPortfolio'),
-            hasPortfolioSync: html.includes('syncPortfolio'),
-            hasProductSessionAdapter: html.includes('product-session'),
-            stillHasAdminKeyInput: html.includes('id="admin-key"'),
-          };
-          console.log(JSON.stringify(flags));
-          if (flags.status !== 200 || !flags.hasPortfolioApplyHook || !flags.hasPortfolioSync || !flags.hasProductSessionAdapter || flags.stillHasAdminKeyInput) {
-            process.exit(1);
-          }
-          NODE
-
-      - name: Verify staging D1 reaches product portfolio endpoint
+      - name: Inspect actual remote staging D1
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          admin_key="$(openssl rand -hex 32)"
-          confirmation_secret="$(openssl rand -hex 32)"
-          session_secret="$(openssl rand -hex 32)"
-          password="diagnostic-password"
-          password_hash="$(printf '%s' "$password" | sha256sum | awk '{print $1}')"
-          cat > .dev.vars <<EOF
-          HOWLER_ADMIN_KEY="$admin_key"
-          HOWLER_CONFIRMATION_SIGNING_SECRET="$confirmation_secret"
-          HOWLER_PILOT_USERNAME="diagnostic-user"
-          HOWLER_PILOT_PASSWORD_HASH="$password_hash"
-          HOWLER_SESSION_SIGNING_SECRET="$session_secret"
-          EOF
-          cleanup() {
-            if [ -f /tmp/howler-diagnostic.pid ]; then kill "$(cat /tmp/howler-diagnostic.pid)" 2>/dev/null || true; fi
-            rm -f .dev.vars /tmp/howler-diagnostic.cookies
-          }
-          trap cleanup EXIT
-          npx wrangler dev --remote --ip 127.0.0.1 --port 8787 --log-level warn > /tmp/howler-diagnostic.log 2>&1 &
-          echo $! > /tmp/howler-diagnostic.pid
-          for attempt in $(seq 1 45); do
-            if curl -s http://127.0.0.1:8787/ >/dev/null; then break; fi
-            sleep 2
-          done
-          curl -sS -c /tmp/howler-diagnostic.cookies \
-            -H 'content-type: application/json' \
-            --data '{"username":"diagnostic-user","password":"diagnostic-password"}' \
-            -o /tmp/login.body -w '%{http_code}' \
-            http://127.0.0.1:8787/auth/login > /tmp/login.status
-          test "$(cat /tmp/login.status)" = "204"
-          curl -sS -b /tmp/howler-diagnostic.cookies \
-            -H 'accept: application/json' \
-            http://127.0.0.1:8787/v1/portfolio > /tmp/portfolio.json
-          node --input-type=module <<'NODE'
-          import fs from 'node:fs';
-          const body = JSON.parse(fs.readFileSync('/tmp/portfolio.json','utf8'));
-          const rows = Array.isArray(body.projects) ? body.projects : [];
-          console.log('PORTFOLIO_COUNT=' + rows.length);
-          for (const p of rows) {
-            console.log([p.projectId, p.projectName, p.progressPercent, p.primaryExposure, p.nextMovement].join(' | '));
-          }
-          if (rows.length !== 7) process.exit(1);
-          for (const p of rows) {
-            if (!p.projectId || !p.projectName || typeof p.progressPercent !== 'number' || !p.primaryExposure || !p.nextMovement) process.exit(1);
-          }
-          NODE
+          echo '=== ACTUAL REMOTE D1 PROJECT COUNT ==='
+          npx wrangler d1 execute howler-intelligence-staging --remote --command "SELECT COUNT(*) AS project_count FROM projects;"
+          echo '=== ACTUAL REMOTE D1 PROJECT ROWS ==='
+          npx wrangler d1 execute howler-intelligence-staging --remote --command "SELECT project_id, name, revision, updated_at FROM projects ORDER BY project_id;"
