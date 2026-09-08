@@ -1,24 +1,18 @@
 {
   "schemaVersion": "1",
   "kind": "handoffRecord",
-  "taskId": "task-18",
-  "title": "Task 18: Voice Transport Pilot",
-  "status": "IN_PROGRESS",
-  "baseSha": "6697435e0efd14da5c1addf635c0353fadee0355",
-  "blocks": ["task-19"],
-  "summary": "Task 17 is accepted history (see context/receipts/accepted/through-task-017.json). Task 18 is the current voice transport pilot: persistent-page-session push-to-talk on the field dashboard, browser-native speech recognition where supported, canonical IntentV1 mapping, immutable 30-second confirmation for EVIDENCE_APPLY_SHADOW, exact Resume reuse, in-memory current interaction state only, and no audio persistence or live connectors. The earlier foundation-plan Task 18 deployment section is deferred/renamed and is not authority for this voice transport task. Task 19 remains blocked and unaccepted.",
+  "taskId": "v096-phase3-scope-workspace",
+  "title": "Phase 3: Scope workspace development closeout",
+  "status": "COMPLETE",
+  "baseSha": "1df45616a212c7b98c9c519e96ffc1505c502313",
+  "blocks": ["v096-phase4"],
+  "summary": "Feature branch claude/v096-phase3-scope-workspace: formatting-only repair 5d399e1fe120dc0b7373b0b19423fd62418d9225 passed all Linux CI steps in run 34282955154. Focused Scope tests passed 37/37; formatted TypeScript syntax trees are unchanged. File-storage recommendation delivered for owner review, not implementation approval. Phase 3 is a development milestone, not field-ready or accepted history. No merge, deploy, provider activation, or Phase 4 implementation. Await owner direction before Phase 4. This replaces the stale Task 18 handoff; it does not re-audit or accept historical tasks.",
   "relevantPaths": [
-    "src/worker/index.ts",
-    "src/operator/intent.ts",
-    "src/operator/workflow.ts",
-    "src/operator/result.ts",
-    "src/operator/policy.ts",
-    "src/worker/admin.ts",
-    "src/worker/voice-transport.ts",
-    "tools/release-gate/src/run.mjs",
-    "wrangler.jsonc",
-    "package.json",
-    "docs/superpowers/specs/2026-09-02-howler-v095-task18-voice-transport-design.md",
-    "docs/superpowers/plans/2026-09-02-howler-v095-task18-voice-transport-plan.md"
+    "HANDOFF.md",
+    "src/operator/scope.ts",
+    "src/app/views/indexCard/scope.ts",
+    "test/unit/scope.test.ts",
+    "test/contract/scope-routes.test.ts",
+    "docs/superpowers/specs/2026-09-08-howler-file-storage-recommendation.md"
   ]
 }

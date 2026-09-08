@@ -3,6 +3,25 @@
 Written because the Claude session that did this work ran low on usage mid-task.
 This is a cold-start briefing: read this fully before touching code.
 
+## Current closeout — 2026-09-08
+
+Phase 3 is a completed development milestone, awaiting the owner's next direction;
+it is not a field-readiness declaration. The historical blocker and draft storage
+notes below are retained for context, not as outstanding instructions.
+
+- Formatting-only repair: `5d399e1fe120dc0b7373b0b19423fd62418d9225`.
+- [Linux CI passed all verification steps](https://github.com/kalob-JRCSI/howler-staging/actions/runs/34282955154),
+  including format, lint, typecheck, tests, binding type drift, and dry-run build.
+- All 229 tracked format-supported files passed LF-normalized Prettier checks;
+  the five formatted TypeScript files retained identical syntax trees.
+- Focused Scope unit/contract tests: 37/37 passed. No behavioral edits were made,
+  so the previously recorded browser walkthrough was not repeated.
+- The completed [file-storage recommendation](docs/superpowers/specs/2026-09-08-howler-file-storage-recommendation.md)
+  supersedes the rough Drive/R2 notes below. It qualifies service-account access,
+  requires explicit approved-version identity, and recommends hybrid by lifecycle.
+- No merge, deployment, provider activation, or Phase 4 work occurred. No acceptance
+  receipt was created; owner direction is still required before the next phase.
+
 ## Who is directing this work
 
 The user (repo owner) is running a formal, phased recovery of the Howler product
@@ -76,7 +95,7 @@ the previous accepted phase, not from `main`. Follow the same pattern for
 Phase 4: branch from `origin/claude/v096-phase3-scope-workspace` once its CI is
 green.
 
-## Immediate blocker — fix this first
+## Historical blocker — resolved by the closeout above
 
 CI run for commit `1df4561` on `claude/v096-phase3-scope-workspace` failed at
 the **"Format check"** step (`npm run format:check` → `prettier --check .`),
@@ -214,7 +233,7 @@ worker-configuration.d.ts` to discard if this happens.
    set. Always run `npm ci` fresh in a new worktree before trusting any
    lint/test/build result from it.
 
-## What's next after Phase 3 is CI-green
+## Historical storage draft — superseded by the recommendation above
 
 The user's Phase 3 directive also asked for a **Drive vs R2 vs Hybrid file-
 architecture recommendation** (for the future Plans/Photos/Documents modules),
