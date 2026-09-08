@@ -9,7 +9,6 @@ on:
 
 jobs:
   activate:
-    if: github.event.head_commit.message == 'chore(pilot): activate staging data'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -24,52 +23,48 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Create masked ephemeral activation credentials
-        shell: bash
-        run: |
-          admin_key="$(openssl rand -hex 32)"
-          confirmation_secret="$(openssl rand -hex 32)"
-          echo "::add-mask::$admin_key"
-          echo "::add-mask::$confirmation_secret"
-          echo "HOWLER_EPHEMERAL_ADMIN_KEY=$admin_key" >> "$GITHUB_ENV"
-          echo "HOWLER_EPHEMERAL_CONFIRMATION_SECRET=$confirmation_secret" >> "$GITHUB_ENV"
-
-      - name: Start remote-development Worker against staging D1
+      - name: Activate and verify staging pilot data through remote-development Worker
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
+          set -euo pipefail
+          admin_key="$(openssl rand -hex 32)"
+          confirmation_secret="$(openssl rand -hex 32)"
+          echo "::add-mask::$admin_key"
+          echo "::add-mask::$confirmation_secret"
+
+          cleanup() {
+            if [ -f /tmp/howler-remote-dev.pid ]; then
+              kill "$(cat /tmp/howler-remote-dev.pid)" 2>/dev/null || true
+            fi
+            rm -f .dev.vars
+          }
+          trap cleanup EXIT
+
           cat > .dev.vars <<EOF
-          HOWLER_ADMIN_KEY="$HOWLER_EPHEMERAL_ADMIN_KEY"
-          HOWLER_CONFIRMATION_SIGNING_SECRET="$HOWLER_EPHEMERAL_CONFIRMATION_SECRET"
+          HOWLER_ADMIN_KEY="$admin_key"
+          HOWLER_CONFIRMATION_SIGNING_SECRET="$confirmation_secret"
           EOF
 
-          npx wrangler dev --remote --ip 127.0.0.1 --port 8787 --log-level warn --show-interactive-dev-session false > /tmp/howler-remote-dev.log 2>&1 &
+          npx wrangler dev --remote --ip 127.0.0.1 --port 8787 --log-level warn > /tmp/howler-remote-dev.log 2>&1 &
           echo $! > /tmp/howler-remote-dev.pid
 
+          ready=0
           for attempt in $(seq 1 45); do
-            if curl --fail --silent --show-error http://127.0.0.1:8787/ > /dev/null; then
-              exit 0
+            if curl --silent --output /dev/null http://127.0.0.1:8787/; then
+              ready=1
+              break
             fi
             sleep 2
           done
 
-          echo "Remote-development Worker did not become ready." >&2
-          tail -100 /tmp/howler-remote-dev.log >&2 || true
-          exit 1
-
-      - name: Activate and verify all seven pilot projects
-        env:
-          HOWLER_ADMIN_KEY: ${{ env.HOWLER_EPHEMERAL_ADMIN_KEY }}
-          HOWLER_BASE_URL: http://127.0.0.1:8787
-        run: node scripts/activate-pilot.ts --base-url http://127.0.0.1:8787
-
-      - name: Cleanup remote-development session
-        if: always()
-        shell: bash
-        run: |
-          if [ -f /tmp/howler-remote-dev.pid ]; then
-            kill "$(cat /tmp/howler-remote-dev.pid)" 2>/dev/null || true
+          if [ "$ready" -ne 1 ]; then
+            echo "Remote-development Worker did not become ready." >&2
+            tail -100 /tmp/howler-remote-dev.log >&2 || true
+            exit 1
           fi
-          rm -f .dev.vars
+
+          HOWLER_ADMIN_KEY="$admin_key" HOWLER_BASE_URL="http://127.0.0.1:8787" \
+            node scripts/activate-pilot.ts --base-url http://127.0.0.1:8787
