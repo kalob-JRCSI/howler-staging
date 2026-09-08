@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - deploy/v096-pilot-20260908
   workflow_dispatch:
 
 jobs:
@@ -22,12 +23,8 @@ jobs:
       - name: Install dependencies (npm ci)
         run: npm ci
 
-      # Fails closed (non-zero exit, before the deploy step below ever runs) if the Worker is
-      # missing HOWLER_CONFIRMATION_SIGNING_SECRET or HOWLER_ADMIN_KEY -- verifies by binding NAME
-      # only (via `wrangler secret list`, which never returns secret values), using the exact same
-      # Cloudflare credentials the deploy step already has. Never creates, sets, or rotates a
-      # secret itself -- see scripts/preflight-worker-secrets.ts for the one-time manual step to
-      # take if this fails.
+      # Fails closed before deployment if any required Howler Worker secret binding is missing.
+      # Verification is by binding NAME only via `wrangler secret list`; secret values are never read.
       - name: Preflight -- verify required Worker secret bindings exist
         run: node scripts/preflight-worker-secrets.ts --worker-name jarvis-voice-staging
         env:
