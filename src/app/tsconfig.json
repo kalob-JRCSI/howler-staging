@@ -1,7 +1,15 @@
 {
   "extends": "../../tsconfig.json",
   "compilerOptions": {
-    "lib": ["ES2024", "DOM", "DOM.Iterable"]
+    "lib": ["ES2024", "DOM", "DOM.Iterable"],
+    // Explicit and empty, matching every other isolated tsconfig in this repo (scripts/,
+    // tools/*) -- without this, TypeScript auto-includes every @types/* package present in
+    // node_modules (notably @types/node), which is unnecessary here (DOM globals come from
+    // `lib` above, not a @types package; test files import vitest's describe/it/expect
+    // explicitly rather than relying on ambient globals) and is a documented source of
+    // ImportMeta declaration conflicts with vite/client's own augmentation used elsewhere in
+    // this repo's test suite.
+    "types": []
   },
   "include": ["./**/*.ts"]
 }
