@@ -174,6 +174,50 @@ export interface ProjectProfileV096 {
   genesisApprovedAt?: ISODateTime;
 }
 
+// Phase 3 (Howler Recovery Directive, Functional Project Scope Workspace): the CURRENT, mutable
+// project scope -- deliberately a separate map from `projectProfile.baselineScope` above, which
+// stays frozen forever (nothing mutates it) so "what was originally contracted" and "what are we
+// now actually building" both remain independently traceable. A scope item whose id also appears
+// in baselineScope descended from that baseline entry; one that doesn't was added after baseline.
+export type ScopeStatusV096 =
+  | "NOT_STARTED"
+  | "IN_PROGRESS"
+  | "COMPLETE"
+  | "BLOCKED"
+  | "NOT_APPLICABLE";
+
+export interface ScopeAllowanceV096 {
+  amount: number;
+  currency: string;
+  note?: string;
+}
+
+export interface ScopeItemV096 {
+  id: string;
+  description: string;
+  phase: string;
+  active: boolean;
+  status: ScopeStatusV096;
+  included: boolean;
+  trade?: string;
+  allowance?: ScopeAllowanceV096;
+  responsibleVendor?: string;
+  // Real, validated references into `activities` -- the only connective tissue between Scope
+  // (what are we building) and Schedule (when/in what sequence). A scope item never becomes a
+  // schedule activity itself, and an activity carries no reciprocal scope reference; the reverse
+  // mapping is computed on read, exactly like Schedule's own dependency refs.
+  activityIds: string[];
+  // Forward-compatible only: no Plans/Photos/Documents or Change Orders module exists yet, so
+  // these are never populated or read by anything in this phase -- present so a later phase can
+  // add real references without a schema migration.
+  planDocumentRefs: string[];
+  changeOrderRef?: string;
+  notes?: string;
+  sourceIds: string[];
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+}
+
 export interface ProjectModelV094 {
   projectId: string;
   revision: number;
@@ -191,6 +235,7 @@ export interface ProjectModelV094 {
   workloadSignals?: Record<string, WorkloadSignalV094>;
   eventLedger: ProjectEventV094[];
   projectProfile?: ProjectProfileV096;
+  scopeItems?: Record<string, ScopeItemV096>;
 }
 
 // Every EventMutationV094 variant below corresponds 1:1 to a `case` in the
@@ -297,6 +342,16 @@ export interface DeactivateDependencyMutationV094 {
   dependencyId: string;
 }
 
+export interface UpsertScopeItemMutationV094 {
+  op: "UPSERT_SCOPE_ITEM";
+  scopeItem: ScopeItemV096;
+}
+
+export interface DeactivateScopeItemMutationV094 {
+  op: "DEACTIVATE_SCOPE_ITEM";
+  scopeItemId: string;
+}
+
 export type EventMutationV094 =
   | SetActualStartMutationV094
   | SetActualFinishMutationV094
@@ -315,4 +370,6 @@ export type EventMutationV094 =
   | UpsertActivityMutationV094
   | UpsertConstraintMutationV094
   | UpsertDependencyMutationV094
-  | DeactivateDependencyMutationV094;
+  | DeactivateDependencyMutationV094
+  | UpsertScopeItemMutationV094
+  | DeactivateScopeItemMutationV094;

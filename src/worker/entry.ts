@@ -159,6 +159,21 @@ function isProductOperatorRoute(request: Request, pathname: string): boolean {
   ) {
     return true;
   }
+  // Phase 3 recovery (Functional Project Scope Workspace): the Scope module's own read view and
+  // preview step, following the exact same pattern as Schedule immediately above -- apply reuses
+  // the existing events/apply-shadow route already allowlisted below.
+  if (
+    request.method === "GET" &&
+    /^\/v1\/projects\/[^/]+\/scope$/.test(pathname)
+  ) {
+    return true;
+  }
+  if (
+    request.method === "POST" &&
+    /^\/v1\/projects\/[^/]+\/scope\/commands\/preview$/.test(pathname)
+  ) {
+    return true;
+  }
   if (
     request.method === "POST" &&
     /^\/v1\/projects\/[^/]+\/events\/apply-shadow$/.test(pathname)

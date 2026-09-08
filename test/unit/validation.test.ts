@@ -461,11 +461,16 @@ describe("EventMutationV094 discriminants", () => {
     "UPSERT_CONSTRAINT",
     "UPSERT_DEPENDENCY",
     "DEACTIVATE_DEPENDENCY",
+    // Phase 3 (Functional Project Scope Workspace): the same UPSERT_X/DEACTIVATE_X pattern
+    // UPSERT_DEPENDENCY/DEACTIVATE_DEPENDENCY already established, for scope items
+    // (src/operator/scope.ts).
+    "UPSERT_SCOPE_ITEM",
+    "DEACTIVATE_SCOPE_ITEM",
   ];
 
-  it("covers exactly the 18 mutation ops found in the baseline reducer", () => {
-    expect(knownOps).toHaveLength(18);
-    expect(new Set(knownOps).size).toBe(18);
+  it("covers exactly the 20 mutation ops found in the baseline reducer plus recovery additions", () => {
+    expect(knownOps).toHaveLength(20);
+    expect(new Set(knownOps).size).toBe(20);
   });
 
   it("exhaustively discriminates every mutation op at compile time", () => {
@@ -507,6 +512,10 @@ describe("EventMutationV094 discriminants", () => {
           return mutation.dependency.id;
         case "DEACTIVATE_DEPENDENCY":
           return mutation.dependencyId;
+        case "UPSERT_SCOPE_ITEM":
+          return mutation.scopeItem.id;
+        case "DEACTIVATE_SCOPE_ITEM":
+          return mutation.scopeItemId;
       }
     }
 

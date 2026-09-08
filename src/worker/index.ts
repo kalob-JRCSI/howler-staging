@@ -65,6 +65,12 @@ import {
   ScheduleCommandError,
 } from "../operator/schedule";
 import type { ScheduleCommandV096 } from "../operator/schedule";
+import {
+  buildScopeEvent,
+  buildScopeView,
+  ScopeCommandError,
+} from "../operator/scope";
+import type { ScopeCommandV096 } from "../operator/scope";
 
 // Engine/admin-page compatibility version. Distinct from GET /health's own `version` field, which
 // buildHealthReport (src/worker/health.ts) now owns and reports as "0.9.5" with an additive
@@ -503,6 +509,122 @@ function validateScheduleCommandShape(raw: unknown): string[] {
       ) {
         errors.push(`state must be one of: ${[...ACTIVITY_STATES].join(", ")}`);
       }
+      break;
+  }
+  return errors;
+}
+
+const SCOPE_COMMAND_KINDS = new Set([
+  "ADD_SCOPE_ITEM",
+  "SET_DESCRIPTION",
+  "SET_PHASE",
+  "SET_TRADE",
+  "SET_INCLUDED",
+  "SET_ALLOWANCE",
+  "SET_RESPONSIBLE_VENDOR",
+  "SET_STATUS",
+  "SET_NOTES",
+  "ASSOCIATE_ACTIVITIES",
+  "DEACTIVATE_SCOPE_ITEM",
+]);
+
+const SCOPE_STATUSES = new Set([
+  "NOT_STARTED",
+  "IN_PROGRESS",
+  "COMPLETE",
+  "BLOCKED",
+  "NOT_APPLICABLE",
+]);
+
+function checkAllowanceShape(record: Record<string, unknown>, errors: string[]): void {
+  const allowance = record.allowance;
+  if (allowance === null) return;
+  if (!allowance || typeof allowance !== "object" || Array.isArray(allowance)) {
+    errors.push("allowance must be an object (or null to clear it)");
+    return;
+  }
+  const a = allowance as Record<string, unknown>;
+  if (typeof a.amount !== "number") errors.push("allowance.amount must be a number");
+  if (typeof a.currency !== "string" || !a.currency) {
+    errors.push("allowance.currency is required");
+  }
+  if (a.note !== undefined && typeof a.note !== "string") {
+    errors.push("allowance.note must be a string when present");
+  }
+}
+
+/**
+ * Structural-only validation of a ScopeCommandV096, mirroring validateScheduleCommandShape's own
+ * pattern exactly -- a malformed field is always a clean 400 here, never a raw TypeError
+ * surfacing as a 500. Domain-level checks (does the scope item / activity actually exist) remain
+ * buildScopeEvent's own job.
+ */
+function validateScopeCommandShape(raw: unknown): string[] {
+  const errors: string[] = [];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return ["command must be a JSON object"];
+  }
+  const record = raw as Record<string, unknown>;
+  if (typeof record.kind !== "string" || !SCOPE_COMMAND_KINDS.has(record.kind)) {
+    return [`command.kind must be one of: ${[...SCOPE_COMMAND_KINDS].join(", ")}`];
+  }
+  switch (record.kind) {
+    case "ADD_SCOPE_ITEM":
+      checkString(record, "description", errors);
+      checkString(record, "phase", errors);
+      checkString(record, "trade", errors, false);
+      checkString(record, "responsibleVendor", errors, false);
+      checkString(record, "notes", errors, false);
+      if (record.included !== undefined && typeof record.included !== "boolean") {
+        errors.push("included must be a boolean when present");
+      }
+      break;
+    case "SET_DESCRIPTION":
+      checkString(record, "scopeItemId", errors);
+      checkString(record, "description", errors);
+      break;
+    case "SET_PHASE":
+      checkString(record, "scopeItemId", errors);
+      checkString(record, "phase", errors);
+      break;
+    case "SET_TRADE":
+      checkString(record, "scopeItemId", errors);
+      checkString(record, "trade", errors);
+      break;
+    case "SET_INCLUDED":
+      checkString(record, "scopeItemId", errors);
+      if (typeof record.included !== "boolean") {
+        errors.push("included must be a boolean");
+      }
+      break;
+    case "SET_ALLOWANCE":
+      checkString(record, "scopeItemId", errors);
+      checkAllowanceShape(record, errors);
+      break;
+    case "SET_RESPONSIBLE_VENDOR":
+      checkString(record, "scopeItemId", errors);
+      checkString(record, "vendor", errors);
+      break;
+    case "SET_STATUS":
+      checkString(record, "scopeItemId", errors);
+      if (typeof record.status !== "string" || !SCOPE_STATUSES.has(record.status)) {
+        errors.push(`status must be one of: ${[...SCOPE_STATUSES].join(", ")}`);
+      }
+      break;
+    case "SET_NOTES":
+      checkString(record, "scopeItemId", errors);
+      checkString(record, "notes", errors);
+      break;
+    case "ASSOCIATE_ACTIVITIES":
+      checkString(record, "scopeItemId", errors);
+      if (!Array.isArray(record.activityIds)) {
+        errors.push("activityIds must be an array");
+      } else if (record.activityIds.some((id) => typeof id !== "string")) {
+        errors.push("activityIds must all be strings");
+      }
+      break;
+    case "DEACTIVATE_SCOPE_ITEM":
+      checkString(record, "scopeItemId", errors);
       break;
   }
   return errors;
@@ -1442,6 +1564,15 @@ async function handle(request: Request, env: Env): Promise<Response> {
     return json(buildScheduleView(model, forecast));
   }
 
+  // Phase 3 (Functional Project Scope Workspace): read-only, derived state, exactly like
+  // /schedule above -- reuses buildScopeView() verbatim (src/operator/scope.ts). No mutation, no
+  // second canonical scope store.
+  if (request.method === "GET" && parts.length === 4 && parts[3] === "scope") {
+    const model = await repo.loadProject(projectId);
+    if (!model) throw new HttpError(404, `Project ${projectId} not found`);
+    return json(buildScopeView(model));
+  }
+
   if (
     request.method === "GET" &&
     parts.length === 5 &&
@@ -1772,6 +1903,65 @@ async function handle(request: Request, env: Env): Promise<Response> {
       oversightPublishable: result.run.publishable,
       reviewToken: result.reviewToken,
       historyNote: built.historyNote,
+      event: built.event,
+      persisted: false,
+      mode,
+      stagingOnly: mode === "shadow",
+    });
+  }
+
+  // Phase 3 (Functional Project Scope Workspace): the same typed-command-to-canonical-event
+  // pattern Phase 2 established for Schedule -- a ScopeCommandV096 becomes a well-formed
+  // ProjectEventV094 (src/operator/scope.ts's buildScopeEvent), previewed through the exact same
+  // reviewedRun. Applying reuses the existing POST .../events/apply-shadow route verbatim.
+  if (
+    request.method === "POST" &&
+    parts.length === 6 &&
+    parts[3] === "scope" &&
+    parts[4] === "commands" &&
+    parts[5] === "preview"
+  ) {
+    const body = (await readJson(request)) as {
+      command?: unknown;
+    } | null;
+    const commandErrors = validateScopeCommandShape(body?.command);
+    if (commandErrors.length > 0) {
+      throw new HttpError(400, "Invalid scope command", {
+        errors: commandErrors,
+      });
+    }
+    const command = body?.command as ScopeCommandV096;
+    const model = await repo.loadProject(projectId);
+    if (!model) throw new HttpError(404, `Project ${projectId} not found`);
+    let built;
+    try {
+      built = buildScopeEvent(model, command, new Date().toISOString(), () =>
+        crypto.randomUUID(),
+      );
+    } catch (error) {
+      if (error instanceof ScopeCommandError) {
+        throw new HttpError(400, error.message);
+      }
+      throw error;
+    }
+    const result = await reviewedRun(repo, projectId, built.event);
+    return json({
+      projectRevision: result.model.revision,
+      baselineVersion: result.baseline?.version ?? null,
+      latestVersion: result.latest?.version ?? null,
+      comparisonVersion: result.comparisonBaseline?.version ?? null,
+      candidate: result.run.candidate,
+      delta: result.run.candidate.delta ?? null,
+      recoveryAnalysis: result.run.candidate.recoveryAnalysis,
+      supersededSources: result.run.candidate.supersededSources,
+      impactActivityIds: result.run.candidate.impactActivityIds,
+      oversight: result.run.oversight,
+      forecastable: result.run.forecastable,
+      commitmentEligible: result.run.commitmentEligible,
+      oversightPublishable: result.run.publishable,
+      reviewToken: result.reviewToken,
+      historyNote: built.historyNote,
+      clerical: built.clerical,
       event: built.event,
       persisted: false,
       mode,

@@ -28,6 +28,8 @@ function baseSummary(
     projectedCompletion: "2026-12-01",
     schedule: { committed: [], forecast: [] },
     scope: [{ id: "framing", label: "Framing", phase: "Framing" }],
+    blockedScopeItems: [],
+    scopeAddedAfterBaselineCount: 0,
     ...overrides,
   };
 }
@@ -131,5 +133,63 @@ describe("renderOverview", () => {
     );
 
     expect(body.textContent).toContain("Budget not recorded");
+  });
+});
+
+describe("renderOverview: Phase 3 scope sync", () => {
+  it("surfaces a BLOCKED scope item as a risk, alongside forecast-derived risks", async () => {
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve(
+        jsonResponse(200, { modelRevision: 0, latest: null, published: null }),
+      ),
+    );
+    const body = document.createElement("div");
+    await renderOverview(
+      body,
+      "carver",
+      baseSummary({ blockedScopeItems: ["Custom closet"] }),
+    );
+    expect(body.textContent).toContain('Scope blocked: "Custom closet".');
+  });
+
+  it("reports the count of scope items added after baseline, and omits the line when zero", async () => {
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve(
+        jsonResponse(200, { modelRevision: 0, latest: null, published: null }),
+      ),
+    );
+    const bodyWithAdditions = document.createElement("div");
+    await renderOverview(
+      bodyWithAdditions,
+      "carver",
+      baseSummary({ scopeAddedAfterBaselineCount: 2 }),
+    );
+    expect(bodyWithAdditions.textContent).toContain(
+      "2 scope items added after baseline.",
+    );
+
+    const bodyWithoutAdditions = document.createElement("div");
+    await renderOverview(bodyWithoutAdditions, "carver", baseSummary());
+    expect(bodyWithoutAdditions.textContent).not.toContain(
+      "added after baseline",
+    );
+  });
+
+  it("never blends scope into progressPercent or budget -- summary fields pass through untouched", async () => {
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve(
+        jsonResponse(200, { modelRevision: 0, latest: null, published: null }),
+      ),
+    );
+    const body = document.createElement("div");
+    await renderOverview(
+      body,
+      "carver",
+      baseSummary({
+        progressPercent: 40,
+        blockedScopeItems: ["Custom closet"],
+      }),
+    );
+    expect(body.textContent).toContain("$40,000 spent / $60,000 remaining");
   });
 });

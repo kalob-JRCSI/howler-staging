@@ -131,6 +131,12 @@ describe("release gate: no legacy mutation route (real repo)", () => {
     // second schedule source of truth: the actual write still only ever happens through the
     // existing events/apply-shadow route above.
     "SEGMENTS(len=6){3=schedule,4=commands,5=preview}",
+    // Phase 3 (Functional Project Scope Workspace): POST /v1/projects/:id/scope/commands/preview
+    // follows the exact same pattern as schedule/commands/preview above -- pure analysis, never a
+    // repository write. It translates a typed ScopeCommandV096 into a ProjectEventV094
+    // (src/operator/scope.ts's buildScopeEvent) and hands it to the same reviewedRun. The actual
+    // write still only ever happens through the existing events/apply-shadow route above.
+    "SEGMENTS(len=6){3=scope,4=commands,5=preview}",
   ];
 
   it("extracts exactly the accepted mutation route set from the real source, nothing more, nothing less", () => {

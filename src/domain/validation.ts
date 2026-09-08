@@ -235,6 +235,47 @@ export function validateProjectModel(model: ProjectModelV094): void {
     }
   }
 
+  const SCOPE_STATUSES = new Set([
+    "NOT_STARTED",
+    "IN_PROGRESS",
+    "COMPLETE",
+    "BLOCKED",
+    "NOT_APPLICABLE",
+  ]);
+  for (const item of Object.values(model.scopeItems ?? {})) {
+    if (!item.description.trim()) {
+      throw new Error(`Scope item ${item.id} is missing a description`);
+    }
+    if (!SCOPE_STATUSES.has(item.status)) {
+      throw new Error(`Scope item ${item.id} has invalid status ${item.status}`);
+    }
+    for (const activityId of item.activityIds) {
+      if (!model.activities[activityId])
+        throw new Error(
+          `Scope item ${item.id} references unknown activity ${activityId}`,
+        );
+    }
+    for (const sourceId of item.sourceIds) {
+      if (!model.sources[sourceId])
+        throw new Error(
+          `Scope item ${item.id} references unknown source ${sourceId}`,
+        );
+    }
+    if (item.allowance) {
+      if (
+        !Number.isFinite(item.allowance.amount) ||
+        item.allowance.amount < 0
+      ) {
+        throw new Error(
+          `Scope item ${item.id} allowance amount must be a non-negative finite number`,
+        );
+      }
+      if (!item.allowance.currency) {
+        throw new Error(`Scope item ${item.id} allowance is missing currency`);
+      }
+    }
+  }
+
   if (model.projectProfile) {
     const profile = model.projectProfile;
     const scopeIds = new Set<string>();

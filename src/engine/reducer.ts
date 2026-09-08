@@ -6,6 +6,7 @@ import type {
   DependencyV094,
   ProjectEventV094,
   ProjectModelV094,
+  ScopeItemV096,
   SourceV094,
   WorkloadSignalV094,
 } from "../domain/types";
@@ -80,6 +81,16 @@ function cloneWorkloadSignal(signal: WorkloadSignalV094): WorkloadSignalV094 {
   };
 }
 
+function cloneScopeItem(item: ScopeItemV096): ScopeItemV096 {
+  return {
+    ...item,
+    activityIds: [...item.activityIds],
+    planDocumentRefs: [...item.planDocumentRefs],
+    sourceIds: [...item.sourceIds],
+    ...(item.allowance ? { allowance: { ...item.allowance } } : {}),
+  };
+}
+
 export function applyEventMutations(
   model: ProjectModelV094,
   event: ProjectEventV094,
@@ -128,6 +139,12 @@ export function applyEventMutations(
         cloneWorkloadSignal(signal),
       ]),
     );
+  const scopeItems: Record<string, ScopeItemV096> = Object.fromEntries(
+    Object.entries(model.scopeItems ?? {}).map(([id, item]) => [
+      id,
+      cloneScopeItem(item),
+    ]),
+  );
   for (const mutation of event.mutations) {
     switch (mutation.op) {
       case "SET_ACTUAL_START": {
@@ -287,6 +304,20 @@ export function applyEventMutations(
         dependency.active = false;
         break;
       }
+      case "UPSERT_SCOPE_ITEM":
+        scopeItems[mutation.scopeItem.id] = cloneScopeItem(
+          mutation.scopeItem,
+        );
+        break;
+      case "DEACTIVATE_SCOPE_ITEM": {
+        const scopeItem = scopeItems[mutation.scopeItemId];
+        if (!scopeItem)
+          throw new Error(
+            `Unknown scope item in DEACTIVATE_SCOPE_ITEM: ${mutation.scopeItemId}`,
+          );
+        scopeItem.active = false;
+        break;
+      }
       default: {
         const exhaustive: never = mutation;
         throw new Error(
@@ -304,5 +335,6 @@ export function applyEventMutations(
     conflicts,
     commercialSignals,
     workloadSignals,
+    scopeItems,
   };
 }

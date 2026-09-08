@@ -1018,3 +1018,95 @@ describe("buildProjectSummary: cheap, deterministic, pure", () => {
     expect(forecast).toEqual(forecastBefore);
   });
 });
+
+describe("buildProjectSummary: Phase 3 scope sync (factual only, never fabricated)", () => {
+  it("lists BLOCKED scope items by description, and nothing else", () => {
+    const model = baseModel({
+      scopeItems: {
+        s1: {
+          id: "s1",
+          description: "Custom closet",
+          phase: "Finishes",
+          active: true,
+          status: "BLOCKED",
+          included: true,
+          activityIds: [],
+          planDocumentRefs: [],
+          sourceIds: [],
+          createdAt: "2026-08-01T00:00:00.000Z",
+          updatedAt: "2026-08-01T00:00:00.000Z",
+        },
+        s2: {
+          id: "s2",
+          description: "Kitchen backsplash",
+          phase: "Finishes",
+          active: true,
+          status: "IN_PROGRESS",
+          included: true,
+          activityIds: [],
+          planDocumentRefs: [],
+          sourceIds: [],
+          createdAt: "2026-08-01T00:00:00.000Z",
+          updatedAt: "2026-08-01T00:00:00.000Z",
+        },
+      },
+    });
+    const health = baseHealth();
+    const summary = buildProjectSummary(model, undefined, health);
+    expect(summary.blockedScopeItems).toEqual(["Custom closet"]);
+  });
+
+  it("counts scope items added after baseline, and only those", () => {
+    const model = baseModel({
+      projectProfile: {
+        baselineScope: [
+          { id: "tile", label: "Master shower tile", phase: "Finishes" },
+        ],
+      },
+      scopeItems: {
+        lamp: {
+          id: "lamp",
+          description: "Exterior lamp-post relocation",
+          phase: "Exterior",
+          active: true,
+          status: "NOT_STARTED",
+          included: true,
+          activityIds: [],
+          planDocumentRefs: [],
+          sourceIds: [],
+          createdAt: "2026-08-01T00:00:00.000Z",
+          updatedAt: "2026-08-01T00:00:00.000Z",
+        },
+      },
+    });
+    const health = baseHealth();
+    const summary = buildProjectSummary(model, undefined, health);
+    // "tile" is untouched baseline scope (not added after baseline); "lamp" has no baseline
+    // counterpart at all.
+    expect(summary.scopeAddedAfterBaselineCount).toBe(1);
+  });
+
+  it("never blends scope completion into progressPercent", () => {
+    const model = baseModel({
+      activities: { a: activity("a", { state: "NOT_STARTED" }) },
+      scopeItems: {
+        s1: {
+          id: "s1",
+          description: "Custom closet",
+          phase: "Finishes",
+          active: true,
+          status: "COMPLETE",
+          included: true,
+          activityIds: [],
+          planDocumentRefs: [],
+          sourceIds: [],
+          createdAt: "2026-08-01T00:00:00.000Z",
+          updatedAt: "2026-08-01T00:00:00.000Z",
+        },
+      },
+    });
+    const health = baseHealth();
+    const summary = buildProjectSummary(model, undefined, health);
+    expect(summary.progressPercent).toBe(0);
+  });
+});

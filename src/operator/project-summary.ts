@@ -10,6 +10,7 @@
 import type { ActivityV094, ProjectModelV094 } from "../domain/types";
 import type { ForecastSnapshotV094 } from "../engine/solver";
 import type { ProjectHealthV094 } from "../worker/health";
+import { buildScopeView } from "./scope";
 
 export interface ProjectScheduleItemV096 {
   activityId: string;
@@ -43,6 +44,13 @@ export interface ProjectSummaryV096 {
     forecast: ProjectScheduleItemV096[];
   };
   scope: { id: string; label: string; phase: string }[];
+  // Phase 3 (Functional Project Scope Workspace): factual current-scope signals, derived from
+  // buildScopeView (src/operator/scope.ts) -- never a second scope computation. Progress percent
+  // above is intentionally left untouched by scope completion; blending the two without a
+  // principled combined model would be exactly the kind of invented percentage the recovery
+  // directive warns against.
+  blockedScopeItems: string[];
+  scopeAddedAfterBaselineCount: number;
 }
 
 // Persisted staging data includes forecast snapshots created before recoveryAnalysis was added.
@@ -162,6 +170,20 @@ function computeScope(model: ProjectModelV094): ProjectSummaryV096["scope"] {
     label: item.label,
     phase: item.phase,
   }));
+}
+
+function computeBlockedScopeItems(
+  scopeView: ReturnType<typeof buildScopeView>,
+): string[] {
+  return scopeView.items
+    .filter((item) => item.status === "BLOCKED")
+    .map((item) => item.description);
+}
+
+function computeScopeAddedAfterBaselineCount(
+  scopeView: ReturnType<typeof buildScopeView>,
+): number {
+  return scopeView.items.filter((item) => item.addedAfterBaseline).length;
 }
 
 // Committed dates come ONLY from activity.scheduleLock; forecast dates come ONLY from
@@ -305,6 +327,7 @@ export function buildProjectSummary(
   health: ProjectHealthV094,
 ): ProjectSummaryV096 {
   const score = computeIntegrityScore(health, forecast);
+  const scopeView = buildScopeView(model);
   return {
     projectId: model.projectId,
     projectName: model.name,
@@ -320,5 +343,8 @@ export function buildProjectSummary(
     projectedCompletion: forecast?.completion.likely ?? null,
     schedule: computeSchedule(model, forecast),
     scope: computeScope(model),
+    blockedScopeItems: computeBlockedScopeItems(scopeView),
+    scopeAddedAfterBaselineCount:
+      computeScopeAddedAfterBaselineCount(scopeView),
   };
 }

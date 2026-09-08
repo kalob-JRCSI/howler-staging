@@ -13,6 +13,7 @@ import type { ProjectSummaryLike } from "../../types";
 import { renderOverview } from "./overview";
 import { renderActivity } from "./activity";
 import { renderSchedule } from "./schedule";
+import { renderScope } from "./scope";
 import { renderPlaceholder } from "./placeholder";
 
 type ModuleRenderer = (
@@ -30,7 +31,7 @@ interface ModuleDefinition {
 export const INDEX_CARD_MODULES: ModuleDefinition[] = [
   { id: "overview", label: "Overview", render: renderOverview },
   { id: "schedule", label: "Schedule", render: renderSchedule },
-  { id: "scope", label: "Scope", render: renderPlaceholder },
+  { id: "scope", label: "Scope", render: renderScope },
   { id: "plans", label: "Plans", render: renderPlaceholder },
   { id: "photos", label: "Photos", render: renderPlaceholder },
   { id: "budget", label: "Budget", render: renderPlaceholder },

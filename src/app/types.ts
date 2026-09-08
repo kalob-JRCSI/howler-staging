@@ -34,6 +34,8 @@ export interface ProjectSummaryLike {
     forecast: ProjectScheduleItemLike[];
   };
   scope: { id: string; label: string; phase: string }[];
+  blockedScopeItems: string[];
+  scopeAddedAfterBaselineCount: number;
 }
 
 export interface PmActionLike {
@@ -184,6 +186,101 @@ export interface ScheduleCommandPreviewLike {
     criticalShiftCount: number;
     shiftedActivities: ShiftedActivityLike[];
   } | null;
+  recoveryAnalysis: {
+    status: string;
+    protectionActions: ProtectionActionLike[];
+  };
+}
+
+// Phase 3 (Functional Project Scope Workspace): hand-mirrored copies of src/operator/scope.ts's
+// own wire shapes, for the same reason as every other *Like type in this file.
+
+export type ScopeStatusLike =
+  "NOT_STARTED" | "IN_PROGRESS" | "COMPLETE" | "BLOCKED" | "NOT_APPLICABLE";
+
+export interface ScopeAllowanceLike {
+  amount: number;
+  currency: string;
+  note?: string;
+}
+
+export interface ScopeActivityRefLike {
+  activityId: string;
+  activityName: string;
+  activityState: string;
+}
+
+export interface ScopeItemViewLike {
+  id: string;
+  description: string;
+  phase: string;
+  status: ScopeStatusLike;
+  included: boolean;
+  trade: string | null;
+  allowance: ScopeAllowanceLike | null;
+  responsibleVendor: string | null;
+  activities: ScopeActivityRefLike[];
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+  addedAfterBaseline: boolean;
+  baselineDescription: string | null;
+  baselinePhase: string | null;
+}
+
+export type ScopeInsightKindLike =
+  | "NO_SCHEDULE_ACTIVITY"
+  | "ADDED_AFTER_BASELINE"
+  | "COMPLETE_BUT_ACTIVITY_INCOMPLETE"
+  | "UNSCOPED_ACTIVITY";
+
+export interface ScopeInsightLike {
+  kind: ScopeInsightKindLike;
+  scopeItemId: string | null;
+  activityId: string | null;
+  message: string;
+}
+
+export interface ProjectScopeLike {
+  projectId: string;
+  projectRevision: number;
+  items: ScopeItemViewLike[];
+  insights: ScopeInsightLike[];
+  allActivities: ScopeActivityRefLike[];
+}
+
+export type ScopeCommandLike =
+  | {
+      kind: "ADD_SCOPE_ITEM";
+      description: string;
+      phase: string;
+      trade?: string;
+      included?: boolean;
+      responsibleVendor?: string;
+      notes?: string;
+    }
+  | { kind: "SET_DESCRIPTION"; scopeItemId: string; description: string }
+  | { kind: "SET_PHASE"; scopeItemId: string; phase: string }
+  | { kind: "SET_TRADE"; scopeItemId: string; trade: string }
+  | { kind: "SET_INCLUDED"; scopeItemId: string; included: boolean }
+  | {
+      kind: "SET_ALLOWANCE";
+      scopeItemId: string;
+      allowance: ScopeAllowanceLike | null;
+    }
+  | { kind: "SET_RESPONSIBLE_VENDOR"; scopeItemId: string; vendor: string }
+  | { kind: "SET_STATUS"; scopeItemId: string; status: ScopeStatusLike }
+  | { kind: "SET_NOTES"; scopeItemId: string; notes: string }
+  | { kind: "ASSOCIATE_ACTIVITIES"; scopeItemId: string; activityIds: string[] }
+  | { kind: "DEACTIVATE_SCOPE_ITEM"; scopeItemId: string };
+
+export interface ScopeCommandPreviewLike {
+  projectRevision: number;
+  reviewToken: string;
+  historyNote: string;
+  clerical: boolean;
+  event: unknown;
+  delta: ScheduleCommandPreviewLike["delta"];
   recoveryAnalysis: {
     status: string;
     protectionActions: ProtectionActionLike[];

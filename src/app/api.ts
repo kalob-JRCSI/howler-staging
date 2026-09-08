@@ -7,9 +7,12 @@ import type {
   ForecastSnapshotLike,
   ProjectEventLike,
   ProjectScheduleLike,
+  ProjectScopeLike,
   ProjectSummaryLike,
   ScheduleCommandLike,
   ScheduleCommandPreviewLike,
+  ScopeCommandLike,
+  ScopeCommandPreviewLike,
 } from "./types";
 
 export class UnauthorizedError extends Error {}
@@ -143,5 +146,28 @@ export function applyScheduleEvent(
   return postJson<ApplyScheduleEventResult>(
     `/v1/projects/${encodeURIComponent(projectId)}/events/apply-shadow`,
     { event, reviewToken },
+  );
+}
+
+// Phase 3 (Functional Project Scope Workspace): the same read view + preview -> apply pattern as
+// Schedule immediately above (see src/operator/scope.ts). Applying a scope event goes through the
+// exact same /events/apply-shadow route as Schedule -- applyScheduleEvent is reused verbatim
+// rather than duplicated, since it is already a generic "apply this event" call.
+
+export function fetchProjectScope(
+  projectId: string,
+): Promise<ProjectScopeLike> {
+  return apiFetch<ProjectScopeLike>(
+    `/v1/projects/${encodeURIComponent(projectId)}/scope`,
+  );
+}
+
+export function previewScopeCommand(
+  projectId: string,
+  command: ScopeCommandLike,
+): Promise<ScopeCommandPreviewLike> {
+  return postJson<ScopeCommandPreviewLike>(
+    `/v1/projects/${encodeURIComponent(projectId)}/scope/commands/preview`,
+    { command },
   );
 }

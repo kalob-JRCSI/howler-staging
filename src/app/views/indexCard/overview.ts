@@ -39,13 +39,17 @@ export async function renderOverview(
         .join("")}</ul>`;
     }
     const protectionActions = latest?.recoveryAnalysis.protectionActions ?? [];
-    if (protectionActions.length > 0) {
-      risksHtml = `<ul>${protectionActions
-        .map(
-          (protectionAction) =>
-            `<li>${escapeHtml(protectionAction.action)}</li>`,
-        )
-        .join("")}</ul>`;
+    // Phase 3 (Functional Project Scope Workspace): a BLOCKED scope item is a real risk signal,
+    // not schedule-derived -- surfaced here alongside forecast-derived risks, never blended into
+    // one invented combined score.
+    const riskItems = [
+      ...protectionActions.map((a) => a.action),
+      ...summary.blockedScopeItems.map(
+        (description) => `Scope blocked: "${description}".`,
+      ),
+    ];
+    if (riskItems.length > 0) {
+      risksHtml = `<ul>${riskItems.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
     }
   } catch (error) {
     if (error instanceof UnauthorizedError) {
@@ -76,6 +80,11 @@ export async function renderOverview(
         summary.scope.length
           ? `<ul>${summary.scope.map((item) => `<li>${escapeHtml(item.label)}</li>`).join("")}</ul>`
           : `<p class="ic-empty">No baseline scope recorded.</p>`
+      }
+      ${
+        summary.scopeAddedAfterBaselineCount > 0
+          ? `<p class="ic-exposure">${String(summary.scopeAddedAfterBaselineCount)} scope item${summary.scopeAddedAfterBaselineCount === 1 ? "" : "s"} added after baseline.</p>`
+          : ""
       }
     </section>
   `;
