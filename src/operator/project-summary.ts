@@ -73,7 +73,7 @@ function computeIntegrityScore(
     health.openConflicts.filter((c) => c.severity === "HIGH").length * 10,
   );
   score -= Math.min(15, health.unverifiedHardConstraints.length * 5);
-  score -= Math.min(15, forecast?.recoveryAnalysis.criticalExposureCount ?? 0);
+  score -= Math.min(15, forecast?.recoveryAnalysis?.criticalExposureCount ?? 0);
   score -= Math.min(10, health.lowCoverage.length * 2);
   return Math.max(0, Math.min(100, score));
 }
@@ -100,7 +100,7 @@ function computePrimaryDriver(
   const unverified = health.unverifiedHardConstraints[0];
   if (unverified) return `Unverified hard constraint: ${unverified.label}.`;
   const criticalExposureCount =
-    forecast?.recoveryAnalysis.criticalExposureCount ?? 0;
+    forecast?.recoveryAnalysis?.criticalExposureCount ?? 0;
   if (criticalExposureCount > 0) {
     return `Critical forecast exposure affecting ${String(criticalExposureCount)} activit${criticalExposureCount === 1 ? "y" : "ies"}.`;
   }
