@@ -13,6 +13,7 @@
     "cf-typegen:check": "npm run cf-typegen && git diff --exit-code -- worker-configuration.d.ts",
     "format:check": "prettier --check .",
     "lint": "eslint .",
+    "lint:app": "cd src/app && eslint .",
     "test": "vitest run --passWithNoTests test/unit test/integration test/contract test/parity test/safety",
     "test:contract": "vitest run --passWithNoTests test/contract",
     "test:integration": "vitest run --passWithNoTests test/integration",
@@ -25,7 +26,7 @@
     "test:pilot-activation": "vitest run --config scripts/vitest.config.ts",
     "test:app": "vitest run --config src/app/vitest.config.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p src/app/tsconfig.json && tsc --noEmit -p test/tsconfig.json && tsc --noEmit -p scripts/tsconfig.json && tsc --noEmit -p tools/context-pack/tsconfig.json && tsc --noEmit -p tools/release-gate/tsconfig.json && tsc --noEmit -p tools/browser-artifact/tsconfig.json",
-    "verify": "npm run format:check && npm run lint && npm run typecheck && npm test && npm run test:context-pack && npm run test:release-gate && npm run test:browser-artifact && npm run test:pilot-activation && npm run test:app && npm run cf-typegen:check && npm run build:dry",
+    "verify": "npm run format:check && npm run lint && npm run lint:app && npm run typecheck && npm test && npm run test:context-pack && npm run test:release-gate && npm run test:browser-artifact && npm run test:pilot-activation && npm run test:app && npm run cf-typegen:check && npm run build:dry",
     "gate:release": "node tools/release-gate/src/run.mjs"
   },
   "devDependencies": {

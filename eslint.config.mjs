@@ -14,6 +14,17 @@ export default tseslint.config(
       ".worktrees/**",
       ".wrangler/**",
       ".pnpm-store/**",
+      // Phase 1 recovery: src/app/ is a genuinely separate browser bundle (its own tsconfig,
+      // DOM lib, no Cloudflare Workers globals) linted by its own fully isolated invocation
+      // (src/app/eslint.config.mjs, `npm run lint:app`) instead of being swept into this run.
+      // typescript-eslint's projectService has a known, unresolved upstream bug where project
+      // resolution can become nondeterministic across multiple tsconfig projects depending on
+      // file glob/config processing order (typescript-eslint/typescript-eslint#10159) -- adding
+      // src/app/tsconfig.json as an eighth project here reproducibly broke type resolution for
+      // completely unrelated, untouched files in CI (Linux) while never once reproducing locally
+      // across many attempts (Windows), consistent with that issue's own description. Full
+      // isolation, not further tsconfig tuning, is the only fix within this repo's control.
+      "src/app/**",
     ],
   },
   {

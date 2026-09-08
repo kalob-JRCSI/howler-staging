@@ -39,6 +39,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Lint (src/app, isolated)
+        run: npm run lint:app
+
       - name: Typecheck
         run: npm run typecheck
 
@@ -56,6 +59,9 @@ jobs:
 
       - name: Pilot activation tests
         run: npm run test:pilot-activation
+
+      - name: App (src/app) tests
+        run: npm run test:app
 
       - name: Cloudflare binding type drift check
         run: npm run cf-typegen:check
