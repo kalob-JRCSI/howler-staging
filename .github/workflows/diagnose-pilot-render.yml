@@ -19,14 +19,13 @@ jobs:
           cache: npm
       - run: npm ci
 
-      - name: Inspect actual remote staging D1
+      - name: Inspect actual remote staging D1 project summary prerequisites
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          echo '=== ACTUAL REMOTE D1 PROJECT COUNT ==='
-          npx wrangler d1 execute howler-intelligence-staging --remote --command "SELECT COUNT(*) AS project_count FROM projects;"
-          echo '=== ACTUAL REMOTE D1 PROJECT ROWS ==='
-          npx wrangler d1 execute howler-intelligence-staging --remote --command "SELECT project_id, name, revision, updated_at FROM projects ORDER BY project_id;"
+          npx wrangler d1 execute howler-intelligence-staging --remote --command "SELECT p.project_id, p.name, p.revision, json_valid(p.current_model_json) AS model_json_valid, json_type(p.current_model_json, '$.activities') AS activities_type, json_type(p.current_model_json, '$.constraints') AS constraints_type, (SELECT COUNT(*) FROM forecast_snapshots f WHERE f.project_id = p.project_id) AS forecast_count, (SELECT COUNT(*) FROM prediction_outcomes o WHERE o.project_id = p.project_id) AS outcome_count FROM projects p ORDER BY p.project_id;"
+          echo '=== PILOT VS EXTRA ROWS ==='
+          npx wrangler d1 execute howler-intelligence-staging --remote --command "SELECT project_id, CASE WHEN project_id IN ('deboard-v091','stewart-v1','swiderski-v1','pratt-v1','carver-v1','ciurlizza-v1','mcmillan-v1') THEN 'PILOT' ELSE 'EXTRA' END AS portfolio_class FROM projects ORDER BY project_id;"
