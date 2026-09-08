@@ -68,7 +68,9 @@ const legacyForecast = {
 
 describe("buildProjectSummary legacy forecast compatibility", () => {
   it("does not throw when an older persisted forecast has no recoveryAnalysis", () => {
-    expect(() => buildProjectSummary(model, legacyForecast, health)).not.toThrow();
+    expect(() =>
+      buildProjectSummary(model, legacyForecast, health),
+    ).not.toThrow();
 
     const summary = buildProjectSummary(model, legacyForecast, health);
     expect(summary.projectId).toBe("legacy-deboard");
