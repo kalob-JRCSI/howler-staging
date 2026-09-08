@@ -10,6 +10,11 @@
     "strict": true,
     "target": "ES2024"
   },
-  "include": ["src/**/*.ts", "worker-configuration.d.ts"],
-  "exclude": ["src/app/**"]
+  "include": [
+    "src/worker/**/*.ts",
+    "src/operator/**/*.ts",
+    "src/engine/**/*.ts",
+    "src/domain/**/*.ts",
+    "worker-configuration.d.ts"
+  ]
 }
