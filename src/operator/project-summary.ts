@@ -45,6 +45,23 @@ export interface ProjectSummaryV096 {
   scope: { id: string; label: string; phase: string }[];
 }
 
+// Persisted staging data includes forecast snapshots created before recoveryAnalysis was added.
+// Current in-memory forecasts always carry it, but read-side summaries must remain compatible with
+// those immutable historical snapshots instead of letting one older row abort the whole portfolio.
+type PersistedForecastWithLegacyRecovery = Omit<
+  ForecastSnapshotV094,
+  "recoveryAnalysis"
+> & {
+  recoveryAnalysis?: ForecastSnapshotV094["recoveryAnalysis"];
+};
+
+function criticalExposureCountFromPersistedForecast(
+  forecast: ForecastSnapshotV094 | undefined,
+): number {
+  const persisted = forecast as PersistedForecastWithLegacyRecovery | undefined;
+  return persisted?.recoveryAnalysis?.criticalExposureCount ?? 0;
+}
+
 // Production progress only: weighted by each activity's likely-duration estimate, never by
 // budget spend, elapsed calendar time, forecast percent, or a plain activity-count average.
 function computeProgressPercent(model: ProjectModelV094): number {
@@ -73,7 +90,7 @@ function computeIntegrityScore(
     health.openConflicts.filter((c) => c.severity === "HIGH").length * 10,
   );
   score -= Math.min(15, health.unverifiedHardConstraints.length * 5);
-  score -= Math.min(15, forecast?.recoveryAnalysis.criticalExposureCount ?? 0);
+  score -= Math.min(15, criticalExposureCountFromPersistedForecast(forecast));
   score -= Math.min(10, health.lowCoverage.length * 2);
   return Math.max(0, Math.min(100, score));
 }
@@ -100,7 +117,7 @@ function computePrimaryDriver(
   const unverified = health.unverifiedHardConstraints[0];
   if (unverified) return `Unverified hard constraint: ${unverified.label}.`;
   const criticalExposureCount =
-    forecast?.recoveryAnalysis.criticalExposureCount ?? 0;
+    criticalExposureCountFromPersistedForecast(forecast);
   if (criticalExposureCount > 0) {
     return `Critical forecast exposure affecting ${String(criticalExposureCount)} activit${criticalExposureCount === 1 ? "y" : "ies"}.`;
   }
