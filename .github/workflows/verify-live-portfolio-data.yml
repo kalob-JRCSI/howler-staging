@@ -1,0 +1,64 @@
+name: Verify Live Portfolio Data After Legacy Fix
+
+on:
+  push:
+    branches:
+      - diagnose/v096-postfix-live-data
+    paths:
+      - .github/workflows/verify-live-portfolio-data.yml
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6.0.0
+        with:
+          node-version: 24.20.0
+          cache: npm
+      - run: npm ci
+
+      - name: Export actual remote staging models and latest forecasts
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          npx wrangler d1 execute howler-intelligence-staging --remote --json --command "SELECT p.project_id, p.current_model_json, (SELECT f.snapshot_json FROM forecast_snapshots f WHERE f.project_id = p.project_id ORDER BY f.version DESC LIMIT 1) AS snapshot_json FROM projects p ORDER BY p.project_id;" > /tmp/howler-rows.json
+
+      - name: Require every live row to build a production portfolio summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > verify-live-summary.ts <<'TS'
+          import fs from "node:fs";
+          import { buildProjectSummary } from "./src/operator/project-summary";
+          import { projectHealth } from "./src/worker/health";
+
+          const raw = JSON.parse(fs.readFileSync("/tmp/howler-rows.json", "utf8"));
+          const rows = Array.isArray(raw) ? (raw[0]?.results ?? []) : [];
+          if (rows.length === 0) throw new Error("actual staging D1 returned zero project rows");
+          const summaries = [];
+          for (const row of rows) {
+            const model = JSON.parse(row.current_model_json);
+            const forecast = row.snapshot_json ? JSON.parse(row.snapshot_json) : undefined;
+            const health = await projectHealth(
+              { loadPredictionOutcomes: async () => [] },
+              model,
+              forecast,
+            );
+            const summary = buildProjectSummary(model, forecast, health);
+            summaries.push(summary);
+            console.log(`SUMMARY_OK ${row.project_id} | ${summary.projectName} | ${summary.progressPercent} | ${summary.integrity.condition} | ${summary.nextMovement}`);
+          }
+          const pilotIds = new Set(["deboard-v091","stewart-v1","swiderski-v1","pratt-v1","carver-v1","ciurlizza-v1","mcmillan-v1"]);
+          const missing = [...pilotIds].filter(id => !summaries.some(s => s.projectId === id));
+          if (missing.length) throw new Error(`missing pilot summaries: ${missing.join(", ")}`);
+          if (summaries.length !== rows.length) throw new Error("not every live row produced a summary");
+          console.log(`LIVE_SUMMARY_COUNT=${summaries.length}`);
+          console.log("ALL_SEVEN_PILOT_SUMMARIES_PRESENT=true");
+          TS
+          npx vite-node verify-live-summary.ts
+          rm -f verify-live-summary.ts
