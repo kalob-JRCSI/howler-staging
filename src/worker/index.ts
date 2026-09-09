@@ -85,6 +85,8 @@ import {
 } from "../operator/change-orders";
 import type { ChangeOrderCommandV097 } from "../operator/change-orders";
 import { computeFinancialFindings } from "../operator/financial-intelligence";
+import { interpretFinancialTurn } from "../operator/financial-interpreter";
+import { buildFieldTestCallFinancialModel } from "./financial-conversation-field-model";
 
 // Engine/admin-page compatibility version. Distinct from GET /health's own `version` field, which
 // buildHealthReport (src/worker/health.ts) now owns and reports as "0.9.5" with an additive
@@ -2583,6 +2585,92 @@ async function handle(request: Request, env: Env): Promise<Response> {
     }
     const result = await reviewedRun(repo, projectId, built.event);
     return json({
+      projectRevision: result.model.revision,
+      baselineVersion: result.baseline?.version ?? null,
+      latestVersion: result.latest?.version ?? null,
+      comparisonVersion: result.comparisonBaseline?.version ?? null,
+      candidate: result.run.candidate,
+      delta: result.run.candidate.delta ?? null,
+      recoveryAnalysis: result.run.candidate.recoveryAnalysis,
+      supersededSources: result.run.candidate.supersededSources,
+      impactActivityIds: result.run.candidate.impactActivityIds,
+      oversight: result.run.oversight,
+      forecastable: result.run.forecastable,
+      commitmentEligible: result.run.commitmentEligible,
+      oversightPublishable: result.run.publishable,
+      reviewToken: result.reviewToken,
+      historyNote: built.historyNote,
+      clerical: built.clerical,
+      event: built.event,
+      persisted: false,
+      mode,
+      stagingOnly: mode === "shadow",
+    });
+  }
+
+  // Phase 4 (Budget + Change Orders, Task 10): the deterministic conversational financial path.
+  // A CallFinancialModel implementation (for now, always the deterministic field-test double --
+  // Task 11 introduces the real, env-selected staging provider behind this same seam) supplies
+  // only free-text spans; interpretFinancialTurn (src/operator/financial-interpreter.ts) does all
+  // entity resolution/money parsing/command construction itself. A RESOLVED turn is previewed
+  // through the exact same buildBudgetEvent/reviewedRun path the manual Budget UI already uses --
+  // no new confirmation/session machinery, no bypass of financial validation. Applying reuses the
+  // existing POST .../events/apply-shadow route verbatim, exactly like the typed-command routes.
+  if (
+    request.method === "POST" &&
+    parts.length === 5 &&
+    parts[3] === "financial-conversation" &&
+    parts[4] === "turn"
+  ) {
+    const body = (await readJson(request)) as { text?: unknown } | null;
+    if (!body || typeof body.text !== "string" || !body.text.trim()) {
+      throw new HttpError(
+        400,
+        "financial-conversation turn requires a non-empty text field",
+      );
+    }
+    const model = await repo.loadProject(projectId);
+    if (!model) throw new HttpError(404, `Project ${projectId} not found`);
+
+    const resolution = await interpretFinancialTurn(
+      model,
+      body.text,
+      buildFieldTestCallFinancialModel(),
+      new Date().toISOString().slice(0, 10),
+    );
+
+    if (resolution.outcome === "CLARIFICATION") {
+      return json({ outcome: "CLARIFICATION", message: resolution.message });
+    }
+
+    let built;
+    try {
+      built =
+        resolution.module === "BUDGET"
+          ? buildBudgetEvent(
+              model,
+              resolution.command,
+              new Date().toISOString(),
+              () => crypto.randomUUID(),
+            )
+          : buildChangeOrderEvent(
+              model,
+              resolution.command,
+              new Date().toISOString(),
+              () => crypto.randomUUID(),
+            );
+    } catch (error) {
+      if (
+        error instanceof BudgetCommandError ||
+        error instanceof ChangeOrderCommandError
+      ) {
+        throw new HttpError(400, error.message);
+      }
+      throw error;
+    }
+    const result = await reviewedRun(repo, projectId, built.event);
+    return json({
+      outcome: "RESOLVED",
       projectRevision: result.model.revision,
       baselineVersion: result.baseline?.version ?? null,
       latestVersion: result.latest?.version ?? null,

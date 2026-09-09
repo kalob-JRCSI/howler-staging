@@ -350,4 +350,38 @@ describe("authenticated product gateway", () => {
     );
     expect(applyResponse.status).toBe(201);
   });
+
+  // Phase 4 (Budget + Change Orders, Task 10): the deterministic conversational financial path
+  // must be reachable through the product session too, following the same pattern the Budget
+  // test above already proves.
+  it("exposes the deterministic conversational financial path to a product session, without a bearer admin key", async () => {
+    const product = await productEnv();
+    await legacyWorker.fetch(
+      new Request("https://example.test/v1/projects/deboard-v091/seed", {
+        method: "POST",
+        headers: { authorization: `Bearer ${ADMIN_KEY}` },
+      }),
+      product,
+    );
+    const cookie = await loginCookie(product);
+
+    const turnResponse = await worker.fetch(
+      new Request(
+        "https://example.test/v1/projects/deboard-v091/financial-conversation/turn",
+        {
+          method: "POST",
+          headers: { cookie, "content-type": "application/json" },
+          body: JSON.stringify({
+            text: "Medina's approved plumbing proposal is $18,750.",
+          }),
+        },
+      ),
+      product,
+    );
+    expect(turnResponse.status).toBe(200);
+    const turn = (await jsonBody(turnResponse)) as { outcome: string };
+    // Financials were never initialized for this project in this test -- a real, honest
+    // CLARIFICATION is the correct outcome, not an error. It proves the route is reachable.
+    expect(turn.outcome).toBe("CLARIFICATION");
+  });
 });

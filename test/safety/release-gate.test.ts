@@ -145,6 +145,14 @@ describe("release gate: no legacy mutation route (real repo)", () => {
     // happens through the existing events/apply-shadow route above.
     "SEGMENTS(len=6){3=budget,4=commands,5=preview}",
     "SEGMENTS(len=6){3=change-orders,4=commands,5=preview}",
+    // Phase 4 (Budget + Change Orders, Task 10): POST /v1/projects/:id/financial-conversation/turn
+    // is the deterministic conversational financial path -- pure analysis, never a repository
+    // write. A CallFinancialModel supplies only free-text spans; interpretFinancialTurn
+    // (src/operator/financial-interpreter.ts) resolves them into a typed BudgetCommandV097 /
+    // ChangeOrderCommandV097 and hands it to the same buildBudgetEvent/buildChangeOrderEvent +
+    // reviewedRun every other preview route above already uses. The actual write still only ever
+    // happens through the existing events/apply-shadow route above.
+    "SEGMENTS(len=5){3=financial-conversation,4=turn}",
   ];
 
   it("extracts exactly the accepted mutation route set from the real source, nothing more, nothing less", () => {

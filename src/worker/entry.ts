@@ -200,6 +200,14 @@ function isProductOperatorRoute(request: Request, pathname: string): boolean {
   ) {
     return true;
   }
+  // Phase 4 (Budget + Change Orders, Task 10): the deterministic conversational financial path --
+  // same preview-only, apply-reuses-events/apply-shadow pattern as Budget/Change Orders above.
+  if (
+    request.method === "POST" &&
+    /^\/v1\/projects\/[^/]+\/financial-conversation\/turn$/.test(pathname)
+  ) {
+    return true;
+  }
   if (
     request.method === "POST" &&
     /^\/v1\/projects\/[^/]+\/events\/apply-shadow$/.test(pathname)
