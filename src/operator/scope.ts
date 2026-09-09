@@ -22,13 +22,16 @@
 import type {
   ActivityV094,
   ISODateTime,
+  MoneyV097,
   ProjectEventV094,
+  ProjectFinancialsV097,
   ProjectModelV094,
   ScopeAllowanceV096,
   ScopeItemV096,
   ScopeStatusV096,
   SourceV094,
 } from "../domain/types";
+import { computeBudgetLineActualTotal } from "./budget";
 
 // ---------------------------------------------------------------------------
 // Read model
@@ -40,6 +43,21 @@ export interface ScopeActivityRefV096 {
   activityState: string;
 }
 
+// Phase 4 (Howler Recovery Directive, Budget + Change Orders, Task 8 cross-module sync): the
+// real, canonical replacement for Phase 3's standalone ScopeAllowanceV096 figure, once a scope
+// item is linked to a real budget line (ScopeItemV096.allowanceBudgetLineId). Reuses Budget's own
+// computeBudgetLineActualTotal so this can never independently drift from what Budget itself
+// reports for the same line. `variance` is null only when the linked line has no baselineAmount
+// yet (Unknown, never fabricated as $0) -- exactly the "$1,000 allowance vs $1,175 selected cost
+// gives -$175 variance" example the directive requires.
+export interface ScopeLinkedBudgetLineV096 {
+  budgetLineId: string;
+  description: string;
+  allowanceAmount: MoneyV097 | null;
+  actualTotal: MoneyV097;
+  variance: MoneyV097 | null;
+}
+
 export interface ScopeItemViewV096 {
   id: string;
   description: string;
@@ -48,6 +66,7 @@ export interface ScopeItemViewV096 {
   included: boolean;
   trade: string | null;
   allowance: ScopeAllowanceV096 | null;
+  linkedBudgetLine: ScopeLinkedBudgetLineV096 | null;
   responsibleVendor: string | null;
   activities: ScopeActivityRefV096[];
   notes: string | null;
@@ -110,6 +129,29 @@ function activityRef(
   };
 }
 
+function linkedBudgetLineFor(
+  fin: ProjectFinancialsV097 | undefined,
+  allowanceBudgetLineId: string | undefined,
+): ScopeLinkedBudgetLineV096 | null {
+  if (!fin || !allowanceBudgetLineId) return null;
+  const line = fin.budgetLines[allowanceBudgetLineId];
+  if (!line) return null;
+  const allowanceAmount = line.baselineAmount ?? null;
+  const actualTotal = computeBudgetLineActualTotal(fin, line.id);
+  return {
+    budgetLineId: line.id,
+    description: line.description,
+    allowanceAmount,
+    actualTotal,
+    variance: allowanceAmount
+      ? {
+          amountMinor: allowanceAmount.amountMinor - actualTotal.amountMinor,
+          currency: allowanceAmount.currency,
+        }
+      : null,
+  };
+}
+
 function viewRowFromScopeItem(
   model: ProjectModelV094,
   item: ScopeItemV096,
@@ -124,6 +166,10 @@ function viewRowFromScopeItem(
     included: item.included,
     trade: item.trade ?? null,
     allowance: item.allowance ?? null,
+    linkedBudgetLine: linkedBudgetLineFor(
+      model.financials,
+      item.allowanceBudgetLineId,
+    ),
     responsibleVendor: item.responsibleVendor ?? null,
     activities: item.activityIds.map((id) => activityRef(model, id)),
     notes: item.notes ?? null,
@@ -281,6 +327,14 @@ export type ScopeCommandV096 =
       kind: "ASSOCIATE_ACTIVITIES";
       scopeItemId: string;
       activityIds: string[];
+    }
+  // Phase 4 (Task 8 cross-module sync): the one-allowance-owner link to a real Budget line
+  // (ScopeItemV096.allowanceBudgetLineId). `budgetLineId: null` unlinks it -- the legacy
+  // standalone `allowance` field above is untouched either way.
+  | {
+      kind: "SET_ALLOWANCE_BUDGET_LINE";
+      scopeItemId: string;
+      budgetLineId: string | null;
     }
   | { kind: "DEACTIVATE_SCOPE_ITEM"; scopeItemId: string };
 
@@ -539,6 +593,28 @@ export function buildScopeEvent(
       return finish(
         "SCOPE_ACTIVITIES_ASSOCIATED",
         `"${current.description}" associated with: ${names || "no activities"}.`,
+        updated,
+      );
+    }
+    case "SET_ALLOWANCE_BUDGET_LINE": {
+      if (command.budgetLineId) {
+        const line = model.financials?.budgetLines[command.budgetLineId];
+        if (!line) {
+          throw new ScopeCommandError(
+            `Unknown budget line: ${command.budgetLineId}`,
+          );
+        }
+        updated.allowanceBudgetLineId = command.budgetLineId;
+        return finish(
+          "SCOPE_ALLOWANCE_BUDGET_LINE_LINKED",
+          `"${current.description}" allowance linked to budget line "${line.description}".`,
+          updated,
+        );
+      }
+      delete updated.allowanceBudgetLineId;
+      return finish(
+        "SCOPE_ALLOWANCE_BUDGET_LINE_UNLINKED",
+        `"${current.description}" allowance unlinked from its budget line.`,
         updated,
       );
     }

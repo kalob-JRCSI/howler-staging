@@ -10,6 +10,8 @@ import { validateProjectModel } from "../../src/domain/validation";
 import { appendEvent } from "../../src/engine/engine";
 import type {
   ActivityV094,
+  BudgetLineV097,
+  ProjectFinancialsV097,
   ProjectModelV094,
   ScopeItemV096,
 } from "../../src/domain/types";
@@ -485,5 +487,183 @@ describe("buildScopeEvent", () => {
     expect(event.baseRevision).toBe(model.revision);
     expect(historyNote).toContain("Custom closet");
     expect(event.mutations.some((m) => m.op === "UPSERT_SOURCE")).toBe(true);
+  });
+});
+
+describe("Phase 4 Task 8: linked Budget allowance (allowanceBudgetLineId)", () => {
+  const now = "2026-09-08T12:00:00.000Z";
+  let uniqueId: () => string;
+
+  beforeEach(() => {
+    uniqueId = idSequence("id");
+  });
+
+  function financialsWith(
+    overrides: Partial<ProjectFinancialsV097> = {},
+  ): ProjectFinancialsV097 {
+    return {
+      currency: "USD",
+      baselineSourceIds: [],
+      categories: {},
+      budgetLines: {},
+      commitments: {},
+      actualCosts: {},
+      changeOrders: {},
+      ...overrides,
+    };
+  }
+
+  function budgetLine(overrides: Partial<BudgetLineV097> = {}): BudgetLineV097 {
+    return {
+      id: "line1",
+      categoryId: "cat1",
+      description: "Kitchen fixtures allowance",
+      isAllowance: true,
+      scopeItemIds: [],
+      active: true,
+      sourceIds: [],
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-01T00:00:00.000Z",
+      ...overrides,
+    };
+  }
+
+  it("buildScopeView: linkedBudgetLine is null when the scope item has no allowanceBudgetLineId", () => {
+    const model = baseModel({
+      scopeItems: { s1: scopeItem("s1") },
+      financials: financialsWith({ budgetLines: { line1: budgetLine() } }),
+    });
+    const row = required(buildScopeView(model).items[0], "items[0]");
+    expect(row.linkedBudgetLine).toBeNull();
+  });
+
+  it("buildScopeView: linkedBudgetLine is null when financials were never initialized, even if allowanceBudgetLineId is set", () => {
+    const model = baseModel({
+      scopeItems: {
+        s1: scopeItem("s1", { allowanceBudgetLineId: "line1" }),
+      },
+    });
+    const row = required(buildScopeView(model).items[0], "items[0]");
+    expect(row.linkedBudgetLine).toBeNull();
+  });
+
+  it("buildScopeView: computes the exact $1,000 allowance vs $1,175 actual = -$175 variance example", () => {
+    const model = baseModel({
+      scopeItems: {
+        s1: scopeItem("s1", { allowanceBudgetLineId: "line1" }),
+      },
+      financials: financialsWith({
+        budgetLines: {
+          line1: budgetLine({
+            baselineAmount: { amountMinor: 100000, currency: "USD" },
+          }),
+        },
+        actualCosts: {
+          a1: {
+            id: "a1",
+            amount: { amountMinor: 117500, currency: "USD" },
+            date: "2026-08-15",
+            description: "Fixture selection",
+            budgetLineId: "line1",
+            status: "RECORDED",
+            sourceIds: [],
+            createdAt: "2026-08-15T00:00:00.000Z",
+            updatedAt: "2026-08-15T00:00:00.000Z",
+          },
+        },
+      }),
+    });
+    const row = required(buildScopeView(model).items[0], "items[0]");
+    expect(row.linkedBudgetLine).toEqual({
+      budgetLineId: "line1",
+      description: "Kitchen fixtures allowance",
+      allowanceAmount: { amountMinor: 100000, currency: "USD" },
+      actualTotal: { amountMinor: 117500, currency: "USD" },
+      variance: { amountMinor: -17500, currency: "USD" },
+    });
+  });
+
+  it("buildScopeView: variance is null (Unknown) when the linked line has no baselineAmount, never $0", () => {
+    const model = baseModel({
+      scopeItems: {
+        s1: scopeItem("s1", { allowanceBudgetLineId: "line1" }),
+      },
+      financials: financialsWith({ budgetLines: { line1: budgetLine() } }),
+    });
+    const row = required(buildScopeView(model).items[0], "items[0]");
+    expect(row.linkedBudgetLine?.allowanceAmount).toBeNull();
+    expect(row.linkedBudgetLine?.variance).toBeNull();
+    expect(row.linkedBudgetLine?.actualTotal).toEqual({
+      amountMinor: 0,
+      currency: "USD",
+    });
+  });
+
+  it("buildScopeEvent SET_ALLOWANCE_BUDGET_LINE: links to a real budget line", () => {
+    const model = baseModel({
+      scopeItems: { s1: scopeItem("s1") },
+      financials: financialsWith({ budgetLines: { line1: budgetLine() } }),
+    });
+    const { event, clerical } = buildScopeEvent(
+      model,
+      {
+        kind: "SET_ALLOWANCE_BUDGET_LINE",
+        scopeItemId: "s1",
+        budgetLineId: "line1",
+      },
+      now,
+      uniqueId,
+    );
+    expect(clerical).toBe(false);
+    const mutation = event.mutations.find((m) => m.op === "UPSERT_SCOPE_ITEM");
+    expect(
+      mutation && "scopeItem" in mutation
+        ? mutation.scopeItem.allowanceBudgetLineId
+        : undefined,
+    ).toBe("line1");
+  });
+
+  it("buildScopeEvent SET_ALLOWANCE_BUDGET_LINE: unlinks with budgetLineId null", () => {
+    const model = baseModel({
+      scopeItems: {
+        s1: scopeItem("s1", { allowanceBudgetLineId: "line1" }),
+      },
+      financials: financialsWith({ budgetLines: { line1: budgetLine() } }),
+    });
+    const { event } = buildScopeEvent(
+      model,
+      {
+        kind: "SET_ALLOWANCE_BUDGET_LINE",
+        scopeItemId: "s1",
+        budgetLineId: null,
+      },
+      now,
+      uniqueId,
+    );
+    const mutation = event.mutations.find((m) => m.op === "UPSERT_SCOPE_ITEM");
+    expect(
+      mutation && "scopeItem" in mutation
+        ? mutation.scopeItem.allowanceBudgetLineId
+        : undefined,
+    ).toBeUndefined();
+  });
+
+  it("buildScopeEvent SET_ALLOWANCE_BUDGET_LINE: rejects an unknown budget line", () => {
+    const model = baseModel({
+      scopeItems: { s1: scopeItem("s1") },
+      financials: financialsWith(),
+    });
+    expect(() =>
+      buildScopeEvent(
+        model,
+        {
+          kind: "SET_ALLOWANCE_BUDGET_LINE",
+          scopeItemId: "s1",
+          budgetLineId: "missing",
+        },
+        now,
+        uniqueId,
+      ),
+    ).toThrow("Unknown budget line: missing");
   });
 });

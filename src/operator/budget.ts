@@ -176,6 +176,21 @@ function lineAllocations(
   return { committed, approvedCO };
 }
 
+// Shared with src/operator/scope.ts's linked-allowance adapter (ScopeItemV096.allowanceBudgetLineId)
+// so "how much has actually been spent against this line" is computed in exactly one place --
+// Scope must never recompute this total independently and risk drifting from Budget's own number.
+export function computeBudgetLineActualTotal(
+  fin: ProjectFinancialsV097,
+  budgetLineId: string,
+): MoneyV097 {
+  return zeroOrSum(
+    fin.currency,
+    Object.values(fin.actualCosts)
+      .filter((a) => a.status === "RECORDED" && a.budgetLineId === budgetLineId)
+      .map((a) => a.amount),
+  );
+}
+
 function viewRowFromBudgetLine(
   fin: ProjectFinancialsV097,
   line: BudgetLineV097,
@@ -183,12 +198,7 @@ function viewRowFromBudgetLine(
   const { committed, approvedCO } = lineAllocations(fin, line.id);
   const committedTotal = zeroOrSum(fin.currency, committed);
   const approvedChangeOrderTotal = zeroOrSum(fin.currency, approvedCO);
-  const actualTotal = zeroOrSum(
-    fin.currency,
-    Object.values(fin.actualCosts)
-      .filter((a) => a.status === "RECORDED" && a.budgetLineId === line.id)
-      .map((a) => a.amount),
-  );
+  const actualTotal = computeBudgetLineActualTotal(fin, line.id);
   const revisedAmount = addToNullable(
     line.baselineAmount ?? null,
     approvedChangeOrderTotal,

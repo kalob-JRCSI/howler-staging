@@ -4,6 +4,7 @@ import type {
   ActivityV094,
   ConflictV094,
   ConstraintV094,
+  ProjectFinancialsV097,
   ProjectModelV094,
 } from "../../src/domain/types";
 import type {
@@ -509,6 +510,74 @@ describe("buildProjectSummary: budget honesty", () => {
       spent: null,
       remaining: null,
       spentPercent: null,
+    });
+  });
+});
+
+describe("buildProjectSummary: Phase 4 financials (Task 8 cross-module sync)", () => {
+  function financialsWith(
+    overrides: Partial<ProjectFinancialsV097> = {},
+  ): ProjectFinancialsV097 {
+    return {
+      currency: "USD",
+      baselineSourceIds: [],
+      categories: {},
+      budgetLines: {},
+      commitments: {},
+      actualCosts: {},
+      changeOrders: {},
+      ...overrides,
+    };
+  }
+
+  it("is null when the project's financials were never initialized -- never a fabricated $0 summary", () => {
+    const summary = buildProjectSummary(baseModel(), undefined, baseHealth());
+    expect(summary.financials).toBeNull();
+  });
+
+  it("never conflates the Phase 4 financials with the legacy projectProfile.budget field", () => {
+    const model = baseModel({
+      projectProfile: {
+        baselineScope: [],
+        budget: { baseline: 310000, spent: 100000, currency: "USD" },
+      },
+      financials: financialsWith(),
+    });
+    const summary = buildProjectSummary(model, undefined, baseHealth());
+    expect(summary.budget).toEqual({
+      baseline: 310000,
+      spent: 100000,
+      remaining: 210000,
+      spentPercent: 32,
+    });
+    expect(summary.financials).not.toBeNull();
+    expect(summary.financials?.currency).toBe("USD");
+  });
+
+  it("reports the exact same numbers buildProjectFinancialSummary itself would -- never a separate recomputation", () => {
+    const model = baseModel({
+      financials: financialsWith({
+        baseline: { amountMinor: 40000000, currency: "USD" },
+        changeOrders: {
+          co1: {
+            id: "co1",
+            title: "Cabinetry upgrade",
+            status: "APPROVED",
+            cost: { amountMinor: 1250000, currency: "USD" },
+            costAllocations: [],
+            scopeItemIds: [],
+            activityIds: [],
+            sourceIds: [],
+            createdAt: "2026-08-01T00:00:00.000Z",
+            updatedAt: "2026-08-01T00:00:00.000Z",
+          },
+        },
+      }),
+    });
+    const summary = buildProjectSummary(model, undefined, baseHealth());
+    expect(summary.financials?.revisedBudget).toEqual({
+      amountMinor: 41250000,
+      currency: "USD",
     });
   });
 });

@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderScope } from "../../../views/indexCard/scope";
-import type { ProjectScopeLike, ScopeItemViewLike } from "../../../types";
+import type {
+  BudgetLineViewLike,
+  ProjectBudgetWorkspaceLike,
+  ProjectScopeLike,
+  ScopeItemViewLike,
+} from "../../../types";
 
 function flushAsyncWork(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
@@ -30,6 +35,7 @@ function scopeItem(
     included: true,
     trade: null,
     allowance: null,
+    linkedBudgetLine: null,
     responsibleVendor: null,
     activities: [],
     notes: null,
@@ -55,6 +61,50 @@ function scope(items: ScopeItemViewLike[]): ProjectScopeLike {
         activityState: "NOT_STARTED",
       },
     ],
+  };
+}
+
+function budgetLine(
+  overrides: Partial<BudgetLineViewLike> = {},
+): BudgetLineViewLike {
+  return {
+    id: "line1",
+    categoryId: "cat1",
+    categoryName: "Fixtures",
+    description: "Kitchen fixtures allowance",
+    costCode: null,
+    trade: null,
+    baselineAmount: null,
+    isAllowance: true,
+    vendorRef: null,
+    scopeItemIds: [],
+    notes: null,
+    active: true,
+    committedTotal: { amountMinor: 0, currency: "USD" },
+    actualTotal: { amountMinor: 0, currency: "USD" },
+    approvedChangeOrderTotal: { amountMinor: 0, currency: "USD" },
+    revisedAmount: null,
+    remaining: null,
+    createdAt: "2026-08-01T00:00:00.000Z",
+    updatedAt: "2026-08-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+function budgetWorkspace(
+  overrides: Partial<ProjectBudgetWorkspaceLike> = {},
+): ProjectBudgetWorkspaceLike {
+  return {
+    projectId: "carver",
+    projectRevision: 3,
+    initialized: true,
+    currency: "USD",
+    summary: null,
+    categories: [],
+    lines: [budgetLine()],
+    commitments: [],
+    actualCosts: [],
+    ...overrides,
   };
 }
 
@@ -291,5 +341,138 @@ describe("renderScope", () => {
     const rows = body.querySelectorAll(".sched-row");
     expect(rows).toHaveLength(1);
     expect(rows[0]?.textContent).toContain("Kitchen backsplash");
+  });
+});
+
+describe("renderScope: Phase 4 Task 8 linked Budget allowance", () => {
+  it("shows the real allowance/actual/variance once a scope item is linked to a budget line", async () => {
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.endsWith("/scope") && (init?.method ?? "GET") === "GET") {
+        return Promise.resolve(
+          jsonResponse(
+            200,
+            scope([
+              scopeItem({
+                linkedBudgetLine: {
+                  budgetLineId: "line1",
+                  description: "Kitchen fixtures allowance",
+                  allowanceAmount: { amountMinor: 100000, currency: "USD" },
+                  actualTotal: { amountMinor: 117500, currency: "USD" },
+                  variance: { amountMinor: -17500, currency: "USD" },
+                },
+              }),
+            ]),
+          ),
+        );
+      }
+      if (url.endsWith("/budget")) {
+        return Promise.resolve(jsonResponse(200, budgetWorkspace()));
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    const body = document.createElement("div");
+    await renderScope(body, "carver");
+    body.querySelector<HTMLElement>(".sched-row")?.click();
+    const detail = body.querySelector<HTMLElement>(".sched-detail-row");
+    expect(detail?.textContent).toContain("Allowance: $1,000.00");
+    expect(detail?.textContent).toContain("Actual: $1,175.00");
+    expect(detail?.textContent).toContain("Variance: -$175.00");
+  });
+
+  it("offers real budget lines to link to, and shows 'Not linked' honestly when unlinked", async () => {
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.endsWith("/scope") && (init?.method ?? "GET") === "GET") {
+        return Promise.resolve(jsonResponse(200, scope([scopeItem()])));
+      }
+      if (url.endsWith("/budget")) {
+        return Promise.resolve(jsonResponse(200, budgetWorkspace()));
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    const body = document.createElement("div");
+    await renderScope(body, "carver");
+    body.querySelector<HTMLElement>(".sched-row")?.click();
+    const detail = body.querySelector<HTMLElement>(".sched-detail-row");
+    expect(detail?.textContent).toContain("Not linked to a budget line.");
+    const select = detail?.querySelector<HTMLSelectElement>(
+      'form[data-action="SET_ALLOWANCE_BUDGET_LINE"] select[name="budgetLineId"]',
+    );
+    expect(
+      Array.from(select?.options ?? []).map((o) => o.textContent),
+    ).toContain("Kitchen fixtures allowance");
+  });
+
+  it("SET_ALLOWANCE_BUDGET_LINE is never clerical -- shows preview -> confirm", async () => {
+    const initial = scope([scopeItem()]);
+    const afterApply = scope([
+      scopeItem({
+        linkedBudgetLine: {
+          budgetLineId: "line1",
+          description: "Kitchen fixtures allowance",
+          allowanceAmount: null,
+          actualTotal: { amountMinor: 0, currency: "USD" },
+          variance: null,
+        },
+      }),
+    ]);
+    let scopeFetchCount = 0;
+
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith("/scope") && method === "GET") {
+        scopeFetchCount += 1;
+        return Promise.resolve(
+          jsonResponse(200, scopeFetchCount === 1 ? initial : afterApply),
+        );
+      }
+      if (url.endsWith("/budget")) {
+        return Promise.resolve(jsonResponse(200, budgetWorkspace()));
+      }
+      if (url.endsWith("/scope/commands/preview")) {
+        return Promise.resolve(
+          jsonResponse(200, {
+            projectRevision: 3,
+            reviewToken: "token-link",
+            historyNote:
+              '"Custom closet" allowance linked to budget line "Kitchen fixtures allowance".',
+            clerical: false,
+            event: { id: "evt-link", baseRevision: 3 },
+            delta: null,
+            recoveryAnalysis: { status: "ON_TRACK", protectionActions: [] },
+          }),
+        );
+      }
+      if (url.endsWith("/events/apply-shadow")) {
+        return Promise.resolve(
+          jsonResponse(201, { applied: true, projectRevision: 4 }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${method} ${url}`);
+    });
+
+    const body = document.createElement("div");
+    await renderScope(body, "carver");
+    body.querySelector<HTMLElement>(".sched-row")?.click();
+    const detail = body.querySelector<HTMLElement>(".sched-detail-row");
+    const form = detail?.querySelector<HTMLFormElement>(
+      'form[data-action="SET_ALLOWANCE_BUDGET_LINE"]',
+    );
+    const select = form?.querySelector<HTMLSelectElement>(
+      'select[name="budgetLineId"]',
+    );
+    if (select) select.value = "line1";
+    form?.dispatchEvent(new Event("submit", { cancelable: true }));
+    await flushAsyncWork();
+
+    const panel = detail?.querySelector<HTMLElement>(".sched-action-panel");
+    expect(panel?.querySelector(".sched-confirm")).not.toBeNull();
+    panel?.querySelector<HTMLButtonElement>(".sched-confirm")?.click();
+    await flushAsyncWork();
+    expect(scopeFetchCount).toBeGreaterThanOrEqual(2);
   });
 });

@@ -36,6 +36,10 @@ export interface ProjectSummaryLike {
   scope: { id: string; label: string; phase: string }[];
   blockedScopeItems: string[];
   scopeAddedAfterBaselineCount: number;
+  // Phase 4 (Budget + Change Orders, Task 8 cross-module sync): null exactly when Budget was
+  // never set up -- never a fabricated $0 summary. Defined further below, alongside the rest of
+  // the Budget/Change Orders wire types.
+  financials: ProjectFinancialSummaryLike | null;
 }
 
 export interface PmActionLike {
@@ -210,6 +214,17 @@ export interface ScopeActivityRefLike {
   activityState: string;
 }
 
+// Phase 4 (Budget + Change Orders, Task 8 cross-module sync): the real replacement for the
+// standalone ScopeAllowanceLike figure above once a scope item is linked to a Budget line.
+// `MoneyLike` is defined further below, alongside the rest of the Budget/Change Orders wire types.
+export interface ScopeLinkedBudgetLineLike {
+  budgetLineId: string;
+  description: string;
+  allowanceAmount: MoneyLike | null;
+  actualTotal: MoneyLike;
+  variance: MoneyLike | null;
+}
+
 export interface ScopeItemViewLike {
   id: string;
   description: string;
@@ -218,6 +233,7 @@ export interface ScopeItemViewLike {
   included: boolean;
   trade: string | null;
   allowance: ScopeAllowanceLike | null;
+  linkedBudgetLine: ScopeLinkedBudgetLineLike | null;
   responsibleVendor: string | null;
   activities: ScopeActivityRefLike[];
   notes: string | null;
@@ -272,6 +288,11 @@ export type ScopeCommandLike =
   | { kind: "SET_STATUS"; scopeItemId: string; status: ScopeStatusLike }
   | { kind: "SET_NOTES"; scopeItemId: string; notes: string }
   | { kind: "ASSOCIATE_ACTIVITIES"; scopeItemId: string; activityIds: string[] }
+  | {
+      kind: "SET_ALLOWANCE_BUDGET_LINE";
+      scopeItemId: string;
+      budgetLineId: string | null;
+    }
   | { kind: "DEACTIVATE_SCOPE_ITEM"; scopeItemId: string };
 
 export interface ScopeCommandPreviewLike {

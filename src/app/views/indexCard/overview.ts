@@ -5,8 +5,13 @@
 // .recoveryAnalysis.protectionActions), never invented text.
 
 import { fetchProjectForecast, UnauthorizedError } from "../../api";
-import { escapeHtml, formatDate, formatMoney } from "../../format";
-import type { ProjectSummaryLike } from "../../types";
+import {
+  escapeHtml,
+  formatDate,
+  formatMoney,
+  formatMoneyMinor,
+} from "../../format";
+import type { MoneyLike, ProjectSummaryLike } from "../../types";
 
 function budgetLineHtml(budget: ProjectSummaryLike["budget"]): string {
   if (budget.baseline === null) return "Budget not recorded";
@@ -16,6 +21,28 @@ function budgetLineHtml(budget: ProjectSummaryLike["budget"]): string {
   const spentStr = formatMoney(budget.spent);
   if (budget.remaining === null) return `${spentStr} spent`;
   return `${spentStr} spent / ${formatMoney(budget.remaining)} remaining`;
+}
+
+function moneyOrUnknown(money: MoneyLike | null): string {
+  return money ? formatMoneyMinor(money) : "Unknown";
+}
+
+// Phase 4 (Budget + Change Orders, Task 8 cross-module sync): purely additive -- the legacy
+// budgetLineHtml above is left completely untouched. Null exactly when Budget was never set up,
+// never a fabricated $0 section.
+function financialsSectionHtml(
+  financials: ProjectSummaryLike["financials"],
+): string {
+  if (!financials) return "";
+  return `
+    <section class="ic-overview-section">
+      <h3>Budget (${escapeHtml(financials.currency)})</h3>
+      <p>Revised budget: ${moneyOrUnknown(financials.revisedBudget)}</p>
+      <p>Committed: ${formatMoneyMinor(financials.committedTotal)}</p>
+      <p>Actual recorded: ${formatMoneyMinor(financials.actualTotal)}</p>
+      <p>Remaining/uncommitted: ${moneyOrUnknown(financials.remaining)}</p>
+    </section>
+  `;
 }
 
 export async function renderOverview(
@@ -74,6 +101,7 @@ export async function renderOverview(
       <h3>Budget</h3>
       <p>${budgetLineHtml(summary.budget)}</p>
     </section>
+    ${financialsSectionHtml(summary.financials)}
     <section class="ic-overview-section">
       <h3>Baseline scope</h3>
       ${

@@ -550,6 +550,7 @@ const SCOPE_COMMAND_KINDS = new Set([
   "SET_STATUS",
   "SET_NOTES",
   "ASSOCIATE_ACTIVITIES",
+  "SET_ALLOWANCE_BUDGET_LINE",
   "DEACTIVATE_SCOPE_ITEM",
 ]);
 
@@ -662,6 +663,10 @@ function validateScopeCommandShape(raw: unknown): string[] {
       } else if (record.activityIds.some((id) => typeof id !== "string")) {
         errors.push("activityIds must all be strings");
       }
+      break;
+    case "SET_ALLOWANCE_BUDGET_LINE":
+      checkString(record, "scopeItemId", errors);
+      checkNullableStringField(record, "budgetLineId", errors);
       break;
     case "DEACTIVATE_SCOPE_ITEM":
       checkString(record, "scopeItemId", errors);

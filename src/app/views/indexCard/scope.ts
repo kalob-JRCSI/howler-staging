@@ -12,12 +12,15 @@
 import {
   ApiRequestError,
   applyScheduleEvent as applyScopeEvent,
+  fetchProjectBudget,
   fetchProjectScope,
   previewScopeCommand,
   UnauthorizedError,
 } from "../../api";
-import { escapeHtml } from "../../format";
+import { escapeHtml, formatMoneyMinor } from "../../format";
 import type {
+  BudgetLineViewLike,
+  MoneyLike,
   ProjectScopeLike,
   ScopeCommandLike,
   ScopeCommandPreviewLike,
@@ -26,6 +29,10 @@ import type {
 
 function dash(value: string | null | undefined): string {
   return value ? escapeHtml(value) : "—";
+}
+
+function moneyOrUnknown(money: MoneyLike | null): string {
+  return money ? formatMoneyMinor(money) : "Unknown";
 }
 
 function statusLabel(status: string): string {
@@ -58,6 +65,20 @@ export async function renderScope(
     return;
   }
 
+  // Phase 4 (Task 8 cross-module sync): real budget lines to link a scope item's allowance to.
+  // Best-effort only -- a project whose Budget was never set up (or a transient read failure)
+  // simply has no lines to offer here; Scope itself still renders fully either way.
+  let budgetLines: BudgetLineViewLike[] = [];
+  try {
+    const budget = await fetchProjectBudget(projectId);
+    budgetLines = budget.lines.filter((l) => l.active);
+  } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      window.location.assign("/");
+      return;
+    }
+  }
+
   let expandedScopeItemId: string | null = null;
   let phaseFilter = ALL_PHASES;
   let tradeFilter = ALL_TRADES;
@@ -65,6 +86,8 @@ export async function renderScope(
   async function reload(): Promise<void> {
     try {
       scope = await fetchProjectScope(projectId);
+      const budget = await fetchProjectBudget(projectId);
+      budgetLines = budget.lines.filter((l) => l.active);
     } catch (error) {
       if (error instanceof UnauthorizedError) {
         window.location.assign("/");
@@ -82,6 +105,16 @@ export async function renderScope(
           `<option value="${escapeHtml(activity.activityId)}" ${selectedIds.includes(activity.activityId) ? "selected" : ""}>${escapeHtml(activity.activityName)}</option>`,
       )
       .join("");
+  }
+
+  function budgetLineOptions(selectedId: string | null): string {
+    const options = budgetLines
+      .map(
+        (line) =>
+          `<option value="${escapeHtml(line.id)}" ${line.id === selectedId ? "selected" : ""}>${escapeHtml(line.description)}</option>`,
+      )
+      .join("");
+    return `<option value="">None</option>${options}`;
   }
 
   /**
@@ -248,6 +281,18 @@ export async function renderScope(
             item.allowance
               ? `<button type="button" class="sched-clear-allowance" data-scope-item="${escapeHtml(item.id)}">Clear allowance</button>`
               : ""
+          }
+        </details>
+        <details>
+          <summary>Linked budget line (real allowance)</summary>
+          <form data-action="SET_ALLOWANCE_BUDGET_LINE">
+            <select name="budgetLineId">${budgetLineOptions(item.linkedBudgetLine?.budgetLineId ?? null)}</select>
+            <button type="submit">Save</button>
+          </form>
+          ${
+            item.linkedBudgetLine
+              ? `<p>Allowance: ${moneyOrUnknown(item.linkedBudgetLine.allowanceAmount)} &mdash; Actual: ${formatMoneyMinor(item.linkedBudgetLine.actualTotal)} &mdash; Variance: ${moneyOrUnknown(item.linkedBudgetLine.variance)}</p>`
+              : `<p class="ic-empty">Not linked to a budget line.</p>`
           }
         </details>
         <details>
@@ -565,6 +610,14 @@ export async function renderScope(
           kind: "ASSOCIATE_ACTIVITIES",
           scopeItemId,
           activityIds: select,
+        };
+      }
+      case "SET_ALLOWANCE_BUDGET_LINE": {
+        const budgetLineId = formString(data, "budgetLineId").trim();
+        return {
+          kind: "SET_ALLOWANCE_BUDGET_LINE",
+          scopeItemId,
+          budgetLineId: budgetLineId || null,
         };
       }
       default:

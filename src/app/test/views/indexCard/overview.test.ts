@@ -30,6 +30,7 @@ function baseSummary(
     scope: [{ id: "framing", label: "Framing", phase: "Framing" }],
     blockedScopeItems: [],
     scopeAddedAfterBaselineCount: 0,
+    financials: null,
     ...overrides,
   };
 }
@@ -191,5 +192,74 @@ describe("renderOverview: Phase 3 scope sync", () => {
       }),
     );
     expect(body.textContent).toContain("$40,000 spent / $60,000 remaining");
+  });
+});
+
+describe("renderOverview: Phase 4 financials sync (Task 8)", () => {
+  it("omits the Phase 4 financial section entirely when Budget was never set up", async () => {
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve(
+        jsonResponse(200, { modelRevision: 0, latest: null, published: null }),
+      ),
+    );
+    const body = document.createElement("div");
+    await renderOverview(body, "carver", baseSummary({ financials: null }));
+    expect(body.textContent).not.toContain("Revised budget");
+  });
+
+  it("shows the real financial summary, with Unknown rather than a fabricated $0, once Budget is set up", async () => {
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve(
+        jsonResponse(200, { modelRevision: 0, latest: null, published: null }),
+      ),
+    );
+    const body = document.createElement("div");
+    await renderOverview(
+      body,
+      "carver",
+      baseSummary({
+        financials: {
+          currency: "USD",
+          baseline: null,
+          approvedChangeOrderTotal: { amountMinor: 0, currency: "USD" },
+          pendingChangeOrderTotal: { amountMinor: 0, currency: "USD" },
+          revisedBudget: null,
+          committedTotal: { amountMinor: 100000, currency: "USD" },
+          actualTotal: { amountMinor: 50000, currency: "USD" },
+          remaining: null,
+        },
+      }),
+    );
+    expect(body.textContent).toContain("Revised budget: Unknown");
+    expect(body.textContent).toContain("Committed: $1,000.00");
+    expect(body.textContent).toContain("Actual recorded: $500.00");
+    expect(body.textContent).toContain("Remaining/uncommitted: Unknown");
+  });
+
+  it("never touches the legacy Budget line -- both sections render side by side", async () => {
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve(
+        jsonResponse(200, { modelRevision: 0, latest: null, published: null }),
+      ),
+    );
+    const body = document.createElement("div");
+    await renderOverview(
+      body,
+      "carver",
+      baseSummary({
+        financials: {
+          currency: "USD",
+          baseline: { amountMinor: 40000000, currency: "USD" },
+          approvedChangeOrderTotal: { amountMinor: 0, currency: "USD" },
+          pendingChangeOrderTotal: { amountMinor: 0, currency: "USD" },
+          revisedBudget: { amountMinor: 40000000, currency: "USD" },
+          committedTotal: { amountMinor: 0, currency: "USD" },
+          actualTotal: { amountMinor: 0, currency: "USD" },
+          remaining: { amountMinor: 40000000, currency: "USD" },
+        },
+      }),
+    );
+    expect(body.textContent).toContain("$40,000 spent / $60,000 remaining");
+    expect(body.textContent).toContain("Revised budget: $400,000.00");
   });
 });

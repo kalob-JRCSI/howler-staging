@@ -11,6 +11,8 @@ import type { ActivityV094, ProjectModelV094 } from "../domain/types";
 import type { ForecastSnapshotV094 } from "../engine/solver";
 import type { ProjectHealthV094 } from "../worker/health";
 import { buildScopeView } from "./scope";
+import { buildProjectFinancialSummary } from "./budget";
+import type { ProjectFinancialSummaryV097 } from "./budget";
 
 export interface ProjectScheduleItemV096 {
   activityId: string;
@@ -51,6 +53,13 @@ export interface ProjectSummaryV096 {
   // directive warns against.
   blockedScopeItems: string[];
   scopeAddedAfterBaselineCount: number;
+  // Phase 4 (Budget + Change Orders, Task 8 cross-module sync): null exactly when the project's
+  // financials were never initialized -- never a fabricated $0 summary. The legacy `budget` field
+  // above is left completely untouched (its own projectProfile.budget source, its own semantics);
+  // this is the real, richer replacement once Budget is set up, computed via
+  // buildProjectFinancialSummary so this can never independently drift from what the Budget module
+  // itself reports.
+  financials: ProjectFinancialSummaryV097 | null;
 }
 
 // Persisted staging data includes forecast snapshots created before recoveryAnalysis was added.
@@ -346,5 +355,8 @@ export function buildProjectSummary(
     blockedScopeItems: computeBlockedScopeItems(scopeView),
     scopeAddedAfterBaselineCount:
       computeScopeAddedAfterBaselineCount(scopeView),
+    financials: model.financials
+      ? buildProjectFinancialSummary(model.financials)
+      : null,
   };
 }
