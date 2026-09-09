@@ -39,7 +39,10 @@ describe("repository policy: CI never receives Cloudflare credentials", () => {
   });
 
   it("ci.yml's pull_request trigger has no branch restriction", () => {
-    const pullRequestBlock = /pull_request:([ \t]*\n(?:[ \t]+.*\n)*)/.exec(
+    // Tolerates CRLF line endings (e.g. a Windows checkout with core.autocrlf=true) as well as
+    // the LF the file is actually committed with -- a `\r` before each `\n` must never make this
+    // regex miss a real, present trigger and report a false "trigger is missing".
+    const pullRequestBlock = /pull_request:([ \t]*\r?\n(?:[ \t]+.*\r?\n)*)/.exec(
       ciWorkflow,
     );
     expect(pullRequestBlock, "pull_request trigger must be present").not.toBe(

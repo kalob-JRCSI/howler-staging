@@ -294,9 +294,17 @@ describe("missing source behavior", () => {
 
 describe("context-budget pruning", () => {
   it("prunes lower-priority-tier entries first, and mandatory material survives budget pressure", () => {
+    // readEntryContent (tools/context-pack/src/catalog.ts) reads fixture files with no line-ending
+    // normalization, so their measured char count depends on the checkout's line endings (LF as
+    // committed vs. CRLF on a Windows checkout with core.autocrlf=true -- each of the 5 line
+    // endings across the mandatory/handoff/budget-a fixtures costs 1 extra char under CRLF). 390
+    // sat exactly between the LF total (386) and the CRLF total (391), so a CRLF checkout pruned
+    // fixture-budget-a and failed this test though nothing about selection was actually broken.
+    // 400 keeps the margin real (still well short of adding fixture-budget-b, LF 260/CRLF 261)
+    // under either line-ending convention.
     const { selected, omitted } = selectForPack(
       TEST_CATALOG,
-      input({ taskType: "budget-test", budgetChars: 390 }),
+      input({ taskType: "budget-test", budgetChars: 400 }),
       FIXTURE_REPO_ROOT,
     );
     expect(selected.some((f) => f.id === "fixture-mandatory-safety")).toBe(
