@@ -58,6 +58,14 @@ history and dependent recalculation. Protected evidence/history/derived values
 are not freely overwritable. Report manual capability and AI coverage separately;
 never infer full functionality from display-only records or a backend interface.
 
+For Phase 4 Budget + Change Orders, also read the full owner directive at
+`docs/superpowers/specs/2026-09-08-howler-phase4-budget-change-orders-directive.md`
+and its requirements reconciliation at
+`docs/superpowers/specs/2026-09-09-howler-phase4-requirements-reconciliation.md`.
+Apply both owner instructions cumulatively. Derived audits cannot substitute
+USD-only or manual-only scope restrictions. Claude remains authoritative
+implementer; Codex supports bounded audit/testing/review.
+
 Any task touching Cloudflare Workers, D1, deployment, or the operator
 surface must load the `howler-cloudflare-safety` skill
 (`.agents/skills/howler-cloudflare-safety/SKILL.md`) before making changes.

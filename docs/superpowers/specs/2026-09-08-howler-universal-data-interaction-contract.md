@@ -5,6 +5,11 @@ Applies to current and future modules. This is a requirement, not a claim that
 all existing modules already comply. It does not authorize unrelated module
 implementation, external integration, deployment, or additional permissions.
 
+For Phase 4, read together with
+`2026-09-08-howler-phase4-budget-change-orders-directive.md`. Budget + Change
+Orders defines the phase's deliverables; this contract defines their interaction
+and canonical-data obligations. Neither supersedes or makes the other optional.
+
 ## Manual-first, AI-assisted, one canonical state
 
 Every mutable project-management data element the PM is allowed to own supports:
@@ -37,6 +42,9 @@ For each mutable record type, the PM must be able to manage it manually, and the
 AI interface must eventually safely operate it through the same canonical system.
 Until AI coverage is implemented and tested, report it explicitly as partial or
 pending. A shared backend alone is not proof of a working AI interaction.
+Eventual delivery is not permission to omit the AI-assisted path from the plan or
+report a partially covered module as fully compliant. Existing and future coverage
+gaps must remain explicit without expanding the currently authorized module scope.
 
 ## Protected values
 

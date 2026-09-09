@@ -2,6 +2,32 @@
   "schemaVersion": "1",
   "entries": [
     {
+      "id": "directive-v096-phase4",
+      "kind": "spec",
+      "path": "docs/superpowers/specs/2026-09-08-howler-phase4-budget-change-orders-directive.md",
+      "authority": "GIT_CANONICAL",
+      "tags": ["phase4", "budget", "change-orders"],
+      "taskTypes": [
+        "implementation-handoff",
+        "product-design",
+        "product-review"
+      ],
+      "summary": "Full owner Phase 4 directive, preserved verbatim; apply cumulatively with the Universal Data Interaction Contract."
+    },
+    {
+      "id": "reconciliation-v096-phase4",
+      "kind": "doc",
+      "path": "docs/superpowers/specs/2026-09-09-howler-phase4-requirements-reconciliation.md",
+      "authority": "GIT_CANONICAL",
+      "tags": ["phase4", "budget", "change-orders", "manual-ai"],
+      "taskTypes": [
+        "implementation-handoff",
+        "product-design",
+        "product-review"
+      ],
+      "summary": "Combined requirement mapping, corrected audit assumptions, full Budget/CO acceptance flows and 14-module reporting obligations; not implementation evidence."
+    },
+    {
       "id": "contract-universal-data-interaction",
       "kind": "spec",
       "path": "docs/superpowers/specs/2026-09-08-howler-universal-data-interaction-contract.md",

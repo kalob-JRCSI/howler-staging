@@ -6,10 +6,16 @@ This is not an implementation-completion claim.
 Base: `3aed78e2241a06e3b299baec8a73a2b6b8f11277`, accepted Phase 3 development
 milestone. Working branch: `codex/v096-phase4-budget-change-orders`.
 
-Authority: the owner's Phase 4 directive and the permanent
+Authority: the [owner's full Phase 4 directive](2026-09-08-howler-phase4-budget-change-orders-directive.md) and the permanent
 [Universal Data Interaction Contract](2026-09-08-howler-universal-data-interaction-contract.md).
 Budget and Change Orders are the only new modules in scope. Storage architecture
 is accepted separately; no provider activation or storage implementation here.
+
+These instructions are cumulative: Phase 4 specifies the product deliverables;
+the Universal Contract specifies how all owned data must be managed. This audit
+is a derived proposal, not authority to narrow either. Claude remains authoritative
+implementer; Codex supplies bounded audit/test/review support and does not redefine
+the architecture. This Codex worktree contains documentation only.
 
 ## 1. Existing capabilities and concrete gaps
 
@@ -64,10 +70,13 @@ tax engine, exchange rates, payment status, or external finance integration.
   units; never `parseFloat(value) * 100`. Check every addition/subtraction and
   aggregate for safe-integer bounds. Reject excess fractional precision,
   exponent notation, non-finite inputs and mixed currencies.
-- One explicit currency per project financial submodel. Proposed first pilot
-  editing support is USD (2 decimal places); unsupported legacy currencies still
-  load honestly, without a dollar label, and require an explicit supported-currency
-  design before editing. This restriction needs owner approval, not silent rollout.
+- Currency is explicit for every amount and financial summary; there is no
+  owner-approved USD-only restriction. Use a validated currency/minor-unit
+  definition, rather than assuming every currency has two decimal places. Reject
+  mixed-currency aggregation and ambiguous units; no exchange-rate conversion.
+  A legacy currency that cannot yet be interpreted safely remains visible with an
+  explicit explanation, never silently relabeled USD or converted. The detailed
+  plan must identify its currency metadata source and precision tests.
 - Preserve `projectProfile.budget` unchanged as the Genesis/import receipt. On
   read, expose legacy values and provenance without writing or guessing a date.
   Exact legacy decimal conversion is required; values that cannot be represented
@@ -76,10 +85,13 @@ tax engine, exchange rates, payment status, or external finance integration.
   tracking basis. Do not fabricate line allocations from a project total.
 - Legacy `spent` is a reported aggregate, not paid status or automatically an
   itemized actual. Keep it separate from new recorded actuals. A combined
-  life-to-date total requires explicit PM reconciliation and an opening-cost
+  life-to-date total requires explicit PM clarification and an opening-cost
   basis/cutoff; records asserted to be included in that opening basis must not
   count again. Before reconciliation, show the two components separately and
   report the combined total unknown.
+- This is clarification of recorded legacy facts, not accounting reconciliation.
+  It must not prevent the project Index Card opening or make project loading
+  contingent on a manual migration. Missing historical data remains unknown.
 - Missing is not zero. A sum of recorded entries may be exactly zero while
   total project commitments/costs remain incomplete. Show completeness and scope
   of coverage alongside every total. No automatic completeness claim from an
@@ -94,17 +106,23 @@ all relationships resolve against the same canonical model. Preserve historical
 source references and created/updated event identity; do not accept arbitrary
 provenance from an AI/client payload.
 
-- Categories are editable local records, initially offered from the owner's
-  construction list, never an imposed accounting code system.
-- Budget lines own description, category, baseline allocation, optional allowance
-  designation/expected selection cost, scope/activity IDs, optional external
-  vendor reference, notes, and active status. Revised amounts are derived from
-  baseline allocation plus approved CO allocations, not independently editable.
+- Categories support manual and AI-assisted creation/editing as project records,
+  initially offered from the owner's construction list, never an imposed
+  accounting code system. The exact starter list is preserved in the directive.
+- Budget lines own stable ID, description, category, optional cost code/trade,
+  baseline allocation, optional allowance designation, original allowance,
+  current expected/selected cost and allowance status, scope/activity IDs,
+  optional stable trade/vendor reference, notes, status, and active state.
+  Allowance selection/category is metadata, not a new Selections module. Original
+  recorded allowance and later corrections remain traceable. Per-line committed
+  and actual amounts are derived from financial records. Revised amounts derive
+  from baseline allocation plus approved CO allocations, not independent edits.
 - Project baseline and line allocations are distinct. Allocating a line does
   not increase the project baseline. Show the difference as unallocated baseline
   or over-allocation; do not silently normalize either side.
 - Commitments have a known amount, status (`DRAFT`, `COMMITTED`, `CLOSED`, `VOID`),
-  reference/PO, optional vendor reference, and line allocations. `COMMITTED` and
+  reference/PO, explicit scope associations, optional schedule association,
+  optional stable vendor/trade reference, and line allocations. `COMMITTED` and
   `CLOSED` count as committed cost; closed is not paid. Moving draft to committed
   requires explicit confirmation. Corrections/voids are new events.
 - A commitment can allocate across multiple lines: allocations plus an explicitly
@@ -147,7 +165,8 @@ a new, linked CO. Approved cost/allocations cannot be edited in place: explicitl
 void and replace with preserved history. Notes can be corrected by a new event.
 
 Each CO has stable ID and project-unique number, title/description/reason, signed
-cost impact or unknown, requested date, client approval state, notes, same-project
+cost impact or unknown, requested/proposed dates, approved/rejected dates when
+applicable, client approval state, notes, same-project
 scope/activity associations, budget allocations and source/event provenance.
 Supporting-document references remain unpopulated unless an existing valid
 canonical reference can be resolved; no storage feature is introduced.
@@ -187,7 +206,7 @@ does not create or approve new scope automatically.
 ## 5. Shared manual/AI command path and delivery safety
 
 Add pure financial command validation/builders and read models, with injected
-clock/IDs. Manual forms and future financial interpretation adapters must emit
+clock/IDs. Manual forms and AI-assisted financial interpretation adapters must emit
 the same typed commands; no HTTP, speech or model-provider assumptions in these
 functions. Keep interpretation outside deterministic financial authority.
 
@@ -215,11 +234,19 @@ Schedule/History views at the applied revision or newer. UI requests are bound t
 project and render generation; late responses cannot replace newer state. Report
 refresh failure as stale/unavailable, separately from confirmed persistence.
 
-AI coverage for every new financial command must be listed as implemented/tested
-or pending. A command-equivalence harness is required now; it does not stand in
-for a working natural-language adapter. The permanent requirement permits eventual
-coverage, so do not label Phase 4 universally AI-functional unless that adapter
-coverage is actually delivered. Its scope must be agreed before implementation.
+AI-assisted interpretation and proposed entry/update is a requirement for every
+new PM-owned financial record/field, not an alternative to manual management.
+Plan the actual financial proposal adapter and accessible PM interaction, not just
+a command-equivalence harness. Resolve project/entity/field against current state,
+ask for ambiguous or missing information, and use the same validated commands,
+review, confirmation, canonical apply, verified outcome and dependent refresh.
+The AI may propose; it cannot set trusted provenance or write model state directly.
+
+The Universal Contract's “eventually” accommodates tracked delivery stages and
+existing-module gaps; it does not permit quietly deleting AI coverage from the
+plan. List every financial operation's manual and AI tests. Pending work stays
+explicitly incomplete, never reported as full contract functionality. No unrelated
+module is authorized merely because the permanent contract applies to it.
 
 ## 6. Factual intelligence and module synchronization
 
@@ -229,11 +256,25 @@ Scope with unknown cost/no CO association; unpriced pending CO; pending CO with
 explicitly linked critical activity. Each finding includes project/revision and
 source record IDs. Missing coverage means “not recorded,” not “not purchased.”
 
+Also support line-without-scope and cost-record-without-scope observations where
+the structured record warrants PM attention. Distinguish a known expected cost
+with no recorded commitment from a truly unknown cost. Do not label a Scope change
+“approved” or a scope/trade association “wrong” without the explicit canonical
+approval or conflicting relationship needed to establish that claim. A PM can
+start a DRAFT CO from a Scope item or Budget exposure, carrying that project's
+actual associations; no generated price, approval or schedule mutation.
+
 Only add near-term unconfirmed-commitment observations where explicit line/activity
 relationships and canonical forecast dates support them. No inferred vendor, no
 financial warning solely because a screen needs content. Overview and Dashboard
 show actionable financial facts from the same derived summary, not a second total
 or an invented combined integrity score. Budget retains detailed financial control.
+
+Budget's top summary shows Original Budget, Approved Changes, Current Budget,
+Committed, Actual Recorded, Pending CO Exposure, and Remaining/Uncommitted, with
+explicit currency/coverage. Use compact operational typography and avoid excessive
+cards. Provide category/trade/scope grouping to explain over/under expectation.
+Do not duplicate the detailed financial workspace on the portfolio Dashboard.
 
 ## 7. Proposed implementation sequence and review gates
 
@@ -250,12 +291,12 @@ code is implemented by this audit.
 | 5 | Worker read/preview wiring and canonical reconciliation, `src/worker/index.ts`, `src/worker/entry.ts`; repository additions only if a required exact-event read is missing | New `test/contract/budget-routes.test.ts`, `test/contract/change-order-routes.test.ts`, `test/integration/financial-persistence.test.ts`: auth, project isolation, stale revision, concurrent approval, duplicate/catch path, uncertain delivery, all-or-nothing D1 batch. |
 | 6 | Shared allowance ownership and financial summary integration: `src/operator/scope.ts`, `src/operator/project-summary.ts`, Scope compatibility adapter where needed | `test/integration/financial-cross-module.test.ts`; existing Scope/summary tests. Editing one allowance through either surface updates the same fact. Missing historical amounts remain unknown. |
 | 7 | Real manual workspaces: new `src/app/views/indexCard/budget.ts`, `src/app/views/indexCard/changeOrders.ts`; update `src/app/views/indexCard/shell.ts`, `src/app/api.ts`, `src/app/types.ts`, `src/app/format.ts`, `src/app/views/indexCard/overview.ts`, `src/app/styles.css` | New app Budget/CO tests; exact minor-unit display, manual create/edit/correct/deactivate, real controls outside diagnostics, confirmation, reload, cross-project and stale-response tests. |
-| 8 | Universal-contract financial coverage matrix and manual/AI command-equivalence tests in `test/unit/financial-interaction.test.ts`; agreed financial interpreter slice only | Same resolved business input produces equivalent canonical facts; missing/ambiguous project/entity/amount/currency clarifies; no arbitrary derived/provenance writes. Report uncovered natural-language commands honestly. |
+| 8 | Actual financial AI-assisted proposal path plus field-by-field manual/AI coverage matrix; extend `src/operator/conversation.ts`, `src/operator/interpreter.ts`, `src/operator/claim-compiler.ts`, `src/operator/conversation-turn.ts`, `src/worker/conversation-field-model.ts` only at their established boundaries, and expose it in Budget/CO UI; new `test/unit/financial-interaction.test.ts`, `test/integration/financial-conversation.test.ts` | Resolve and clarify before proposing; invoke the same commands as manual controls; preview/correct/defer/cancel/confirm; verify persisted outcome and dependent refresh. Test equivalent business state, no raw mutations or client-assigned provenance, and every planned PM-owned financial record/field. A fake interpreter-only test is not proof of a functioning UI adapter. |
 | 9 | Local seeded browser acceptance, full regression/CI, final module matrix | Full Budget/CO owner walkthrough, screenshots/read-back/history evidence, no hidden schedule changes; all CI jobs pass at final feature SHA. No deployment/merge. |
 
-Before task 1, turn this approved proposal into exact RED/GREEN command-level tasks
-with ledger and final operation/route names. Do not use this sequence to bypass
-design approval or improvise unresolved financial semantics.
+Before task 1, resolve the engineering design with the authoritative implementer
+and present exact RED/GREEN command-level tasks with ledger and final operation/
+route names. Do not use this outline to improvise unresolved financial semantics.
 
 ## 8. Verification and guardrails
 
@@ -281,11 +322,18 @@ projects. Remote staging mutation would require separate authorization. Preserve
 `howler-intelligence-staging`, D1 ID `b1049979-11cc-4faa-9a94-a0f42f9f4f23`,
 `HOWLER_ADMIN_KEY`, existing contracts, shadow mode and all false live-system flags.
 
-## 9. Decisions to approve before code
+## 9. Requirements versus proposed engineering decisions
 
-Approve the proposed canonical financial submodel, legacy reconciliation and CO
-void/replacement rules. Confirm whether USD-only editing is sufficient for this
-pilot, and whether Phase 4 delivers manual management plus tested AI-ready commands
-with explicit pending interpreter coverage, or includes full financial conversation
-coverage now. These materially affect implementation scope; they are not assumptions
-to conceal in code. No feature implementation or Phase 4 completion is claimed yet.
+The owner has already specified both required modules, manual-first plus AI-assisted
+interaction, financial truth, explicit currency, cross-module synchronization,
+history, acceptance workflows and scope limits. Do not ask the owner to reapprove
+these as optional features. In particular, USD-only editing and a manual-only
+replacement for the AI requirement were unsupported choices in the earlier audit
+and are removed.
+
+The proposed optional financial submodel, legacy aggregate clarification and
+exact CO transition/correction rules remain engineering design choices to review
+with the authoritative implementer. The original instruction is audit → present
+implementation plan → execute under branch/test/browser/CI discipline. This audit's
+nine-task outline is not the missing detailed implementation plan and does not
+itself complete that instruction. No application implementation is claimed here.

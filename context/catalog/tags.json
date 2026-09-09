@@ -3,11 +3,27 @@
   "tags": {
     "product": ["contract-universal-data-interaction"],
     "canonical-data": ["contract-universal-data-interaction"],
-    "manual-ai": ["contract-universal-data-interaction"],
-    "phase4": ["receipt-v096-phase3", "audit-v096-phase4"],
+    "manual-ai": [
+      "contract-universal-data-interaction",
+      "reconciliation-v096-phase4"
+    ],
+    "phase4": [
+      "receipt-v096-phase3",
+      "audit-v096-phase4",
+      "directive-v096-phase4",
+      "reconciliation-v096-phase4"
+    ],
     "scope": ["receipt-v096-phase3"],
-    "budget": ["audit-v096-phase4"],
-    "change-orders": ["audit-v096-phase4"],
+    "budget": [
+      "audit-v096-phase4",
+      "directive-v096-phase4",
+      "reconciliation-v096-phase4"
+    ],
+    "change-orders": [
+      "audit-v096-phase4",
+      "directive-v096-phase4",
+      "reconciliation-v096-phase4"
+    ],
     "safety": [
       "skill-cloudflare-safety",
       "runtime-wrangler-config",

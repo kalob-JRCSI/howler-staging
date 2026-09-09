@@ -13,6 +13,14 @@ The permanent Universal Data Interaction Contract now governs all mutable PM dat
 Application implementation has not started; the financial design choices are
 awaiting review. The older Phase 3 closeout below is historical context.
 
+Both owner instructions are required inputs: the complete Phase 4 directive and
+the Universal Data Interaction Contract. The reconciliation document maps their
+requirements to delivery and acceptance tests. The earlier audit's USD-only and
+optional-AI choices are withdrawn; do not carry them into implementation. Claude
+remains authoritative implementer, with bounded Codex support; older text below
+about Codex inheriting that role applied only to Phase 3 closeout. The detailed
+implementation plan is still owed; a proposed task outline is not a completed plan.
+
 Storage clarification: the owner accepted hybrid lifecycle architecture only.
 Future file-module audits may justify D1 read/projection tables; canonical events
 and project state remain authoritative. No Phase 4 storage implementation or

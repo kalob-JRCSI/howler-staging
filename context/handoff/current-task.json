@@ -6,9 +6,11 @@
   "status": "IN_PROGRESS",
   "baseSha": "3aed78e2241a06e3b299baec8a73a2b6b8f11277",
   "blocks": ["v096-phase4-implementation", "v096-phase5"],
-  "summary": "Owner accepted Phase 3 as a development milestone at the exact base SHA (receipt v096-phase3-scope-workspace.md) and approved hybrid storage direction only, allowing future justified D1 projections but no Phase 4 storage activation. New branch codex/v096-phase4-budget-change-orders. Permanent Universal Data Interaction Contract recorded and routed from AGENTS.md. Financial capability audit and proposed nine-task sequence are ready; detailed execution plan and application code await design review, including legacy-spent reconciliation, CO reversal semantics, currency support and financial AI coverage. Baseline targeted tests passed 204/204. Local Node 24.19.0 differs from CI's pinned 24.20.0; pin unchanged. No application code, configuration, migration, deployment or merge changed. Do not begin implementation merely because the branch exists.",
+  "summary": "Phase 3 accepted at exact base SHA as a development milestone; hybrid storage architecture accepted without Phase 4 activation, with future justified D1 projections allowed. Read BOTH the full Phase 4 directive and Universal Data Interaction Contract, then the requirements reconciliation and corrected capability audit. Phase 4 requires Budget + Change Orders manual management and safe AI-assisted proposals through the same canonical state, history and dependent synchronization. USD-only editing and substituting AI-ready commands for actual assisted entry were unsupported audit proposals and are removed. Claude remains authoritative implementer; Codex provides bounded support. The detailed implementation plan is still owed; the nine-task outline is not that plan. Baseline tests previously passed 204/204; no application implementation or new CI verification claimed. Local Node 24.19.0 differs from pinned CI 24.20.0. No code/configuration/migration/push/merge/deployment or storage activation in this documentation reconciliation.",
   "relevantPaths": [
+    "docs/superpowers/specs/2026-09-08-howler-phase4-budget-change-orders-directive.md",
     "docs/superpowers/specs/2026-09-08-howler-universal-data-interaction-contract.md",
+    "docs/superpowers/specs/2026-09-09-howler-phase4-requirements-reconciliation.md",
     "docs/superpowers/specs/2026-09-09-howler-phase4-financial-capability-audit.md",
     "context/receipts/accepted/v096-phase3-scope-workspace.md",
     "src/domain/types.ts",
