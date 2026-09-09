@@ -174,6 +174,32 @@ function isProductOperatorRoute(request: Request, pathname: string): boolean {
   ) {
     return true;
   }
+  // Phase 4 recovery (Budget + Change Orders): same pattern as Schedule/Scope immediately above --
+  // apply reuses the existing events/apply-shadow route already allowlisted below.
+  if (
+    request.method === "GET" &&
+    /^\/v1\/projects\/[^/]+\/budget$/.test(pathname)
+  ) {
+    return true;
+  }
+  if (
+    request.method === "POST" &&
+    /^\/v1\/projects\/[^/]+\/budget\/commands\/preview$/.test(pathname)
+  ) {
+    return true;
+  }
+  if (
+    request.method === "GET" &&
+    /^\/v1\/projects\/[^/]+\/change-orders$/.test(pathname)
+  ) {
+    return true;
+  }
+  if (
+    request.method === "POST" &&
+    /^\/v1\/projects\/[^/]+\/change-orders\/commands\/preview$/.test(pathname)
+  ) {
+    return true;
+  }
   if (
     request.method === "POST" &&
     /^\/v1\/projects\/[^/]+\/events\/apply-shadow$/.test(pathname)

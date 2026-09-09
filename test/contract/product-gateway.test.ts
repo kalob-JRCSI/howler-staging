@@ -290,4 +290,64 @@ describe("authenticated product gateway", () => {
     );
     expect(applyResponse.status).toBe(201);
   });
+
+  // Phase 4 recovery (Budget + Change Orders): the Budget module's own read view and its
+  // preview -> apply save model must be reachable through the product session, following the
+  // exact same pattern the Schedule test above already proves.
+  it("exposes the Budget module's read view and save flow to a product session, without a bearer admin key", async () => {
+    const product = await productEnv();
+    await legacyWorker.fetch(
+      new Request("https://example.test/v1/projects/deboard-v091/seed", {
+        method: "POST",
+        headers: { authorization: `Bearer ${ADMIN_KEY}` },
+      }),
+      product,
+    );
+    const cookie = await loginCookie(product);
+
+    const budgetResponse = await worker.fetch(
+      new Request("https://example.test/v1/projects/deboard-v091/budget", {
+        headers: { cookie },
+      }),
+      product,
+    );
+    expect(budgetResponse.status).toBe(200);
+    const budget = (await jsonBody(budgetResponse)) as { initialized: boolean };
+    expect(budget.initialized).toBe(false);
+
+    const previewResponse = await worker.fetch(
+      new Request(
+        "https://example.test/v1/projects/deboard-v091/budget/commands/preview",
+        {
+          method: "POST",
+          headers: { cookie, "content-type": "application/json" },
+          body: JSON.stringify({
+            command: { kind: "INITIALIZE_FINANCIALS", currency: "USD" },
+          }),
+        },
+      ),
+      product,
+    );
+    expect(previewResponse.status).toBe(200);
+    const preview = (await jsonBody(previewResponse)) as {
+      event: unknown;
+      reviewToken: string;
+    };
+
+    const applyResponse = await worker.fetch(
+      new Request(
+        "https://example.test/v1/projects/deboard-v091/events/apply-shadow",
+        {
+          method: "POST",
+          headers: { cookie, "content-type": "application/json" },
+          body: JSON.stringify({
+            event: preview.event,
+            reviewToken: preview.reviewToken,
+          }),
+        },
+      ),
+      product,
+    );
+    expect(applyResponse.status).toBe(201);
+  });
 });

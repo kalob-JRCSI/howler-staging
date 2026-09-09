@@ -72,6 +72,18 @@ import {
   ScopeCommandError,
 } from "../operator/scope";
 import type { ScopeCommandV096 } from "../operator/scope";
+import {
+  buildBudgetEvent,
+  buildBudgetView,
+  BudgetCommandError,
+} from "../operator/budget";
+import type { BudgetCommandV097 } from "../operator/budget";
+import {
+  buildChangeOrderEvent,
+  buildChangeOrdersView,
+  ChangeOrderCommandError,
+} from "../operator/change-orders";
+import type { ChangeOrderCommandV097 } from "../operator/change-orders";
 
 // Engine/admin-page compatibility version. Distinct from GET /health's own `version` field, which
 // buildHealthReport (src/worker/health.ts) now owns and reports as "0.9.5" with an additive
@@ -654,6 +666,454 @@ function validateScopeCommandShape(raw: unknown): string[] {
     case "DEACTIVATE_SCOPE_ITEM":
       checkString(record, "scopeItemId", errors);
       break;
+  }
+  return errors;
+}
+
+function checkNumberField(
+  record: Record<string, unknown>,
+  key: string,
+  errors: string[],
+  required = true,
+): void {
+  const value = record[key];
+  if (value === undefined) {
+    if (required) errors.push(`${key} is required`);
+    return;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    errors.push(`${key} must be a finite number`);
+  }
+}
+
+function checkBooleanField(
+  record: Record<string, unknown>,
+  key: string,
+  errors: string[],
+  required = true,
+): void {
+  const value = record[key];
+  if (value === undefined) {
+    if (required) errors.push(`${key} is required`);
+    return;
+  }
+  if (typeof value !== "boolean") {
+    errors.push(`${key} must be a boolean`);
+  }
+}
+
+function checkStringArrayField(
+  record: Record<string, unknown>,
+  key: string,
+  errors: string[],
+  required = true,
+): void {
+  const value = record[key];
+  if (value === undefined) {
+    if (required) errors.push(`${key} is required`);
+    return;
+  }
+  if (!Array.isArray(value) || value.some((v) => typeof v !== "string")) {
+    errors.push(`${key} must be an array of strings`);
+  }
+}
+
+/** Accepts null when `nullable` -- used for the "clear this optional association" commands. */
+function checkNullableStringField(
+  record: Record<string, unknown>,
+  key: string,
+  errors: string[],
+): void {
+  const value = record[key];
+  if (value === undefined) {
+    errors.push(`${key} is required (use null to clear it)`);
+    return;
+  }
+  if (value === null) return;
+  if (typeof value !== "string" || value.trim().length === 0) {
+    errors.push(`${key} must be a non-empty string or null`);
+  }
+}
+
+function checkMoneyShape(
+  record: Record<string, unknown>,
+  key: string,
+  errors: string[],
+  options: { required?: boolean; nullable?: boolean } = {},
+): void {
+  const { required = true, nullable = false } = options;
+  const value = record[key];
+  if (value === undefined) {
+    if (required) errors.push(`${key} is required`);
+    return;
+  }
+  if (value === null) {
+    if (!nullable) errors.push(`${key} must not be null`);
+    return;
+  }
+  // `value` can no longer be null/undefined here (both handled above), so `typeof !== "object"`
+  // alone already rejects every non-object case, including falsy primitives (0, "", false).
+  if (typeof value !== "object" || Array.isArray(value)) {
+    errors.push(`${key} must be an object with amountMinor and currency`);
+    return;
+  }
+  const money = value as Record<string, unknown>;
+  if (
+    typeof money.amountMinor !== "number" ||
+    !Number.isFinite(money.amountMinor)
+  ) {
+    errors.push(`${key}.amountMinor must be a finite number`);
+  }
+  if (typeof money.currency !== "string" || !money.currency) {
+    errors.push(`${key}.currency is required`);
+  }
+}
+
+function checkAllocationsShape(
+  record: Record<string, unknown>,
+  key: string,
+  errors: string[],
+  required = false,
+): void {
+  const value = record[key];
+  if (value === undefined) {
+    if (required) errors.push(`${key} is required`);
+    return;
+  }
+  if (!Array.isArray(value)) {
+    errors.push(`${key} must be an array`);
+    return;
+  }
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      errors.push(`${key} entries must be objects`);
+      continue;
+    }
+    const allocation = entry as Record<string, unknown>;
+    checkString(allocation, "budgetLineId", errors);
+    checkMoneyShape(allocation, "amount", errors);
+  }
+}
+
+const BUDGET_COMMAND_KINDS = new Set([
+  "INITIALIZE_FINANCIALS",
+  "SET_FINANCIAL_BASELINE",
+  "ADD_CATEGORY",
+  "SET_CATEGORY_NAME",
+  "SET_CATEGORY_SORT_ORDER",
+  "SET_CATEGORY_NOTES",
+  "DEACTIVATE_CATEGORY",
+  "ADD_LINE",
+  "SET_LINE_DESCRIPTION",
+  "SET_LINE_CATEGORY",
+  "SET_LINE_COST_CODE",
+  "SET_LINE_TRADE",
+  "SET_LINE_BASELINE_AMOUNT",
+  "SET_LINE_IS_ALLOWANCE",
+  "SET_LINE_VENDOR",
+  "ASSOCIATE_LINE_SCOPE_ITEMS",
+  "SET_LINE_NOTES",
+  "DEACTIVATE_LINE",
+  "ADD_COMMITMENT",
+  "SET_COMMITMENT_AMOUNT",
+  "SET_COMMITMENT_ALLOCATIONS",
+  "SET_COMMITMENT_VENDOR",
+  "SET_COMMITMENT_ACTIVITY",
+  "ASSOCIATE_COMMITMENT_SCOPE_ITEMS",
+  "SET_COMMITMENT_REFERENCE",
+  "SET_COMMITMENT_NOTES",
+  "VOID_COMMITMENT",
+  "ADD_ACTUAL_COST",
+  "SET_ACTUAL_COST_AMOUNT",
+  "SET_ACTUAL_COST_DATE",
+  "SET_ACTUAL_COST_DESCRIPTION",
+  "SET_ACTUAL_COST_BUDGET_LINE",
+  "SET_ACTUAL_COST_COMMITMENT",
+  "SET_ACTUAL_COST_REFERENCE",
+  "SET_ACTUAL_COST_NOTES",
+  "VOID_ACTUAL_COST",
+]);
+
+/**
+ * Structural-only validation of a BudgetCommandV097, mirroring validateScopeCommandShape's own
+ * pattern exactly -- a malformed field is always a clean 400 here, never a raw TypeError
+ * surfacing as a 500. Domain-level checks (does the referenced category/line/commitment actually
+ * exist, does its currency match the project's) remain buildBudgetEvent's own job.
+ */
+function validateBudgetCommandShape(raw: unknown): string[] {
+  const errors: string[] = [];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return ["command must be a JSON object"];
+  }
+  const record = raw as Record<string, unknown>;
+  if (
+    typeof record.kind !== "string" ||
+    !BUDGET_COMMAND_KINDS.has(record.kind)
+  ) {
+    return [
+      `command.kind must be one of: ${[...BUDGET_COMMAND_KINDS].join(", ")}`,
+    ];
+  }
+  switch (record.kind) {
+    case "INITIALIZE_FINANCIALS":
+      checkString(record, "currency", errors);
+      break;
+    case "SET_FINANCIAL_BASELINE":
+      checkMoneyShape(record, "baseline", errors);
+      break;
+    case "ADD_CATEGORY":
+      checkString(record, "name", errors);
+      checkBooleanField(record, "isDefault", errors, false);
+      checkNumberField(record, "sortOrder", errors, false);
+      checkString(record, "notes", errors, false);
+      break;
+    case "SET_CATEGORY_NAME":
+      checkString(record, "categoryId", errors);
+      checkString(record, "name", errors);
+      break;
+    case "SET_CATEGORY_SORT_ORDER":
+      checkString(record, "categoryId", errors);
+      checkNumberField(record, "sortOrder", errors);
+      break;
+    case "SET_CATEGORY_NOTES":
+      checkString(record, "categoryId", errors);
+      checkString(record, "notes", errors);
+      break;
+    case "DEACTIVATE_CATEGORY":
+      checkString(record, "categoryId", errors);
+      break;
+    case "ADD_LINE":
+      checkString(record, "categoryId", errors);
+      checkString(record, "description", errors);
+      checkString(record, "costCode", errors, false);
+      checkString(record, "trade", errors, false);
+      checkMoneyShape(record, "baselineAmount", errors, { required: false });
+      checkBooleanField(record, "isAllowance", errors, false);
+      checkString(record, "vendorRef", errors, false);
+      checkStringArrayField(record, "scopeItemIds", errors, false);
+      checkString(record, "notes", errors, false);
+      break;
+    case "SET_LINE_DESCRIPTION":
+      checkString(record, "budgetLineId", errors);
+      checkString(record, "description", errors);
+      break;
+    case "SET_LINE_CATEGORY":
+      checkString(record, "budgetLineId", errors);
+      checkString(record, "categoryId", errors);
+      break;
+    case "SET_LINE_COST_CODE":
+      checkString(record, "budgetLineId", errors);
+      checkString(record, "costCode", errors);
+      break;
+    case "SET_LINE_TRADE":
+      checkString(record, "budgetLineId", errors);
+      checkString(record, "trade", errors);
+      break;
+    case "SET_LINE_BASELINE_AMOUNT":
+      checkString(record, "budgetLineId", errors);
+      checkMoneyShape(record, "baselineAmount", errors, { nullable: true });
+      break;
+    case "SET_LINE_IS_ALLOWANCE":
+      checkString(record, "budgetLineId", errors);
+      checkBooleanField(record, "isAllowance", errors);
+      break;
+    case "SET_LINE_VENDOR":
+      checkString(record, "budgetLineId", errors);
+      checkString(record, "vendorRef", errors);
+      break;
+    case "ASSOCIATE_LINE_SCOPE_ITEMS":
+      checkString(record, "budgetLineId", errors);
+      checkStringArrayField(record, "scopeItemIds", errors);
+      break;
+    case "SET_LINE_NOTES":
+      checkString(record, "budgetLineId", errors);
+      checkString(record, "notes", errors);
+      break;
+    case "DEACTIVATE_LINE":
+      checkString(record, "budgetLineId", errors);
+      break;
+    case "ADD_COMMITMENT":
+      checkMoneyShape(record, "amount", errors);
+      checkAllocationsShape(record, "allocations", errors, false);
+      checkString(record, "vendorRef", errors, false);
+      checkString(record, "activityId", errors, false);
+      checkStringArrayField(record, "scopeItemIds", errors, false);
+      checkString(record, "reference", errors, false);
+      checkString(record, "notes", errors, false);
+      break;
+    case "SET_COMMITMENT_AMOUNT":
+      checkString(record, "commitmentId", errors);
+      checkMoneyShape(record, "amount", errors);
+      break;
+    case "SET_COMMITMENT_ALLOCATIONS":
+      checkString(record, "commitmentId", errors);
+      checkAllocationsShape(record, "allocations", errors, true);
+      break;
+    case "SET_COMMITMENT_VENDOR":
+      checkString(record, "commitmentId", errors);
+      checkString(record, "vendorRef", errors);
+      break;
+    case "SET_COMMITMENT_ACTIVITY":
+      checkString(record, "commitmentId", errors);
+      checkString(record, "activityId", errors);
+      break;
+    case "ASSOCIATE_COMMITMENT_SCOPE_ITEMS":
+      checkString(record, "commitmentId", errors);
+      checkStringArrayField(record, "scopeItemIds", errors);
+      break;
+    case "SET_COMMITMENT_REFERENCE":
+      checkString(record, "commitmentId", errors);
+      checkString(record, "reference", errors);
+      break;
+    case "SET_COMMITMENT_NOTES":
+      checkString(record, "commitmentId", errors);
+      checkString(record, "notes", errors);
+      break;
+    case "VOID_COMMITMENT":
+      checkString(record, "commitmentId", errors);
+      break;
+    case "ADD_ACTUAL_COST":
+      checkMoneyShape(record, "amount", errors);
+      checkString(record, "date", errors);
+      checkString(record, "description", errors);
+      checkString(record, "budgetLineId", errors, false);
+      checkString(record, "commitmentId", errors, false);
+      checkString(record, "reference", errors, false);
+      checkString(record, "notes", errors, false);
+      break;
+    case "SET_ACTUAL_COST_AMOUNT":
+      checkString(record, "actualCostId", errors);
+      checkMoneyShape(record, "amount", errors);
+      break;
+    case "SET_ACTUAL_COST_DATE":
+      checkString(record, "actualCostId", errors);
+      checkString(record, "date", errors);
+      break;
+    case "SET_ACTUAL_COST_DESCRIPTION":
+      checkString(record, "actualCostId", errors);
+      checkString(record, "description", errors);
+      break;
+    case "SET_ACTUAL_COST_BUDGET_LINE":
+      checkString(record, "actualCostId", errors);
+      checkNullableStringField(record, "budgetLineId", errors);
+      break;
+    case "SET_ACTUAL_COST_COMMITMENT":
+      checkString(record, "actualCostId", errors);
+      checkNullableStringField(record, "commitmentId", errors);
+      break;
+    case "SET_ACTUAL_COST_REFERENCE":
+      checkString(record, "actualCostId", errors);
+      checkString(record, "reference", errors);
+      break;
+    case "SET_ACTUAL_COST_NOTES":
+      checkString(record, "actualCostId", errors);
+      checkString(record, "notes", errors);
+      break;
+    case "VOID_ACTUAL_COST":
+      checkString(record, "actualCostId", errors);
+      break;
+  }
+  return errors;
+}
+
+const CHANGE_ORDER_COMMAND_KINDS = new Set([
+  "ADD_CHANGE_ORDER",
+  "SET_TITLE",
+  "SET_DESCRIPTION",
+  "SET_REASON",
+  "SET_NUMBER",
+  "SET_NOTES",
+  "SET_COST",
+  "SET_COST_ALLOCATIONS",
+  "SET_DECLARED_SCHEDULE_IMPACT",
+  "ASSOCIATE_SCOPE_ITEMS",
+  "ASSOCIATE_ACTIVITIES",
+  "SET_CATEGORY",
+  "SET_CLIENT_APPROVED",
+  "PROPOSE",
+  "SUBMIT_FOR_APPROVAL",
+  "APPROVE",
+  "REJECT",
+  "REOPEN_TO_DRAFT",
+  "VOID",
+]);
+
+/**
+ * Structural-only validation of a ChangeOrderCommandV097, mirroring the Budget/Scope validators
+ * above. Lifecycle transitions (PROPOSE, APPROVE, ...) carry only `changeOrderId` -- their legal
+ * prior-status checks are buildChangeOrderEvent's own job, not a shape concern.
+ */
+function validateChangeOrderCommandShape(raw: unknown): string[] {
+  const errors: string[] = [];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return ["command must be a JSON object"];
+  }
+  const record = raw as Record<string, unknown>;
+  if (
+    typeof record.kind !== "string" ||
+    !CHANGE_ORDER_COMMAND_KINDS.has(record.kind)
+  ) {
+    return [
+      `command.kind must be one of: ${[...CHANGE_ORDER_COMMAND_KINDS].join(", ")}`,
+    ];
+  }
+  if (record.kind === "ADD_CHANGE_ORDER") {
+    checkString(record, "title", errors);
+    checkMoneyShape(record, "cost", errors);
+    checkString(record, "description", errors, false);
+    checkString(record, "reason", errors, false);
+    checkString(record, "number", errors, false);
+    checkAllocationsShape(record, "costAllocations", errors, false);
+    checkNumberField(record, "declaredScheduleImpactDays", errors, false);
+    checkStringArrayField(record, "scopeItemIds", errors, false);
+    checkStringArrayField(record, "activityIds", errors, false);
+    checkString(record, "categoryId", errors, false);
+    checkString(record, "notes", errors, false);
+    return errors;
+  }
+  checkString(record, "changeOrderId", errors);
+  switch (record.kind) {
+    case "SET_TITLE":
+      checkString(record, "title", errors);
+      break;
+    case "SET_DESCRIPTION":
+      checkString(record, "description", errors);
+      break;
+    case "SET_REASON":
+      checkString(record, "reason", errors);
+      break;
+    case "SET_NUMBER":
+      checkString(record, "number", errors);
+      break;
+    case "SET_NOTES":
+      checkString(record, "notes", errors);
+      break;
+    case "SET_COST":
+      checkMoneyShape(record, "cost", errors);
+      break;
+    case "SET_COST_ALLOCATIONS":
+      checkAllocationsShape(record, "costAllocations", errors, true);
+      break;
+    case "SET_DECLARED_SCHEDULE_IMPACT":
+      if (record.declaredScheduleImpactDays === null) {
+        break;
+      }
+      checkNumberField(record, "declaredScheduleImpactDays", errors);
+      break;
+    case "ASSOCIATE_SCOPE_ITEMS":
+      checkStringArrayField(record, "scopeItemIds", errors);
+      break;
+    case "ASSOCIATE_ACTIVITIES":
+      checkStringArrayField(record, "activityIds", errors);
+      break;
+    case "SET_CATEGORY":
+      checkNullableStringField(record, "categoryId", errors);
+      break;
+    case "SET_CLIENT_APPROVED":
+      checkBooleanField(record, "clientApproved", errors);
+      break;
+    // PROPOSE / SUBMIT_FOR_APPROVAL / APPROVE / REJECT / REOPEN_TO_DRAFT / VOID carry only
+    // changeOrderId, already checked above.
   }
   return errors;
 }
@@ -1601,6 +2061,25 @@ async function handle(request: Request, env: Env): Promise<Response> {
     return json(buildScopeView(model));
   }
 
+  // Phase 4 (Budget + Change Orders): read-only, derived state, exactly like /scope above --
+  // reuses buildBudgetView()/buildChangeOrdersView() verbatim (src/operator/budget.ts,
+  // src/operator/change-orders.ts). No mutation, no second canonical financial store.
+  if (request.method === "GET" && parts.length === 4 && parts[3] === "budget") {
+    const model = await repo.loadProject(projectId);
+    if (!model) throw new HttpError(404, `Project ${projectId} not found`);
+    return json(buildBudgetView(model));
+  }
+
+  if (
+    request.method === "GET" &&
+    parts.length === 4 &&
+    parts[3] === "change-orders"
+  ) {
+    const model = await repo.loadProject(projectId);
+    if (!model) throw new HttpError(404, `Project ${projectId} not found`);
+    return json(buildChangeOrdersView(model));
+  }
+
   if (
     request.method === "GET" &&
     parts.length === 5 &&
@@ -1968,6 +2447,123 @@ async function handle(request: Request, env: Env): Promise<Response> {
       );
     } catch (error) {
       if (error instanceof ScopeCommandError) {
+        throw new HttpError(400, error.message);
+      }
+      throw error;
+    }
+    const result = await reviewedRun(repo, projectId, built.event);
+    return json({
+      projectRevision: result.model.revision,
+      baselineVersion: result.baseline?.version ?? null,
+      latestVersion: result.latest?.version ?? null,
+      comparisonVersion: result.comparisonBaseline?.version ?? null,
+      candidate: result.run.candidate,
+      delta: result.run.candidate.delta ?? null,
+      recoveryAnalysis: result.run.candidate.recoveryAnalysis,
+      supersededSources: result.run.candidate.supersededSources,
+      impactActivityIds: result.run.candidate.impactActivityIds,
+      oversight: result.run.oversight,
+      forecastable: result.run.forecastable,
+      commitmentEligible: result.run.commitmentEligible,
+      oversightPublishable: result.run.publishable,
+      reviewToken: result.reviewToken,
+      historyNote: built.historyNote,
+      clerical: built.clerical,
+      event: built.event,
+      persisted: false,
+      mode,
+      stagingOnly: mode === "shadow",
+    });
+  }
+
+  // Phase 4 (Budget + Change Orders): the same typed-command-to-canonical-event pattern
+  // Schedule/Scope established -- a BudgetCommandV097 becomes a well-formed ProjectEventV094
+  // (src/operator/budget.ts's buildBudgetEvent), previewed through the exact same reviewedRun.
+  // Applying reuses the existing POST .../events/apply-shadow route verbatim.
+  if (
+    request.method === "POST" &&
+    parts.length === 6 &&
+    parts[3] === "budget" &&
+    parts[4] === "commands" &&
+    parts[5] === "preview"
+  ) {
+    const body = (await readJson(request)) as {
+      command?: unknown;
+    } | null;
+    const commandErrors = validateBudgetCommandShape(body?.command);
+    if (commandErrors.length > 0) {
+      throw new HttpError(400, "Invalid budget command", {
+        errors: commandErrors,
+      });
+    }
+    const command = body?.command as BudgetCommandV097;
+    const model = await repo.loadProject(projectId);
+    if (!model) throw new HttpError(404, `Project ${projectId} not found`);
+    let built;
+    try {
+      built = buildBudgetEvent(model, command, new Date().toISOString(), () =>
+        crypto.randomUUID(),
+      );
+    } catch (error) {
+      if (error instanceof BudgetCommandError) {
+        throw new HttpError(400, error.message);
+      }
+      throw error;
+    }
+    const result = await reviewedRun(repo, projectId, built.event);
+    return json({
+      projectRevision: result.model.revision,
+      baselineVersion: result.baseline?.version ?? null,
+      latestVersion: result.latest?.version ?? null,
+      comparisonVersion: result.comparisonBaseline?.version ?? null,
+      candidate: result.run.candidate,
+      delta: result.run.candidate.delta ?? null,
+      recoveryAnalysis: result.run.candidate.recoveryAnalysis,
+      supersededSources: result.run.candidate.supersededSources,
+      impactActivityIds: result.run.candidate.impactActivityIds,
+      oversight: result.run.oversight,
+      forecastable: result.run.forecastable,
+      commitmentEligible: result.run.commitmentEligible,
+      oversightPublishable: result.run.publishable,
+      reviewToken: result.reviewToken,
+      historyNote: built.historyNote,
+      clerical: built.clerical,
+      event: built.event,
+      persisted: false,
+      mode,
+      stagingOnly: mode === "shadow",
+    });
+  }
+
+  if (
+    request.method === "POST" &&
+    parts.length === 6 &&
+    parts[3] === "change-orders" &&
+    parts[4] === "commands" &&
+    parts[5] === "preview"
+  ) {
+    const body = (await readJson(request)) as {
+      command?: unknown;
+    } | null;
+    const commandErrors = validateChangeOrderCommandShape(body?.command);
+    if (commandErrors.length > 0) {
+      throw new HttpError(400, "Invalid change order command", {
+        errors: commandErrors,
+      });
+    }
+    const command = body?.command as ChangeOrderCommandV097;
+    const model = await repo.loadProject(projectId);
+    if (!model) throw new HttpError(404, `Project ${projectId} not found`);
+    let built;
+    try {
+      built = buildChangeOrderEvent(
+        model,
+        command,
+        new Date().toISOString(),
+        () => crypto.randomUUID(),
+      );
+    } catch (error) {
+      if (error instanceof ChangeOrderCommandError) {
         throw new HttpError(400, error.message);
       }
       throw error;

@@ -137,6 +137,14 @@ describe("release gate: no legacy mutation route (real repo)", () => {
     // (src/operator/scope.ts's buildScopeEvent) and hands it to the same reviewedRun. The actual
     // write still only ever happens through the existing events/apply-shadow route above.
     "SEGMENTS(len=6){3=scope,4=commands,5=preview}",
+    // Phase 4 (Budget + Change Orders): POST /v1/projects/:id/budget/commands/preview and
+    // .../change-orders/commands/preview follow the exact same pattern as schedule/scope above --
+    // pure analysis, never a repository write. Each translates a typed BudgetCommandV097 /
+    // ChangeOrderCommandV097 (src/operator/budget.ts / src/operator/change-orders.ts) into a
+    // ProjectEventV094 and hands it to the same reviewedRun. The actual write still only ever
+    // happens through the existing events/apply-shadow route above.
+    "SEGMENTS(len=6){3=budget,4=commands,5=preview}",
+    "SEGMENTS(len=6){3=change-orders,4=commands,5=preview}",
   ];
 
   it("extracts exactly the accepted mutation route set from the real source, nothing more, nothing less", () => {
