@@ -76,6 +76,7 @@ function workspace(
     commitments: [],
     actualCosts: [],
     findings: [],
+    legacyBudget: null,
     ...overrides,
   };
 }
@@ -119,6 +120,10 @@ describe("renderBudget", () => {
     expect(
       body.querySelector('form[data-action="INITIALIZE_FINANCIALS"]'),
     ).not.toBeNull();
+    // No legacy budget on this project's profile -- never a dead "adopt" button.
+    expect(
+      body.querySelector('form[data-action="ADOPT_LEGACY_BASELINE"]'),
+    ).toBeNull();
   });
 
   it("shows baseline as Unknown, not $0, when never set", async () => {
@@ -343,5 +348,83 @@ describe("renderBudget: Phase 4 financial intelligence findings (Task 9)", () =>
     const body = document.createElement("div");
     await renderBudget(body, "carver");
     expect(body.textContent).not.toContain("Observations");
+  });
+});
+
+describe("renderBudget: ADOPT_LEGACY_BASELINE affordance (Phase 4 Task 12, legacy compatibility)", () => {
+  it("shows an 'adopt from project intake' action only when the backend reports a real legacy budget", async () => {
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve(
+        jsonResponse(
+          200,
+          workspace({ legacyBudget: { baseline: 310000, currency: "USD" } }),
+        ),
+      ),
+    );
+    const body = document.createElement("div");
+    await renderBudget(body, "carver");
+    expect(body.textContent).toContain("$310,000.00");
+    expect(
+      body.querySelector('form[data-action="ADOPT_LEGACY_BASELINE"]'),
+    ).not.toBeNull();
+  });
+
+  it("previews then requires confirmation before applying -- never an immediate clerical save", async () => {
+    let getBudgetCount = 0;
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith("/budget") && method === "GET") {
+        getBudgetCount += 1;
+        return Promise.resolve(
+          jsonResponse(
+            200,
+            getBudgetCount === 1
+              ? workspace({
+                  legacyBudget: { baseline: 310000, currency: "USD" },
+                })
+              : initializedWorkspace(),
+          ),
+        );
+      }
+      if (url.endsWith("/budget/commands/preview")) {
+        return Promise.resolve(
+          jsonResponse(200, {
+            projectRevision: 3,
+            reviewToken: "token-adopt",
+            historyNote:
+              "Adopted the legacy project budget baseline ($310,000.00) from project intake -- no re-entry required.",
+            clerical: false,
+            event: { id: "evt-adopt", baseRevision: 3 },
+            delta: null,
+            recoveryAnalysis: { status: "ON_TRACK", protectionActions: [] },
+          }),
+        );
+      }
+      if (url.endsWith("/events/apply-shadow")) {
+        return Promise.resolve(
+          jsonResponse(201, { applied: true, projectRevision: 4 }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${method} ${url}`);
+    });
+
+    const body = document.createElement("div");
+    await renderBudget(body, "carver");
+    const form = body.querySelector<HTMLFormElement>(
+      'form[data-action="ADOPT_LEGACY_BASELINE"]',
+    );
+    form?.dispatchEvent(new Event("submit", { cancelable: true }));
+    await flushAsyncWork();
+
+    const confirmButton = body.querySelector<HTMLButtonElement>(
+      "#budget-adopt-panel .sched-confirm",
+    );
+    expect(confirmButton).not.toBeNull();
+    expect(body.textContent).toContain("no re-entry required");
+
+    confirmButton?.click();
+    await flushAsyncWork();
+    expect(getBudgetCount).toBeGreaterThanOrEqual(2);
   });
 });

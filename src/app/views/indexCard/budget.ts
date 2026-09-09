@@ -170,8 +170,24 @@ export async function renderBudget(
   // ---------------------------------------------------------------------
 
   function renderUninitialized(): void {
+    const legacy = workspace.legacyBudget;
+    // Phase 4 Task 12 (legacy compatibility): only offered when the backend confirms there is a
+    // real Genesis-intake baseline/currency to adopt -- never a dead button most projects would
+    // hit with nothing to do.
+    const adoptSectionHtml = legacy
+      ? `
+      <div class="sched-consequence" style="border-color: var(--border);">
+        <p>This project's intake already recorded a budget of ${formatMoneyMinor({ amountMinor: Math.round(legacy.baseline * 100), currency: legacy.currency })}.</p>
+        <div class="sched-action-panel" id="budget-adopt-panel"></div>
+        <form data-action="ADOPT_LEGACY_BASELINE" class="sched-add-activity-form">
+          <button type="submit">Adopt from project intake</button>
+        </form>
+      </div>
+    `
+      : "";
     body.innerHTML = `
       <p class="ic-empty">This project's financials have not been set up yet. No budget, categories, or costs exist until you initialize it with a tracked currency.</p>
+      ${adoptSectionHtml}
       <div class="sched-action-panel" id="budget-init-panel"></div>
       <form data-action="INITIALIZE_FINANCIALS" class="sched-add-activity-form">
         <label>Currency
@@ -202,6 +218,16 @@ export async function renderBudget(
         },
         panel,
       );
+    });
+
+    const adoptPanel = body.querySelector<HTMLElement>("#budget-adopt-panel");
+    const adoptForm = body.querySelector<HTMLFormElement>(
+      'form[data-action="ADOPT_LEGACY_BASELINE"]',
+    );
+    adoptForm?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (!adoptPanel) return;
+      void runCommand({ kind: "ADOPT_LEGACY_BASELINE" }, adoptPanel);
     });
   }
 

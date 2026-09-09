@@ -32,7 +32,13 @@ import type {
   ProjectModelV094,
   SourceV094,
 } from "../domain/types";
-import { isSupportedCurrency, isValidMoney } from "../domain/money";
+import {
+  formatMoneyMinor,
+  isSupportedCurrency,
+  isValidMoney,
+  MoneyError,
+  parseMoneyInput,
+} from "../domain/money";
 
 // ---------------------------------------------------------------------------
 // Read model
@@ -307,6 +313,33 @@ export interface ProjectBudgetWorkspaceV097 {
   lines: BudgetLineViewV097[];
   commitments: CommitmentViewV097[];
   actualCosts: ActualCostViewV097[];
+  // Phase 4 Task 12 (legacy compatibility): non-null only when ADOPT_LEGACY_BASELINE would
+  // actually succeed right now -- the UI uses this to decide whether an "adopt from project
+  // intake" affordance is worth showing at all, never a dead button offered on every project.
+  legacyBudget: { baseline: number; currency: string } | null;
+}
+
+/**
+ * Phase 4 Task 12 (legacy compatibility): the one shared eligibility check for adopting
+ * `projectProfile.budget` (the Genesis-intake artifact) into this project's real, structured
+ * financials -- used by buildBudgetView (to decide whether to show the affordance) and mirrored
+ * by ADOPT_LEGACY_BASELINE's own handler (which re-derives a specific reason on each failure
+ * rather than reusing this boolean-shaped result). Never returns a currency this project doesn't
+ * actually support, and never returns non-null once a real baseline has already been set --
+ * adopting is a one-time bridge from legacy intake, not a standing alternate path to
+ * SET_FINANCIAL_BASELINE.
+ */
+export function computeAdoptableLegacyBaseline(
+  model: ProjectModelV094,
+): { baseline: number; currency: string } | null {
+  const legacyBudget = model.projectProfile?.budget;
+  if (!legacyBudget || legacyBudget.baseline === undefined) return null;
+  if (!isSupportedCurrency(legacyBudget.currency)) return null;
+  if (model.financials && model.financials.currency !== legacyBudget.currency) {
+    return null;
+  }
+  if (model.financials?.baseline) return null;
+  return { baseline: legacyBudget.baseline, currency: legacyBudget.currency };
 }
 
 /**
@@ -330,6 +363,7 @@ export function buildBudgetView(
       lines: [],
       commitments: [],
       actualCosts: [],
+      legacyBudget: computeAdoptableLegacyBaseline(model),
     };
   }
   return {
@@ -361,6 +395,7 @@ export function buildBudgetView(
     actualCosts: Object.values(fin.actualCosts)
       .map(viewRowFromActualCost)
       .sort((a, b) => a.date.localeCompare(b.date)),
+    legacyBudget: computeAdoptableLegacyBaseline(model),
   };
 }
 
@@ -371,6 +406,11 @@ export function buildBudgetView(
 export type BudgetCommandV097 =
   | { kind: "INITIALIZE_FINANCIALS"; currency: string }
   | { kind: "SET_FINANCIAL_BASELINE"; baseline: MoneyV097 }
+  // Phase 4 Task 12 (legacy compatibility): one-shot adoption of the Genesis-intake
+  // `projectProfile.budget.baseline`/`currency` into this project's real, structured financials
+  // -- no params, since everything it needs already lives on the project's own canonical state.
+  // See its handler below for exactly what "adopt" means when financials are/aren't initialized.
+  | { kind: "ADOPT_LEGACY_BASELINE" }
   | {
       kind: "ADD_CATEGORY";
       name: string;
@@ -646,6 +686,61 @@ export function buildBudgetEvent(
       "PROJECT_FINANCIALS_INITIALIZED",
       `Project financials initialized in ${command.currency}.`,
       [{ op: "INITIALIZE_PROJECT_FINANCIALS", currency: command.currency }],
+    );
+  }
+
+  if (command.kind === "ADOPT_LEGACY_BASELINE") {
+    const legacyBudget = model.projectProfile?.budget;
+    if (!legacyBudget || legacyBudget.baseline === undefined) {
+      throw new BudgetCommandError(
+        "No legacy project budget baseline found on this project's profile to adopt",
+      );
+    }
+    if (!isSupportedCurrency(legacyBudget.currency)) {
+      throw new BudgetCommandError(
+        `Legacy currency "${legacyBudget.currency}" is not a supported currency`,
+      );
+    }
+    if (
+      model.financials &&
+      model.financials.currency !== legacyBudget.currency
+    ) {
+      throw new BudgetCommandError(
+        `Legacy currency "${legacyBudget.currency}" does not match the project's already-tracked currency ${model.financials.currency}`,
+      );
+    }
+    if (model.financials?.baseline) {
+      throw new BudgetCommandError(
+        "Project financial baseline has already been set -- use SET_FINANCIAL_BASELINE to change it",
+      );
+    }
+    let baseline: MoneyV097;
+    try {
+      baseline = parseMoneyInput(
+        String(legacyBudget.baseline),
+        legacyBudget.currency,
+      );
+    } catch (error) {
+      if (error instanceof MoneyError) {
+        throw new BudgetCommandError(
+          `Legacy baseline amount "${String(legacyBudget.baseline)}" could not be adopted: ${error.message}`,
+        );
+      }
+      throw error;
+    }
+    const mutations: ProjectEventV094["mutations"] = model.financials
+      ? [{ op: "SET_PROJECT_FINANCIAL_BASELINE", baseline }]
+      : [
+          {
+            op: "INITIALIZE_PROJECT_FINANCIALS",
+            currency: legacyBudget.currency,
+          },
+          { op: "SET_PROJECT_FINANCIAL_BASELINE", baseline },
+        ];
+    return finish(
+      "PROJECT_FINANCIAL_BASELINE_ADOPTED_FROM_LEGACY",
+      `Adopted the legacy project budget baseline (${formatMoneyMinor(baseline)}) from project intake -- no re-entry required.`,
+      mutations,
     );
   }
 

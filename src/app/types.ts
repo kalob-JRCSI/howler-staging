@@ -430,11 +430,13 @@ export interface ProjectBudgetWorkspaceLike {
   commitments: CommitmentViewLike[];
   actualCosts: ActualCostViewLike[];
   findings: FinancialFindingLike[];
+  legacyBudget: { baseline: number; currency: string } | null;
 }
 
 export type BudgetCommandLike =
   | { kind: "INITIALIZE_FINANCIALS"; currency: string }
   | { kind: "SET_FINANCIAL_BASELINE"; baseline: MoneyLike }
+  | { kind: "ADOPT_LEGACY_BASELINE" }
   | {
       kind: "ADD_CATEGORY";
       name: string;

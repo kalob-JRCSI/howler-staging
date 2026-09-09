@@ -807,6 +807,7 @@ function checkAllocationsShape(
 const BUDGET_COMMAND_KINDS = new Set([
   "INITIALIZE_FINANCIALS",
   "SET_FINANCIAL_BASELINE",
+  "ADOPT_LEGACY_BASELINE",
   "ADD_CATEGORY",
   "SET_CATEGORY_NAME",
   "SET_CATEGORY_SORT_ORDER",
@@ -869,6 +870,9 @@ function validateBudgetCommandShape(raw: unknown): string[] {
       break;
     case "SET_FINANCIAL_BASELINE":
       checkMoneyShape(record, "baseline", errors);
+      break;
+    case "ADOPT_LEGACY_BASELINE":
+      // No fields -- everything it needs already lives on the project's own canonical state.
       break;
     case "ADD_CATEGORY":
       checkString(record, "name", errors);

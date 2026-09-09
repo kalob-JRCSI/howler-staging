@@ -105,6 +105,7 @@ function budgetWorkspace(
     commitments: [],
     actualCosts: [],
     findings: [],
+    legacyBudget: null,
     ...overrides,
   };
 }

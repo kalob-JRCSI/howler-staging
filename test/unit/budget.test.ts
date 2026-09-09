@@ -570,3 +570,135 @@ describe("buildBudgetEvent: source and verification", () => {
     ).toBe(built.event.sourceIds[0]);
   });
 });
+
+describe("buildBudgetEvent: ADOPT_LEGACY_BASELINE (Phase 4 Task 12, legacy compatibility)", () => {
+  it("initializes financials AND sets the baseline in one shot when financials do not yet exist", () => {
+    const built = buildBudgetEvent(
+      model({
+        projectProfile: {
+          baselineScope: [],
+          budget: { baseline: 310000, currency: "USD" },
+        },
+      }),
+      { kind: "ADOPT_LEGACY_BASELINE" },
+      "2026-08-26T12:00:00Z",
+      newId,
+    );
+    expect(built.event.mutations.map((m) => m.op)).toEqual([
+      "UPSERT_SOURCE",
+      "INITIALIZE_PROJECT_FINANCIALS",
+      "SET_PROJECT_FINANCIAL_BASELINE",
+    ]);
+    expect(built.event.mutations).toContainEqual({
+      op: "INITIALIZE_PROJECT_FINANCIALS",
+      currency: "USD",
+    });
+    expect(built.event.mutations).toContainEqual({
+      op: "SET_PROJECT_FINANCIAL_BASELINE",
+      baseline: { amountMinor: 31000000, currency: "USD" },
+    });
+    expect(built.clerical).toBe(false);
+  });
+
+  it("sets only the baseline when financials are already initialized with the matching currency", () => {
+    const built = buildBudgetEvent(
+      model({
+        projectProfile: {
+          baselineScope: [],
+          budget: { baseline: 310000, currency: "USD" },
+        },
+        financials: financials(),
+      }),
+      { kind: "ADOPT_LEGACY_BASELINE" },
+      "2026-08-26T12:00:00Z",
+      newId,
+    );
+    expect(built.event.mutations.map((m) => m.op)).toEqual([
+      "UPSERT_SOURCE",
+      "SET_PROJECT_FINANCIAL_BASELINE",
+    ]);
+    expect(built.event.mutations).toContainEqual({
+      op: "SET_PROJECT_FINANCIAL_BASELINE",
+      baseline: { amountMinor: 31000000, currency: "USD" },
+    });
+  });
+
+  it("throws when there is no legacy budget on the project's profile at all", () => {
+    expect(() =>
+      buildBudgetEvent(
+        model(),
+        { kind: "ADOPT_LEGACY_BASELINE" },
+        "2026-08-26T12:00:00Z",
+        newId,
+      ),
+    ).toThrow(BudgetCommandError);
+  });
+
+  it("throws when the profile has a budget but no baseline figure", () => {
+    expect(() =>
+      buildBudgetEvent(
+        model({
+          projectProfile: {
+            baselineScope: [],
+            budget: { currency: "USD" },
+          },
+        }),
+        { kind: "ADOPT_LEGACY_BASELINE" },
+        "2026-08-26T12:00:00Z",
+        newId,
+      ),
+    ).toThrow(BudgetCommandError);
+  });
+
+  it("throws, never silently coercing, when the legacy currency is not supported", () => {
+    expect(() =>
+      buildBudgetEvent(
+        model({
+          projectProfile: {
+            baselineScope: [],
+            budget: { baseline: 310000, currency: "Monopoly dollars" },
+          },
+        }),
+        { kind: "ADOPT_LEGACY_BASELINE" },
+        "2026-08-26T12:00:00Z",
+        newId,
+      ),
+    ).toThrow(BudgetCommandError);
+  });
+
+  it("throws, never silently overriding, when financials are already tracking a different currency", () => {
+    expect(() =>
+      buildBudgetEvent(
+        model({
+          projectProfile: {
+            baselineScope: [],
+            budget: { baseline: 310000, currency: "USD" },
+          },
+          financials: financials({ currency: "CAD" }),
+        }),
+        { kind: "ADOPT_LEGACY_BASELINE" },
+        "2026-08-26T12:00:00Z",
+        newId,
+      ),
+    ).toThrow(BudgetCommandError);
+  });
+
+  it("throws, never double-adopting, when the financial baseline has already been set", () => {
+    expect(() =>
+      buildBudgetEvent(
+        model({
+          projectProfile: {
+            baselineScope: [],
+            budget: { baseline: 310000, currency: "USD" },
+          },
+          financials: financials({
+            baseline: { amountMinor: 30000000, currency: "USD" },
+          }),
+        }),
+        { kind: "ADOPT_LEGACY_BASELINE" },
+        "2026-08-26T12:00:00Z",
+        newId,
+      ),
+    ).toThrow(BudgetCommandError);
+  });
+});
