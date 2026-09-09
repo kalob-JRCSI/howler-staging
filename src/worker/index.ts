@@ -8,6 +8,7 @@ import { analyzeRecovery } from "../engine/solver";
 import type { ForecastSnapshotV094 } from "../engine/solver";
 import { validateProjectModel } from "../domain/validation";
 import { RevisionConflictError } from "../engine/storage";
+import { resolveIdempotentApply } from "../engine/idempotent-apply";
 import { createDeboardSeed } from "./deboard-seed";
 import { adminPage, operatorPanelPage, fieldDashboardPage } from "./admin";
 import { buildHealthReport, projectHealth } from "./health";
@@ -287,6 +288,18 @@ interface RawEventShape {
   mutations?: unknown;
   occurredAt?: unknown;
   receivedAt?: unknown;
+}
+
+/**
+ * Correction 8: the one place a possibly-malformed request body's event id is read before the
+ * rest of reviewedRun's own shape validation runs. Returns undefined (never throws) for anything
+ * that isn't a non-empty string id, so a malformed body always falls through unchanged to
+ * reviewedRun's existing, comprehensive validation.
+ */
+function extractEventId(rawEvent: unknown): string | undefined {
+  if (!rawEvent || typeof rawEvent !== "object") return undefined;
+  const id = (rawEvent as { id?: unknown }).id;
+  return typeof id === "string" && id.length > 0 ? id : undefined;
 }
 
 interface ReviewedRunResult {
@@ -2030,6 +2043,46 @@ async function handle(request: Request, env: Env): Promise<Response> {
       event?: unknown;
       reviewToken?: unknown;
     };
+    // Correction 8 (generic idempotent-apply fix, src/engine/idempotent-apply.ts): a retry of
+    // this exact request -- same event id, lost response -- must not fail with the same generic
+    // 409 a genuine conflict produces. Checked only when an id is actually present as a string;
+    // any other malformed body falls through unchanged to reviewedRun's own validation below.
+    const retryEventId = extractEventId(body.event);
+    if (retryEventId) {
+      const idempotency = await resolveIdempotentApply(
+        repo,
+        projectId,
+        retryEventId,
+      );
+      if (idempotency.outcome === "AMBIGUOUS") {
+        throw new HttpError(409, idempotency.reason, {
+          code: "COMMIT_STATE_AMBIGUOUS",
+        });
+      }
+      if (idempotency.outcome === "REPLAYED") {
+        return json(
+          {
+            applied: true,
+            stagingOnly: true,
+            replayed: true,
+            projectRevision: idempotency.candidate.modelRevision,
+            candidate: idempotency.candidate,
+            delta: idempotency.candidate.delta ?? null,
+            recoveryAnalysis: idempotency.candidate.recoveryAnalysis,
+            supersededSources: idempotency.candidate.supersededSources,
+            impactActivityIds: idempotency.candidate.impactActivityIds,
+            oversight: idempotency.oversight,
+            publicationGate: {
+              forecastAllowed: true,
+              commitmentEligible: idempotency.oversight.decision !== "BLOCK",
+              publishable: false,
+              mode: "shadow",
+            },
+          },
+          200,
+        );
+      }
+    }
     const result = await reviewedRun(repo, projectId, body.event);
     if (result.reviewToken !== body.reviewToken) {
       throw new HttpError(
@@ -2082,6 +2135,28 @@ async function handle(request: Request, env: Env): Promise<Response> {
       event?: unknown;
       reviewToken?: unknown;
     };
+    // Correction 8: same fix as /events/apply-shadow above -- a retry of an already-published
+    // event must not fail with a false conflict.
+    const publishRetryEventId = extractEventId(body.event);
+    if (publishRetryEventId) {
+      const idempotency = await resolveIdempotentApply(
+        repo,
+        projectId,
+        publishRetryEventId,
+      );
+      if (idempotency.outcome === "AMBIGUOUS") {
+        throw new HttpError(409, idempotency.reason, {
+          code: "COMMIT_STATE_AMBIGUOUS",
+        });
+      }
+      if (idempotency.outcome === "REPLAYED") {
+        return json({
+          published: idempotency.candidate,
+          oversight: idempotency.oversight,
+          replayed: true,
+        });
+      }
+    }
     const result = await reviewedRun(repo, projectId, body.event);
     if (result.reviewToken !== body.reviewToken) {
       throw new HttpError(

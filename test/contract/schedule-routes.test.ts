@@ -275,7 +275,7 @@ describe("preview -> apply-shadow: the full save/confirm/reforecast/history flow
     );
   });
 
-  it("rejects re-applying a previewed event whose baseRevision has gone stale, with 409", async () => {
+  it("Correction 8: an exact retry of an already-applied event replays the original success instead of a false conflict", async () => {
     const previewResponse = await worker.fetch(
       jsonRequest(
         "POST",
@@ -302,11 +302,95 @@ describe("preview -> apply-shadow: the full save/confirm/reforecast/history flow
       adminEnv(),
     );
     expect(firstApply.status).toBe(201);
+    const firstApplied = (await jsonBody(firstApply)) as {
+      applied: boolean;
+      projectRevision: number;
+    };
 
+    // A retry resends the identical already-built event and reviewToken -- exactly what a client
+    // does when it never saw the first response (network drop), not a fresh new mutation.
     const secondApply = await worker.fetch(
       jsonRequest("POST", "/v1/projects/deboard-v091/events/apply-shadow", {
         event: preview.event,
         reviewToken: preview.reviewToken,
+      }),
+      adminEnv(),
+    );
+    expect(secondApply.status).toBe(200);
+    const secondApplied = (await jsonBody(secondApply)) as {
+      applied: boolean;
+      replayed: boolean;
+      projectRevision: number;
+    };
+    expect(secondApplied.applied).toBe(true);
+    expect(secondApplied.replayed).toBe(true);
+    expect(secondApplied.projectRevision).toBe(firstApplied.projectRevision);
+
+    // The retry must not have duplicated the mutation's effect or its history entry.
+    const events = (await jsonBody(
+      await worker.fetch(
+        plainRequest("GET", "/v1/projects/deboard-v091/events?limit=100"),
+        adminEnv(),
+      ),
+    )) as { events: { id: string }[] };
+    expect(events.events.filter((e) => e.id === preview.event.id)).toHaveLength(
+      1,
+    );
+  });
+
+  it("still rejects a genuinely different event whose baseRevision has gone stale, with 409", async () => {
+    const firstPreview = (await jsonBody(
+      await worker.fetch(
+        jsonRequest(
+          "POST",
+          "/v1/projects/deboard-v091/schedule/commands/preview",
+          {
+            command: {
+              kind: "SET_ACTIVITY_STATE",
+              activityId: "framing",
+              state: "IN_PROGRESS",
+            },
+          },
+        ),
+        adminEnv(),
+      ),
+    )) as SchedulePreviewResponse;
+    const firstApply = await worker.fetch(
+      jsonRequest("POST", "/v1/projects/deboard-v091/events/apply-shadow", {
+        event: firstPreview.event,
+        reviewToken: firstPreview.reviewToken,
+      }),
+      adminEnv(),
+    );
+    expect(firstApply.status).toBe(201);
+
+    // A second, distinct preview built against the now-stale baseRevision -- a genuinely
+    // different event id, not a retry of the first one.
+    const secondPreview = (await jsonBody(
+      await worker.fetch(
+        jsonRequest(
+          "POST",
+          "/v1/projects/deboard-v091/schedule/commands/preview",
+          {
+            command: {
+              kind: "SET_ACTIVITY_STATE",
+              activityId: "framing",
+              state: "COMPLETE",
+            },
+          },
+        ),
+        adminEnv(),
+      ),
+    )) as SchedulePreviewResponse;
+    expect(secondPreview.event.id).not.toBe(firstPreview.event.id);
+    const staleEvent = {
+      ...secondPreview.event,
+      baseRevision: firstPreview.projectRevision,
+    };
+    const secondApply = await worker.fetch(
+      jsonRequest("POST", "/v1/projects/deboard-v091/events/apply-shadow", {
+        event: staleEvent,
+        reviewToken: secondPreview.reviewToken,
       }),
       adminEnv(),
     );

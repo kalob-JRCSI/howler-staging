@@ -424,7 +424,7 @@ describe("preview -> apply-shadow: the full save/confirm/reforecast/history flow
     expect(scopeAfter.items).toEqual([]);
   });
 
-  it("rejects re-applying a previewed event whose baseRevision has gone stale, with 409", async () => {
+  it("Correction 8: an exact retry of an already-applied event replays the original success instead of a false conflict", async () => {
     const previewResponse = await worker.fetch(
       jsonRequest("POST", "/v1/projects/deboard-v091/scope/commands/preview", {
         command: {
@@ -445,11 +445,89 @@ describe("preview -> apply-shadow: the full save/confirm/reforecast/history flow
       adminEnv(),
     );
     expect(firstApply.status).toBe(201);
+    const firstApplied = (await jsonBody(firstApply)) as {
+      projectRevision: number;
+    };
 
     const secondApply = await worker.fetch(
       jsonRequest("POST", "/v1/projects/deboard-v091/events/apply-shadow", {
         event: preview.event,
         reviewToken: preview.reviewToken,
+      }),
+      adminEnv(),
+    );
+    expect(secondApply.status).toBe(200);
+    const secondApplied = (await jsonBody(secondApply)) as {
+      applied: boolean;
+      replayed: boolean;
+      projectRevision: number;
+    };
+    expect(secondApplied.applied).toBe(true);
+    expect(secondApplied.replayed).toBe(true);
+    expect(secondApplied.projectRevision).toBe(firstApplied.projectRevision);
+
+    const scopeAfterRetry = (await jsonBody(
+      await worker.fetch(
+        plainRequest("GET", "/v1/projects/deboard-v091/scope"),
+        adminEnv(),
+      ),
+    )) as { items: ScopeItemRow[] };
+    expect(
+      scopeAfterRetry.items.filter((i) => i.description === "Custom closet"),
+    ).toHaveLength(1);
+  });
+
+  it("still rejects a genuinely different event whose baseRevision has gone stale, with 409", async () => {
+    const firstPreview = (await jsonBody(
+      await worker.fetch(
+        jsonRequest(
+          "POST",
+          "/v1/projects/deboard-v091/scope/commands/preview",
+          {
+            command: {
+              kind: "ADD_SCOPE_ITEM",
+              description: "Custom closet",
+              phase: "Finishes",
+            },
+          },
+        ),
+        adminEnv(),
+      ),
+    )) as ScopePreviewResponse;
+    const firstApply = await worker.fetch(
+      jsonRequest("POST", "/v1/projects/deboard-v091/events/apply-shadow", {
+        event: firstPreview.event,
+        reviewToken: firstPreview.reviewToken,
+      }),
+      adminEnv(),
+    );
+    expect(firstApply.status).toBe(201);
+
+    const secondPreview = (await jsonBody(
+      await worker.fetch(
+        jsonRequest(
+          "POST",
+          "/v1/projects/deboard-v091/scope/commands/preview",
+          {
+            command: {
+              kind: "ADD_SCOPE_ITEM",
+              description: "Custom mudroom bench",
+              phase: "Finishes",
+            },
+          },
+        ),
+        adminEnv(),
+      ),
+    )) as ScopePreviewResponse;
+    expect(secondPreview.event.id).not.toBe(firstPreview.event.id);
+    const staleEvent = {
+      ...secondPreview.event,
+      baseRevision: firstPreview.projectRevision,
+    };
+    const secondApply = await worker.fetch(
+      jsonRequest("POST", "/v1/projects/deboard-v091/events/apply-shadow", {
+        event: staleEvent,
+        reviewToken: secondPreview.reviewToken,
       }),
       adminEnv(),
     );

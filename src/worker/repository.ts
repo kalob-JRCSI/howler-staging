@@ -731,6 +731,56 @@ export class D1HowlerRepository {
       : undefined;
   }
 
+  /**
+   * Phase 4 Correction 8 (generic idempotent-apply fix, src/engine/idempotent-apply.ts): finds
+   * the forecast snapshot a committed event produced, by the project revision it resulted in --
+   * not by snapshot id, which the caller of a retried request cannot know without having seen
+   * the original (possibly lost) response. `forecast_snapshots` has no explicit UNIQUE constraint
+   * on `(project_id, model_revision)`, but in practice at most one row can ever exist for a given
+   * pair: every row is created only by commitShadowTransition/commitForecastTransition, and
+   * `project_events.UNIQUE(project_id, new_revision)` guarantees only one event -- and therefore
+   * only one commit -- ever reaches a given revision.
+   */
+  async loadForecastByModelRevision(
+    projectId: string,
+    modelRevision: number,
+  ): Promise<ForecastSnapshotV094 | undefined> {
+    const row = await this.db
+      .prepare(
+        `SELECT snapshot_json AS json FROM forecast_snapshots
+      WHERE project_id = ? AND model_revision = ? LIMIT 1`,
+      )
+      .bind(projectId, modelRevision)
+      .first<{ json: string }>();
+    return row
+      ? (parseJson(
+          row.json,
+          `forecast at revision ${String(modelRevision)}`,
+        ) as ForecastSnapshotV094)
+      : undefined;
+  }
+
+  /**
+   * Phase 4 Correction 8: the other half of the same reconstruction -- given the forecast
+   * snapshot a committed event produced, finds the oversight review that gated it.
+   */
+  async loadOversightReviewByCandidateSnapshotId(
+    candidateSnapshotId: string,
+  ): Promise<OversightReviewV094 | undefined> {
+    const row = await this.db
+      .prepare(
+        `SELECT review_json AS json FROM oversight_reviews WHERE candidate_snapshot_id = ? LIMIT 1`,
+      )
+      .bind(candidateSnapshotId)
+      .first<{ json: string }>();
+    return row
+      ? (parseJson(
+          row.json,
+          `oversight review for candidate ${candidateSnapshotId}`,
+        ) as OversightReviewV094)
+      : undefined;
+  }
+
   async saveLearningRecord(record: LearningRecordV094): Promise<void> {
     await this.db
       .prepare(
