@@ -51,6 +51,13 @@ loaded on its own, without the skill that names it.
 
 ## Safety/invariant routing
 
+For any current or future PM-owned data feature, read
+`docs/superpowers/specs/2026-09-08-howler-universal-data-interaction-contract.md`.
+Manual and AI-assisted entry share canonical facts, validation, confirmation,
+history and dependent recalculation. Protected evidence/history/derived values
+are not freely overwritable. Report manual capability and AI coverage separately;
+never infer full functionality from display-only records or a backend interface.
+
 Any task touching Cloudflare Workers, D1, deployment, or the operator
 surface must load the `howler-cloudflare-safety` skill
 (`.agents/skills/howler-cloudflare-safety/SKILL.md`) before making changes.

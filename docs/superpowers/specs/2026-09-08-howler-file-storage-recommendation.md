@@ -1,6 +1,12 @@
 # Howler file storage: Drive, R2, or hybrid
 
-Date: 2026-09-08. Status: recommendation for owner review; not an approved implementation spec.
+Date: 2026-09-08. Status: architectural direction accepted by the owner; not an approved implementation spec.
+
+Owner clarification: a future approved file-module audit may propose dedicated D1
+projection/read tables for file/version metadata when justified. References below
+to no new tables describe the initial recommendation, not an immutable constraint.
+Canonical project events/state remain authoritative. Phase 4 Budget + Change Orders
+does not authorize storage implementation, credentials, buckets or migrations.
 
 ## Decision
 

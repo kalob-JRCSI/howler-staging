@@ -3,6 +3,21 @@
 Written because the Claude session that did this work ran low on usage mid-task.
 This is a cold-start briefing: read this fully before touching code.
 
+## Superseding Phase 4 handoff — 2026-09-09
+
+The owner accepted Phase 3 at `3aed78e2241a06e3b299baec8a73a2b6b8f11277` as a
+development milestone, not field readiness. Phase 4 is now the Budget + Change
+Orders capability audit/design on `codex/v096-phase4-budget-change-orders`.
+Read `context/handoff/current-task.json` and the documents it routes to first.
+The permanent Universal Data Interaction Contract now governs all mutable PM data.
+Application implementation has not started; the financial design choices are
+awaiting review. The older Phase 3 closeout below is historical context.
+
+Storage clarification: the owner accepted hybrid lifecycle architecture only.
+Future file-module audits may justify D1 read/projection tables; canonical events
+and project state remain authoritative. No Phase 4 storage implementation or
+activation is authorized. This supersedes older absolute no-new-table wording.
+
 ## Current closeout — 2026-09-08
 
 Phase 3 is a completed development milestone, awaiting the owner's next direction;

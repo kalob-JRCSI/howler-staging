@@ -2,6 +2,37 @@
   "schemaVersion": "1",
   "entries": [
     {
+      "id": "contract-universal-data-interaction",
+      "kind": "spec",
+      "path": "docs/superpowers/specs/2026-09-08-howler-universal-data-interaction-contract.md",
+      "authority": "GIT_CANONICAL",
+      "tags": ["product", "canonical-data", "manual-ai", "safety"],
+      "taskTypes": [
+        "implementation-handoff",
+        "product-design",
+        "product-review"
+      ],
+      "summary": "Permanent owner contract: manual and AI-assisted paths share canonical validation, confirmation, history and dependent recalculation; protected values are not freely overwritable."
+    },
+    {
+      "id": "receipt-v096-phase3",
+      "kind": "receipt",
+      "path": "context/receipts/accepted/v096-phase3-scope-workspace.md",
+      "authority": "ACCEPTED_RECEIPT",
+      "tags": ["accepted-history", "scope", "phase4"],
+      "taskTypes": ["implementation-handoff"],
+      "summary": "Phase 3 accepted by owner at 3aed78e as a development milestone; hybrid storage direction approved without activation."
+    },
+    {
+      "id": "audit-v096-phase4",
+      "kind": "doc",
+      "path": "docs/superpowers/specs/2026-09-09-howler-phase4-financial-capability-audit.md",
+      "authority": "GIT_CANONICAL",
+      "tags": ["phase4", "budget", "change-orders", "design"],
+      "taskTypes": ["implementation-handoff", "product-design"],
+      "summary": "Source-backed financial capability audit and proposed design/build sequence; design approval pending, not authority to implement unresolved choices."
+    },
+    {
       "id": "skill-cloudflare-safety",
       "kind": "skill",
       "path": ".agents/skills/howler-cloudflare-safety/SKILL.md",
