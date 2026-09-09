@@ -40,6 +40,9 @@ export interface ProjectSummaryLike {
   // never set up -- never a fabricated $0 summary. Defined further below, alongside the rest of
   // the Budget/Change Orders wire types.
   financials: ProjectFinancialSummaryLike | null;
+  // Phase 4 (Task 9 financial intelligence): a deliberately narrow subset of real financial
+  // exposure, blended additively into "Top risks" -- never folded into progressPercent/integrity.
+  financialRiskLines: string[];
 }
 
 export interface PmActionLike {
@@ -395,6 +398,27 @@ export interface ActualCostViewLike {
   updatedAt: string;
 }
 
+// Phase 4 (Task 9 financial intelligence): mirrors src/operator/financial-intelligence.ts's
+// FinancialFindingV097 exactly. Every finding links to real, structured facts already on
+// canonical state -- never a generated narrative.
+export type FinancialFindingKindLike =
+  | "LINE_HAS_NO_BASELINE"
+  | "ACTUAL_COST_UNALLOCATED"
+  | "COMMITMENT_HAS_UNALLOCATED_AMOUNT"
+  | "APPROVED_CO_HAS_UNALLOCATED_AMOUNT"
+  | "ALLOWANCE_OVERRUN"
+  | "SCOPE_ALLOWANCE_NOT_LINKED";
+
+export interface FinancialFindingLike {
+  kind: FinancialFindingKindLike;
+  budgetLineId: string | null;
+  commitmentId: string | null;
+  actualCostId: string | null;
+  changeOrderId: string | null;
+  scopeItemId: string | null;
+  message: string;
+}
+
 export interface ProjectBudgetWorkspaceLike {
   projectId: string;
   projectRevision: number;
@@ -405,6 +429,7 @@ export interface ProjectBudgetWorkspaceLike {
   lines: BudgetLineViewLike[];
   commitments: CommitmentViewLike[];
   actualCosts: ActualCostViewLike[];
+  findings: FinancialFindingLike[];
 }
 
 export type BudgetCommandLike =

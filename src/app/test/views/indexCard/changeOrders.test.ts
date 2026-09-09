@@ -104,6 +104,7 @@ function budgetWorkspace(
     lines: [],
     commitments: [],
     actualCosts: [],
+    findings: [],
     ...overrides,
   };
 }

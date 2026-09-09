@@ -84,6 +84,7 @@ import {
   ChangeOrderCommandError,
 } from "../operator/change-orders";
 import type { ChangeOrderCommandV097 } from "../operator/change-orders";
+import { computeFinancialFindings } from "../operator/financial-intelligence";
 
 // Engine/admin-page compatibility version. Distinct from GET /health's own `version` field, which
 // buildHealthReport (src/worker/health.ts) now owns and reports as "0.9.5" with an additive
@@ -2069,10 +2070,17 @@ async function handle(request: Request, env: Env): Promise<Response> {
   // Phase 4 (Budget + Change Orders): read-only, derived state, exactly like /scope above --
   // reuses buildBudgetView()/buildChangeOrdersView() verbatim (src/operator/budget.ts,
   // src/operator/change-orders.ts). No mutation, no second canonical financial store.
+  // `findings` (Task 9, src/operator/financial-intelligence.ts) is composed in here rather than
+  // inside buildBudgetView itself, since that module reuses budget.ts's own
+  // computeBudgetLineActualTotal -- baking findings into buildBudgetView would create a circular
+  // import.
   if (request.method === "GET" && parts.length === 4 && parts[3] === "budget") {
     const model = await repo.loadProject(projectId);
     if (!model) throw new HttpError(404, `Project ${projectId} not found`);
-    return json(buildBudgetView(model));
+    return json({
+      ...buildBudgetView(model),
+      findings: computeFinancialFindings(model),
+    });
   }
 
   if (

@@ -13,6 +13,7 @@ import type { ProjectHealthV094 } from "../worker/health";
 import { buildScopeView } from "./scope";
 import { buildProjectFinancialSummary } from "./budget";
 import type { ProjectFinancialSummaryV097 } from "./budget";
+import { computeFinancialFindings } from "./financial-intelligence";
 
 export interface ProjectScheduleItemV096 {
   activityId: string;
@@ -60,6 +61,13 @@ export interface ProjectSummaryV096 {
   // buildProjectFinancialSummary so this can never independently drift from what the Budget module
   // itself reports.
   financials: ProjectFinancialSummaryV097 | null;
+  // Phase 4 (Task 9 financial intelligence): a deliberately narrow subset of
+  // computeFinancialFindings -- real financial exposure (allowance overruns, unallocated approved
+  // change orders/commitments), never the more administrative findings (a line with no baseline
+  // yet, an actual cost not yet allocated) that would just be noise on this headline risk feed.
+  // Those stay visible in Budget's own findings list. Blended additively alongside
+  // blockedScopeItems above, exactly like that field -- never folded into the integrity score.
+  financialRiskLines: string[];
 }
 
 // Persisted staging data includes forecast snapshots created before recoveryAnalysis was added.
@@ -187,6 +195,18 @@ function computeBlockedScopeItems(
   return scopeView.items
     .filter((item) => item.status === "BLOCKED")
     .map((item) => item.description);
+}
+
+const FINANCIAL_RISK_FINDING_KINDS = new Set([
+  "ALLOWANCE_OVERRUN",
+  "APPROVED_CO_HAS_UNALLOCATED_AMOUNT",
+  "COMMITMENT_HAS_UNALLOCATED_AMOUNT",
+]);
+
+function computeFinancialRiskLines(model: ProjectModelV094): string[] {
+  return computeFinancialFindings(model)
+    .filter((f) => FINANCIAL_RISK_FINDING_KINDS.has(f.kind))
+    .map((f) => f.message);
 }
 
 function computeScopeAddedAfterBaselineCount(
@@ -358,5 +378,6 @@ export function buildProjectSummary(
     financials: model.financials
       ? buildProjectFinancialSummary(model.financials)
       : null,
+    financialRiskLines: computeFinancialRiskLines(model),
   };
 }

@@ -31,6 +31,7 @@ function baseSummary(
     blockedScopeItems: [],
     scopeAddedAfterBaselineCount: 0,
     financials: null,
+    financialRiskLines: [],
     ...overrides,
   };
 }
@@ -261,5 +262,45 @@ describe("renderOverview: Phase 4 financials sync (Task 8)", () => {
     );
     expect(body.textContent).toContain("$40,000 spent / $60,000 remaining");
     expect(body.textContent).toContain("Revised budget: $400,000.00");
+  });
+});
+
+describe("renderOverview: Phase 4 financial risk lines (Task 9)", () => {
+  it("blends real financial risk lines into Top risks, alongside forecast- and scope-derived risks", async () => {
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve(
+        jsonResponse(200, { modelRevision: 0, latest: null, published: null }),
+      ),
+    );
+    const body = document.createElement("div");
+    await renderOverview(
+      body,
+      "carver",
+      baseSummary({
+        blockedScopeItems: ["Custom closet"],
+        financialRiskLines: [
+          '"Kitchen fixtures" allowance of $1,000.00 is exceeded by $175.00 in actual cost.',
+        ],
+      }),
+    );
+    expect(body.textContent).toContain('Scope blocked: "Custom closet".');
+    expect(body.textContent).toContain(
+      '"Kitchen fixtures" allowance of $1,000.00 is exceeded by $175.00 in actual cost.',
+    );
+  });
+
+  it("shows no financial risk section when there is none, never a fabricated empty list marker", async () => {
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve(
+        jsonResponse(200, { modelRevision: 0, latest: null, published: null }),
+      ),
+    );
+    const body = document.createElement("div");
+    await renderOverview(
+      body,
+      "carver",
+      baseSummary({ financialRiskLines: [] }),
+    );
+    expect(body.textContent).not.toContain("allowance of");
   });
 });

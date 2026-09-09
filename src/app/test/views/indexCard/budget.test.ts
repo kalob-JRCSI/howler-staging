@@ -75,6 +75,7 @@ function workspace(
     lines: [],
     commitments: [],
     actualCosts: [],
+    findings: [],
     ...overrides,
   };
 }
@@ -299,5 +300,48 @@ describe("renderBudget", () => {
 
     const panel = detail?.querySelector<HTMLElement>(".sched-action-panel");
     expect(panel?.textContent).toContain("Invalid budget command");
+  });
+});
+
+describe("renderBudget: Phase 4 financial intelligence findings (Task 9)", () => {
+  it("shows real, structured findings under Observations", async () => {
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve(
+        jsonResponse(
+          200,
+          initializedWorkspace({
+            findings: [
+              {
+                kind: "LINE_HAS_NO_BASELINE",
+                budgetLineId: "line1",
+                commitmentId: null,
+                actualCostId: null,
+                changeOrderId: null,
+                scopeItemId: null,
+                message:
+                  'Budget line "Kitchen cabinets" has no baseline amount recorded.',
+              },
+            ],
+          }),
+        ),
+      ),
+    );
+    const body = document.createElement("div");
+    await renderBudget(body, "carver");
+    expect(body.textContent).toContain("Observations");
+    expect(body.textContent).toContain(
+      'Budget line "Kitchen cabinets" has no baseline amount recorded.',
+    );
+  });
+
+  it("shows no Observations section at all when there are no findings", async () => {
+    vi.stubGlobal("fetch", () =>
+      Promise.resolve(
+        jsonResponse(200, initializedWorkspace({ findings: [] })),
+      ),
+    );
+    const body = document.createElement("div");
+    await renderBudget(body, "carver");
+    expect(body.textContent).not.toContain("Observations");
   });
 });

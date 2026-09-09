@@ -165,6 +165,52 @@ describe("preview -> apply-shadow: Budget save/confirm flow", () => {
     });
   });
 
+  it("Task 9: GET /budget includes real, structured financial intelligence findings", async () => {
+    await previewAndApply({ kind: "INITIALIZE_FINANCIALS", currency: "USD" });
+    const category = await previewAndApply({
+      kind: "ADD_CATEGORY",
+      name: "Cabinetry",
+    });
+    const categoryId = (
+      (await jsonBody(
+        await worker.fetch(
+          plainRequest("GET", "/v1/projects/deboard-v091/budget"),
+          adminEnv(),
+        ),
+      )) as BudgetView
+    ).categories[0]?.id;
+    expect(category.applyStatus).toBe(201);
+    expect(categoryId).toBeDefined();
+
+    // Deliberately no baselineAmount -- should surface as LINE_HAS_NO_BASELINE.
+    const line = await previewAndApply({
+      kind: "ADD_LINE",
+      categoryId,
+      description: "Kitchen cabinets",
+    });
+    expect(line.applyStatus).toBe(201);
+
+    const budget = (await jsonBody(
+      await worker.fetch(
+        plainRequest("GET", "/v1/projects/deboard-v091/budget"),
+        adminEnv(),
+      ),
+    )) as BudgetView & {
+      findings: {
+        kind: string;
+        budgetLineId: string | null;
+        message: string;
+      }[];
+    };
+    expect(
+      budget.findings.some(
+        (f) =>
+          f.kind === "LINE_HAS_NO_BASELINE" &&
+          f.message.includes("Kitchen cabinets"),
+      ),
+    ).toBe(true);
+  });
+
   it("rejects an invalid budget command shape with 400, never a raw 500", async () => {
     const response = await worker.fetch(
       jsonRequest("POST", "/v1/projects/deboard-v091/budget/commands/preview", {

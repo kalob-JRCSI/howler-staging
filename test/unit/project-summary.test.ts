@@ -580,7 +580,99 @@ describe("buildProjectSummary: Phase 4 financials (Task 8 cross-module sync)", (
       currency: "USD",
     });
   });
+
+  it("blends real financial risk (Task 9) into financialRiskLines, additively, never into progressPercent/integrity", () => {
+    const model = baseModel({
+      scopeItems: {
+        s1: { ...scopeItemFixture(), allowanceBudgetLineId: "line1" },
+      },
+      financials: financialsWith({
+        budgetLines: {
+          line1: {
+            id: "line1",
+            categoryId: "cat1",
+            description: "Kitchen fixtures allowance",
+            isAllowance: true,
+            scopeItemIds: [],
+            active: true,
+            sourceIds: [],
+            createdAt: "2026-08-01T00:00:00.000Z",
+            updatedAt: "2026-08-01T00:00:00.000Z",
+            baselineAmount: { amountMinor: 100000, currency: "USD" },
+          },
+        },
+        actualCosts: {
+          a1: {
+            id: "a1",
+            amount: { amountMinor: 117500, currency: "USD" },
+            date: "2026-08-15",
+            description: "Fixture selection",
+            budgetLineId: "line1",
+            status: "RECORDED",
+            sourceIds: [],
+            createdAt: "2026-08-15T00:00:00.000Z",
+            updatedAt: "2026-08-15T00:00:00.000Z",
+          },
+        },
+      }),
+    });
+    const summary = buildProjectSummary(model, undefined, baseHealth());
+    expect(
+      summary.financialRiskLines.some((line) => line.includes("exceeded")),
+    ).toBe(true);
+    expect(summary.integrity.score).toBe(100);
+  });
+
+  it("never surfaces administrative-only findings (e.g. LINE_HAS_NO_BASELINE) on the headline risk feed", () => {
+    const model = baseModel({
+      financials: financialsWith({
+        budgetLines: {
+          line1: {
+            id: "line1",
+            categoryId: "cat1",
+            description: "Kitchen cabinets",
+            isAllowance: false,
+            scopeItemIds: [],
+            active: true,
+            sourceIds: [],
+            createdAt: "2026-08-01T00:00:00.000Z",
+            updatedAt: "2026-08-01T00:00:00.000Z",
+          },
+        },
+      }),
+    });
+    const summary = buildProjectSummary(model, undefined, baseHealth());
+    expect(summary.financialRiskLines).toEqual([]);
+  });
 });
+
+function scopeItemFixture(): {
+  id: string;
+  description: string;
+  phase: string;
+  active: boolean;
+  status: "NOT_STARTED";
+  included: boolean;
+  activityIds: string[];
+  planDocumentRefs: string[];
+  sourceIds: string[];
+  createdAt: string;
+  updatedAt: string;
+} {
+  return {
+    id: "s1",
+    description: "Kitchen fixtures",
+    phase: "Interior",
+    active: true,
+    status: "NOT_STARTED",
+    included: true,
+    activityIds: [],
+    planDocumentRefs: [],
+    sourceIds: [],
+    createdAt: "2026-08-01T00:00:00.000Z",
+    updatedAt: "2026-08-01T00:00:00.000Z",
+  };
+}
 
 describe("buildProjectSummary: scope comes only from the approved profile", () => {
   it("preserves id/label/phase from projectProfile.baselineScope", () => {

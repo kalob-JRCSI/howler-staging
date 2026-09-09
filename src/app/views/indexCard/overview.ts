@@ -74,6 +74,10 @@ export async function renderOverview(
       ...summary.blockedScopeItems.map(
         (description) => `Scope blocked: "${description}".`,
       ),
+      // Phase 4 (Task 9 financial intelligence): real financial exposure (allowance overruns,
+      // unallocated approved change orders/commitments) -- same additive treatment as
+      // blockedScopeItems above, never blended into one invented combined score.
+      ...summary.financialRiskLines,
     ];
     if (riskItems.length > 0) {
       risksHtml = `<ul>${riskItems.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;

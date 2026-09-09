@@ -236,6 +236,19 @@ export async function renderBudget(
     `;
   }
 
+  // Phase 4 (Task 9 financial intelligence): every finding links to a real, structured fact --
+  // never generated narrative -- exactly like Scope's own "Observations" block
+  // (src/app/views/indexCard/scope.ts's renderInsights).
+  function renderFindings(): string {
+    if (workspace.findings.length === 0) return "";
+    return `
+      <div class="sched-consequence" style="border-color: var(--border);">
+        <p class="sched-consequence-note">Observations</p>
+        <ul>${workspace.findings.map((f) => `<li>${escapeHtml(f.message)}</li>`).join("")}</ul>
+      </div>
+    `;
+  }
+
   function wireSummary(): void {
     const panel = body.querySelector<HTMLElement>("#budget-baseline-panel");
     const form = body.querySelector<HTMLFormElement>(
@@ -1245,6 +1258,7 @@ export async function renderBudget(
     }
     body.innerHTML = `
       ${renderSummary()}
+      ${renderFindings()}
       ${renderCategories()}
       ${renderLines()}
       ${renderCommitments()}
