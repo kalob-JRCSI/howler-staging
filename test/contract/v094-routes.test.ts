@@ -164,6 +164,7 @@ describe("GET /health", () => {
         "engineCompatibilityVersion",
         "dashboardConnected",
         "calendarConnected",
+        "financialAi",
       ].sort(),
     );
     expect(body.service).toBe("howler-scheduling-staging");
@@ -182,6 +183,45 @@ describe("GET /health", () => {
       env,
     );
     expect(response.status).toBe(200);
+  });
+
+  it("Phase 4 Task 11: reports the deterministic financial AI provider honestly when HOWLER_AI_PROVIDER is unset, never implying live AI is active", async () => {
+    const response = await worker.fetch(
+      plainRequest("GET", "/health", false),
+      adminEnv(),
+    );
+    const body = (await jsonBody(response)) as {
+      financialAi: {
+        provider: string;
+        model: string | null;
+        configured: boolean;
+      };
+    };
+    expect(body.financialAi).toEqual({
+      provider: "deterministic",
+      model: null,
+      configured: true,
+    });
+  });
+
+  it("Phase 4 Task 11: reports the real provider/model, and configured=false, when 'openai' is selected without a configured key -- never exposing the credential itself", async () => {
+    const response = await worker.fetch(plainRequest("GET", "/health", false), {
+      ...adminEnv(),
+      HOWLER_AI_PROVIDER: "openai",
+    });
+    const body = (await jsonBody(response)) as {
+      financialAi: {
+        provider: string;
+        model: string | null;
+        configured: boolean;
+      };
+    };
+    expect(body.financialAi).toEqual({
+      provider: "openai",
+      model: "gpt-5.6-terra",
+      configured: false,
+    });
+    expect(JSON.stringify(body)).not.toContain("HOWLER_OPENAI_API_KEY");
   });
 });
 

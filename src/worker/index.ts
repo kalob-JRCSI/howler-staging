@@ -86,7 +86,8 @@ import {
 import type { ChangeOrderCommandV097 } from "../operator/change-orders";
 import { computeFinancialFindings } from "../operator/financial-intelligence";
 import { interpretFinancialTurn } from "../operator/financial-interpreter";
-import { buildFieldTestCallFinancialModel } from "./financial-conversation-field-model";
+import { selectCallFinancialModel } from "./financial-model-provider";
+import { DEFAULT_OPENAI_FINANCIAL_MODEL } from "./openai-financial-provider";
 
 // Engine/admin-page compatibility version. Distinct from GET /health's own `version` field, which
 // buildHealthReport (src/worker/health.ts) now owns and reports as "0.9.5" with an additive
@@ -1577,7 +1578,27 @@ async function handle(request: Request, env: Env): Promise<Response> {
 
   if (request.method === "GET" && url.pathname === "/health") {
     const adminConfigured = Boolean(env.HOWLER_ADMIN_KEY);
-    return json(await buildHealthReport(env.HOWLER_DB, mode, adminConfigured));
+    const financialAiProvider =
+      env.HOWLER_AI_PROVIDER === "openai" ? "openai" : "deterministic";
+    const financialAi = {
+      provider: financialAiProvider,
+      model:
+        financialAiProvider === "openai"
+          ? (env.HOWLER_AI_MODEL ?? DEFAULT_OPENAI_FINANCIAL_MODEL)
+          : null,
+      configured:
+        financialAiProvider === "openai"
+          ? Boolean(env.HOWLER_OPENAI_API_KEY)
+          : true,
+    };
+    return json(
+      await buildHealthReport(
+        env.HOWLER_DB,
+        mode,
+        adminConfigured,
+        financialAi,
+      ),
+    );
   }
 
   if (parts[0] !== "v1") throw new HttpError(404, "Not found");
@@ -2608,20 +2629,28 @@ async function handle(request: Request, env: Env): Promise<Response> {
     });
   }
 
-  // Phase 4 (Budget + Change Orders, Task 10): the deterministic conversational financial path.
-  // A CallFinancialModel implementation (for now, always the deterministic field-test double --
-  // Task 11 introduces the real, env-selected staging provider behind this same seam) supplies
-  // only free-text spans; interpretFinancialTurn (src/operator/financial-interpreter.ts) does all
-  // entity resolution/money parsing/command construction itself. A RESOLVED turn is previewed
-  // through the exact same buildBudgetEvent/reviewedRun path the manual Budget UI already uses --
-  // no new confirmation/session machinery, no bypass of financial validation. Applying reuses the
+  // Phase 4 (Budget + Change Orders, Task 10/11): the conversational financial path. A
+  // CallFinancialModel implementation supplies only free-text spans; interpretFinancialTurn
+  // (src/operator/financial-interpreter.ts) does all entity resolution/money parsing/command
+  // construction itself. A RESOLVED turn is previewed through the exact same
+  // buildBudgetEvent/reviewedRun path the manual Budget UI already uses -- no new
+  // confirmation/session machinery, no bypass of financial validation. Applying reuses the
   // existing POST .../events/apply-shadow route verbatim, exactly like the typed-command routes.
+  //
+  // Task 11: which provider actually runs is decided by src/worker/financial-model-provider.ts
+  // from HOWLER_AI_PROVIDER/HOWLER_AI_MODEL -- the browser never chooses a model. Selecting
+  // "openai" without a configured HOWLER_OPENAI_API_KEY is a genuine server misconfiguration
+  // (matching the existing HOWLER_CONFIRMATION_SIGNING_SECRET precedent above), never a silent
+  // fallback to the deterministic double while implying live AI is active.
   if (
     request.method === "POST" &&
     parts.length === 5 &&
     parts[3] === "financial-conversation" &&
     parts[4] === "turn"
   ) {
+    if (env.HOWLER_AI_PROVIDER === "openai" && !env.HOWLER_OPENAI_API_KEY) {
+      throw new HttpError(500, "HOWLER_OPENAI_API_KEY is not configured");
+    }
     const body = (await readJson(request)) as { text?: unknown } | null;
     if (!body || typeof body.text !== "string" || !body.text.trim()) {
       throw new HttpError(
@@ -2635,7 +2664,7 @@ async function handle(request: Request, env: Env): Promise<Response> {
     const resolution = await interpretFinancialTurn(
       model,
       body.text,
-      buildFieldTestCallFinancialModel(),
+      selectCallFinancialModel(env),
       new Date().toISOString().slice(0, 10),
     );
 

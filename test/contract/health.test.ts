@@ -151,4 +151,26 @@ describe("buildHealthReport", () => {
     expect(report.dashboardConnected).toBe(false);
     expect(report.calendarConnected).toBe(false);
   });
+
+  it("Phase 4 Task 11: defaults financialAi to the honest, always-ready deterministic report", async () => {
+    const report = await buildHealthReport(undefined, "shadow", false);
+    expect(report.financialAi).toEqual({
+      provider: "deterministic",
+      model: null,
+      configured: true,
+    });
+  });
+
+  it("Phase 4 Task 11: reports a caller-supplied financialAi diagnostic verbatim, never a credential", async () => {
+    const report = await buildHealthReport(undefined, "shadow", false, {
+      provider: "openai",
+      model: "gpt-5.6-terra",
+      configured: false,
+    });
+    expect(report.financialAi).toEqual({
+      provider: "openai",
+      model: "gpt-5.6-terra",
+      configured: false,
+    });
+  });
 });

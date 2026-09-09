@@ -210,6 +210,20 @@ describe("POST /v1/projects/:id/financial-conversation/turn", () => {
     expect(response.status).toBe(400);
   });
 
+  it("Phase 4 Task 11: fails closed with a clear 500, never a fake credential or a silent fallback, when 'openai' is selected without a configured key", async () => {
+    const response = await worker.fetch(
+      jsonRequest(
+        "POST",
+        `/v1/projects/${PROJECT_ID}/financial-conversation/turn`,
+        { text: "Medina's approved plumbing proposal is $18,750." },
+      ),
+      { ...adminEnv(), HOWLER_AI_PROVIDER: "openai" },
+    );
+    expect(response.status).toBe(500);
+    const body = (await jsonBody(response)) as { error: string };
+    expect(body.error).toBe("HOWLER_OPENAI_API_KEY is not configured");
+  });
+
   it("clarifies rather than guesses when financials have not been initialized yet", async () => {
     const response = await postTurn(
       "Medina's approved plumbing proposal is $18,750.",

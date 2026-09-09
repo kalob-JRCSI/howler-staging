@@ -16,12 +16,22 @@
 // verifier authenticates the single controlled pilot account; HOWLER_SESSION_SIGNING_SECRET signs
 // the browser's HttpOnly product session. None of these reuse HOWLER_ADMIN_KEY or the confirmation
 // signing secret, and none are declared in wrangler.jsonc or embedded into client code.
+//
+// Phase 4 Task 11 (real staging AI provider, src/worker/openai-financial-provider.ts): three more
+// bindings, none yet present in wrangler.jsonc's vars or as a configured secret (confirmed via
+// `wrangler secret list` against the real staging Worker) -- src/worker/financial-model-provider.ts
+// safely defaults to the deterministic double until an operator adds HOWLER_OPENAI_API_KEY as a
+// secret and sets HOWLER_AI_PROVIDER/HOWLER_AI_MODEL as plain vars. HOWLER_OPENAI_API_KEY must
+// never be embedded into client code, canonical project state, Activity History, or logs.
 interface Env {
   HOWLER_ADMIN_KEY?: string;
   HOWLER_CONFIRMATION_SIGNING_SECRET?: string;
   HOWLER_PILOT_USERNAME?: string;
   HOWLER_PILOT_PASSWORD_HASH?: string;
   HOWLER_SESSION_SIGNING_SECRET?: string;
+  HOWLER_OPENAI_API_KEY?: string;
+  HOWLER_AI_PROVIDER?: string;
+  HOWLER_AI_MODEL?: string;
 }
 
 declare namespace Cloudflare {
@@ -31,5 +41,8 @@ declare namespace Cloudflare {
     HOWLER_PILOT_USERNAME?: string;
     HOWLER_PILOT_PASSWORD_HASH?: string;
     HOWLER_SESSION_SIGNING_SECRET?: string;
+    HOWLER_OPENAI_API_KEY?: string;
+    HOWLER_AI_PROVIDER?: string;
+    HOWLER_AI_MODEL?: string;
   }
 }

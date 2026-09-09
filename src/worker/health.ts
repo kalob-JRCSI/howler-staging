@@ -91,6 +91,12 @@ const SCHEMA_TABLES = [
   "prediction_outcomes",
 ] as const;
 
+export interface FinancialAiHealthV097 {
+  provider: string;
+  model: string | null;
+  configured: boolean;
+}
+
 export interface WorkerHealthV094 {
   ok: boolean;
   service: string;
@@ -102,12 +108,25 @@ export interface WorkerHealthV094 {
   engineCompatibilityVersion: string;
   dashboardConnected: false;
   calendarConnected: false;
+  financialAi: FinancialAiHealthV097;
 }
+
+// Phase 4 Task 11: reports which CallFinancialModel implementation is actually active and
+// whether it is fully configured -- never the credential itself (Stage C authorization:
+// "diagnostics report actual provider/model without exposing credentials"). Defaults to the
+// deterministic double's own honest report when the caller doesn't pass one, matching
+// src/worker/financial-model-provider.ts's own default.
+const DEFAULT_FINANCIAL_AI_HEALTH: FinancialAiHealthV097 = {
+  provider: "deterministic",
+  model: null,
+  configured: true,
+};
 
 export async function buildHealthReport(
   db: D1Database | undefined,
   mode: string | undefined,
   adminConfigured: boolean,
+  financialAi: FinancialAiHealthV097 = DEFAULT_FINANCIAL_AI_HEALTH,
 ): Promise<WorkerHealthV094> {
   const databaseBound = Boolean(db);
   let schemaReady = false;
@@ -140,5 +159,6 @@ export async function buildHealthReport(
     engineCompatibilityVersion: "0.9.4",
     dashboardConnected: false,
     calendarConnected: false,
+    financialAi,
   };
 }
