@@ -1,6 +1,7 @@
 import { assertISODate } from "../engine/date";
 import { buildGraphIndex } from "../engine/graph";
-import type { ProjectModelV094 } from "./types";
+import { isSupportedCurrency, isValidMoney } from "./money";
+import type { MoneyV097, ProjectModelV094 } from "./types";
 
 function assertUnitInterval(value: number, label: string): void {
   if (!Number.isFinite(value) || value < 0 || value > 1) {
@@ -274,6 +275,241 @@ export function validateProjectModel(model: ProjectModelV094): void {
       }
       if (!item.allowance.currency) {
         throw new Error(`Scope item ${item.id} allowance is missing currency`);
+      }
+    }
+    if (
+      item.allowanceBudgetLineId &&
+      !model.financials?.budgetLines[item.allowanceBudgetLineId]
+    ) {
+      throw new Error(
+        `Scope item ${item.id} references unknown budget line ${item.allowanceBudgetLineId}`,
+      );
+    }
+  }
+
+  // Phase 4 (Howler Recovery Directive, Budget + Change Orders, corrected plan): a project tracks
+  // money in exactly one currency (`financials.currency`) -- no invented FX conversion. Every
+  // MoneyV097 value reachable from `financials` must both be individually valid (supported
+  // currency, safe-integer minor units) AND share that one project currency exactly; a
+  // budget line priced in a different-but-otherwise-valid currency is still rejected.
+  if (model.financials) {
+    const fin = model.financials;
+    if (!isSupportedCurrency(fin.currency)) {
+      throw new Error(
+        `Project financials currency "${fin.currency}" is not supported`,
+      );
+    }
+    function assertOwnCurrency(label: string, money: MoneyV097): void {
+      if (!isValidMoney(money)) {
+        throw new Error(`${label} is not a valid money amount`);
+      }
+      if (money.currency !== fin.currency) {
+        throw new Error(
+          `${label} currency ${money.currency} does not match the project's tracked currency ${fin.currency}`,
+        );
+      }
+    }
+    // Correction 5/6: partial/unallocated allocation is legal -- this only rejects
+    // OVER-allocation (allocations summing beyond the total), never under-allocation.
+    function assertAllocationsWithinTotal(
+      label: string,
+      total: MoneyV097,
+      allocations: { budgetLineId: string; amount: MoneyV097 }[],
+    ): void {
+      let allocated = 0;
+      for (const allocation of allocations) {
+        assertOwnCurrency(
+          `${label} allocation to ${allocation.budgetLineId}`,
+          allocation.amount,
+        );
+        if (!fin.budgetLines[allocation.budgetLineId]) {
+          throw new Error(
+            `${label} allocation references unknown budget line ${allocation.budgetLineId}`,
+          );
+        }
+        allocated += allocation.amount.amountMinor;
+      }
+      const overAllocated =
+        total.amountMinor >= 0
+          ? allocated > total.amountMinor
+          : allocated < total.amountMinor;
+      if (overAllocated) {
+        throw new Error(
+          `${label} allocations (${String(allocated)}) exceed its total amount (${String(total.amountMinor)})`,
+        );
+      }
+    }
+
+    // Correction 2/3: baseline is optional -- "Unknown," never fabricated as $0.
+    if (fin.baseline) {
+      assertOwnCurrency("Project financial baseline", fin.baseline);
+    }
+    for (const sourceId of fin.baselineSourceIds) {
+      if (!model.sources[sourceId]) {
+        throw new Error(
+          `Project financial baseline references unknown source ${sourceId}`,
+        );
+      }
+    }
+
+    for (const cat of Object.values(fin.categories)) {
+      if (!cat.name.trim()) {
+        throw new Error(`Budget category ${cat.id} is missing a name`);
+      }
+      for (const sourceId of cat.sourceIds) {
+        if (!model.sources[sourceId]) {
+          throw new Error(
+            `Budget category ${cat.id} references unknown source ${sourceId}`,
+          );
+        }
+      }
+    }
+
+    for (const line of Object.values(fin.budgetLines)) {
+      if (!line.description.trim()) {
+        throw new Error(`Budget line ${line.id} is missing a description`);
+      }
+      if (!fin.categories[line.categoryId]) {
+        throw new Error(
+          `Budget line ${line.id} references unknown budget category ${line.categoryId}`,
+        );
+      }
+      // Correction 2/3: baselineAmount is optional -- "Unknown," never fabricated as $0.
+      if (line.baselineAmount) {
+        assertOwnCurrency(
+          `Budget line ${line.id} baselineAmount`,
+          line.baselineAmount,
+        );
+      }
+      for (const scopeItemId of line.scopeItemIds) {
+        if (!model.scopeItems?.[scopeItemId]) {
+          throw new Error(
+            `Budget line ${line.id} references unknown scope item ${scopeItemId}`,
+          );
+        }
+      }
+      for (const sourceId of line.sourceIds) {
+        if (!model.sources[sourceId]) {
+          throw new Error(
+            `Budget line ${line.id} references unknown source ${sourceId}`,
+          );
+        }
+      }
+    }
+
+    const COMMITMENT_STATUSES = new Set(["ACTIVE", "VOID"]);
+    for (const c of Object.values(fin.commitments)) {
+      assertOwnCurrency(`Commitment ${c.id} amount`, c.amount);
+      if (!COMMITMENT_STATUSES.has(c.status)) {
+        throw new Error(`Commitment ${c.id} has invalid status ${c.status}`);
+      }
+      assertAllocationsWithinTotal(
+        `Commitment ${c.id}`,
+        c.amount,
+        c.allocations,
+      );
+      if (c.activityId && !model.activities[c.activityId]) {
+        throw new Error(
+          `Commitment ${c.id} references unknown activity ${c.activityId}`,
+        );
+      }
+      for (const scopeItemId of c.scopeItemIds) {
+        if (!model.scopeItems?.[scopeItemId]) {
+          throw new Error(
+            `Commitment ${c.id} references unknown scope item ${scopeItemId}`,
+          );
+        }
+      }
+      for (const sourceId of c.sourceIds) {
+        if (!model.sources[sourceId]) {
+          throw new Error(
+            `Commitment ${c.id} references unknown source ${sourceId}`,
+          );
+        }
+      }
+    }
+
+    const ACTUAL_COST_STATUSES = new Set(["RECORDED", "VOID"]);
+    for (const actual of Object.values(fin.actualCosts)) {
+      assertOwnCurrency(`Actual cost ${actual.id} amount`, actual.amount);
+      assertISODate(actual.date);
+      if (!actual.description.trim()) {
+        throw new Error(`Actual cost ${actual.id} is missing a description`);
+      }
+      if (!ACTUAL_COST_STATUSES.has(actual.status)) {
+        throw new Error(
+          `Actual cost ${actual.id} has invalid status ${actual.status}`,
+        );
+      }
+      // Correction 6: budgetLineId is optional -- an unallocated actual cost is a real, valid
+      // state, never coerced onto a guessed line.
+      if (actual.budgetLineId && !fin.budgetLines[actual.budgetLineId]) {
+        throw new Error(
+          `Actual cost ${actual.id} references unknown budget line ${actual.budgetLineId}`,
+        );
+      }
+      if (actual.commitmentId && !fin.commitments[actual.commitmentId]) {
+        throw new Error(
+          `Actual cost ${actual.id} references unknown commitment ${actual.commitmentId}`,
+        );
+      }
+      for (const sourceId of actual.sourceIds) {
+        if (!model.sources[sourceId]) {
+          throw new Error(
+            `Actual cost ${actual.id} references unknown source ${sourceId}`,
+          );
+        }
+      }
+    }
+
+    const CHANGE_ORDER_STATUSES = new Set([
+      "DRAFT",
+      "PROPOSED",
+      "PENDING_APPROVAL",
+      "APPROVED",
+      "REJECTED",
+      "VOID",
+    ]);
+    for (const co of Object.values(fin.changeOrders)) {
+      if (!co.title.trim()) {
+        throw new Error(`Change order ${co.id} is missing a title`);
+      }
+      if (!CHANGE_ORDER_STATUSES.has(co.status)) {
+        throw new Error(
+          `Change order ${co.id} has invalid status ${co.status}`,
+        );
+      }
+      assertOwnCurrency(`Change order ${co.id} cost`, co.cost);
+      assertAllocationsWithinTotal(
+        `Change order ${co.id}`,
+        co.cost,
+        co.costAllocations,
+      );
+      if (co.categoryId && !fin.categories[co.categoryId]) {
+        throw new Error(
+          `Change order ${co.id} references unknown budget category ${co.categoryId}`,
+        );
+      }
+      for (const scopeItemId of co.scopeItemIds) {
+        if (!model.scopeItems?.[scopeItemId]) {
+          throw new Error(
+            `Change order ${co.id} references unknown scope item ${scopeItemId}`,
+          );
+        }
+      }
+      for (const activityId of co.activityIds) {
+        if (!model.activities[activityId]) {
+          throw new Error(
+            `Change order ${co.id} references unknown activity ${activityId}`,
+          );
+        }
+      }
+      for (const sourceId of co.sourceIds) {
+        if (!model.sources[sourceId]) {
+          throw new Error(
+            `Change order ${co.id} references unknown source ${sourceId}`,
+          );
+        }
       }
     }
   }

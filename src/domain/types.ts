@@ -203,11 +203,17 @@ export interface ScopeItemV096 {
   // schedule activity itself, and an activity carries no reciprocal scope reference; the reverse
   // mapping is computed on read, exactly like Schedule's own dependency refs.
   activityIds: string[];
-  // Forward-compatible only: no Plans/Photos/Documents or Change Orders module exists yet, so
-  // these are never populated or read by anything in this phase -- present so a later phase can
-  // add real references without a schema migration.
+  // Forward-compatible only: no Plans/Photos/Documents module exists yet, so these are never
+  // populated or read by anything in this phase -- present so a later phase can add real
+  // references without a schema migration.
   planDocumentRefs: string[];
-  changeOrderRef?: string;
+  // Phase 4 (corrected plan, Correction 7): replaces the never-populated, never-read
+  // `changeOrderRef` field above (removed, not deprecated-in-place -- nothing referenced it).
+  // A one-allowance-owner relationship only: the single BudgetLineV097 this scope item's
+  // allowance is tracked against, if any. The general many-to-many Scope<->Budget association
+  // is the reverse: `BudgetLineV097.scopeItemIds[]` and `ChangeOrderV097.scopeItemIds[]` are the
+  // owning collections; this field is never written back to from those, only read alongside them.
+  allowanceBudgetLineId?: string;
   notes?: string;
   sourceIds: string[];
   createdAt: ISODateTime;
@@ -225,6 +231,186 @@ export interface ScopeItemV096 {
 export interface MoneyV097 {
   amountMinor: number;
   currency: string;
+}
+
+// Phase 4 (Howler Recovery Directive, Budget + Change Orders, corrected plan): Budget/Change
+// Order entities. All totals a PM or Howler Intelligence would call "revised budget," "pending
+// exposure," "committed," "actual," or "unallocated" are DERIVED on every read from these small
+// records -- never stored/incremented on any entity -- which is the mechanism that prevents
+// additive double-counting under retry or duplicate-confirmation. See
+// src/operator/budget.ts / src/operator/change-orders.ts (Task 3) for those derivations.
+//
+// A project tracks money in exactly one currency (`ProjectFinancialsV097.currency`, chosen once
+// via INITIALIZE_PROJECT_FINANCIALS and never changed): no invented FX conversion. Every
+// MoneyV097 value reachable from `financials` below must share that currency; validation.ts
+// enforces this project-wide, not just per-field currency validity.
+
+export interface BudgetCategoryV097 {
+  id: string;
+  name: string;
+  // True only for a category seeded from the owner's construction starter list (never a
+  // hard-coded accounting taxonomy baked into the reducer/validation) -- fully PM-editable and
+  // deactivatable exactly like a PM-created category.
+  isDefault: boolean;
+  active: boolean;
+  sortOrder?: number;
+  notes?: string;
+  sourceIds: string[];
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+}
+
+export interface BudgetLineV097 {
+  id: string;
+  categoryId: string;
+  description: string;
+  costCode?: string;
+  trade?: string;
+  // "Unknown" when absent -- a line legitimately exists (e.g. scoped but not yet priced) before
+  // it has a baseline. Never fabricated as 0; a corrected baseline is a new
+  // SET-style UPSERT_BUDGET_LINE event, the old value stays in eventLedger history.
+  baselineAmount?: MoneyV097;
+  isAllowance: boolean;
+  // Real, optional stable reference only -- no Vendors/Trades module exists yet in this phase.
+  vendorRef?: string;
+  // General many-to-many Scope association (a line can cover several scope items; a scope item's
+  // single allowance-owner line, if any, is the reverse `ScopeItemV096.allowanceBudgetLineId`).
+  // The reverse view is always computed on read, never written back here.
+  scopeItemIds: string[];
+  notes?: string;
+  active: boolean;
+  sourceIds: string[];
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+}
+
+export type CommitmentStatusV097 = "ACTIVE" | "VOID";
+
+export interface CommitmentAllocationV097 {
+  budgetLineId: string;
+  amount: MoneyV097;
+}
+
+export interface CommitmentV097 {
+  id: string;
+  // Total committed amount (e.g. the full PO/subcontract value) -- may exceed the sum of
+  // `allocations`; see `allocations` below.
+  amount: MoneyV097;
+  // Correction 6: partial/unallocated allocation is legal and expected, not an error state. The
+  // sum of `allocations[].amount` may be less than `amount`; the remainder
+  // (`unallocatedAmount`, computed in src/operator/budget.ts, never stored here) is a real,
+  // visible fact for the PM to resolve, not silently dropped or forced to zero.
+  allocations: CommitmentAllocationV097[];
+  vendorRef?: string;
+  // Optional Schedule association for context/reporting only -- a commitment never mutates
+  // Schedule, and this reference carries no scheduling authority.
+  activityId?: string;
+  scopeItemIds: string[];
+  reference?: string;
+  // No separate DEACTIVATE_COMMITMENT op exists: correction/voiding is expressed by re-UPSERTing
+  // with `status: "VOID"`, keeping one mutation op per entity and full history via the event that
+  // changed it, exactly like Commitment's own status field says so on every read.
+  status: CommitmentStatusV097;
+  notes?: string;
+  sourceIds: string[];
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+}
+
+export type ActualCostStatusV097 = "RECORDED" | "VOID";
+
+export interface ActualCostV097 {
+  id: string;
+  amount: MoneyV097;
+  date: ISODate;
+  description: string;
+  // Correction 6: optional -- an actual cost can be recorded before anyone has decided which
+  // budget line it belongs to. Absence is a real "unallocated actual cost," never coerced to a
+  // guessed line.
+  budgetLineId?: string;
+  commitmentId?: string;
+  reference?: string;
+  // No separate DEACTIVATE_ACTUAL_COST op: correction/voiding is a re-UPSERT with
+  // `status: "VOID"`, same rationale as CommitmentV097.status above.
+  status: ActualCostStatusV097;
+  notes?: string;
+  sourceIds: string[];
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+}
+
+// Exact-once approval, explicit auditable reject/void/correction (reconciliation doc, Change
+// Orders acceptance walkthrough): APPROVED is reachable only from PENDING_APPROVAL, and only VOID
+// follows APPROVED -- there is no path back from APPROVED to any earlier state, so a change order
+// cannot be approved twice and its approved-budget effect cannot be silently reapplied. The legal
+// transition table lives next to the reducer's UPSERT_CHANGE_ORDER case in src/engine/reducer.ts,
+// the only place old-status-to-new-status is actually checked (validation.ts only ever sees the
+// final model, not the transition that produced it).
+export type ChangeOrderStatusV097 =
+  "DRAFT" | "PROPOSED" | "PENDING_APPROVAL" | "APPROVED" | "REJECTED" | "VOID";
+
+export interface ChangeOrderCostAllocationV097 {
+  budgetLineId: string;
+  amount: MoneyV097;
+}
+
+export interface ChangeOrderV097 {
+  id: string;
+  // PM-facing display number (e.g. "CO-014"), distinct from the internal `id` -- optional because
+  // a DRAFT originated conversationally or from Scope/Budget may not have one assigned yet.
+  number?: string;
+  title: string;
+  description?: string;
+  reason?: string;
+  status: ChangeOrderStatusV097;
+  // Total declared cost. May be negative (a credit CO is a legitimate, real record, not modeled
+  // as a separate type).
+  cost: MoneyV097;
+  // Correction 5: partial/unallocated allocation to budget lines is legal -- the sum of
+  // `costAllocations[].amount` may be less than `cost`; the remainder (`unallocatedAmount`,
+  // computed in src/operator/change-orders.ts, never stored here) is a real, visible fact.
+  costAllocations: ChangeOrderCostAllocationV097[];
+  // A DECLARED fact only. Approving this change order never itself mutates Schedule -- a
+  // separately authorized Schedule command (existing UPSERT_ACTIVITY/UPSERT_DEPENDENCY pathway)
+  // is the only thing that ever changes activities/dependencies/locks. This preserves the
+  // Schedule-mutation boundary the corrected plan requires.
+  declaredScheduleImpactDays?: number;
+  scopeItemIds: string[];
+  // Optional Schedule association for context/reporting only, exactly like
+  // CommitmentV097.activityId -- carries no scheduling authority.
+  activityIds: string[];
+  categoryId?: string;
+  clientApproved?: boolean;
+  requestedAt?: ISODateTime;
+  proposedAt?: ISODateTime;
+  approvedAt?: ISODateTime;
+  rejectedAt?: ISODateTime;
+  voidedAt?: ISODateTime;
+  notes?: string;
+  sourceIds: string[];
+  createdAt: ISODateTime;
+  updatedAt: ISODateTime;
+}
+
+// The financial state for one project. Optional on ProjectModelV094 itself: a project that has
+// never had INITIALIZE_PROJECT_FINANCIALS applied to it (every project that predates Phase 4,
+// and any new project before its first financial action) simply has no `financials` -- absence
+// is "not yet initialized," never an implied zero-currency-less budget of $0.
+export interface ProjectFinancialsV097 {
+  // The project's one tracked currency, set once at INITIALIZE_PROJECT_FINANCIALS and never
+  // changed by any later event (changing it would be an invented FX conversion).
+  currency: string;
+  // "Unknown" when absent -- correction 2/3: a project's overall financial baseline is not
+  // required to exist, and is never fabricated as 0 merely because INITIALIZE_PROJECT_FINANCIALS
+  // ran. Set (or corrected) independently via SET_PROJECT_FINANCIAL_BASELINE.
+  baseline?: MoneyV097;
+  baselineSetAt?: ISODateTime;
+  baselineSourceIds: string[];
+  categories: Record<string, BudgetCategoryV097>;
+  budgetLines: Record<string, BudgetLineV097>;
+  commitments: Record<string, CommitmentV097>;
+  actualCosts: Record<string, ActualCostV097>;
+  changeOrders: Record<string, ChangeOrderV097>;
 }
 
 export interface ProjectModelV094 {
@@ -245,6 +431,7 @@ export interface ProjectModelV094 {
   eventLedger: ProjectEventV094[];
   projectProfile?: ProjectProfileV096;
   scopeItems?: Record<string, ScopeItemV096>;
+  financials?: ProjectFinancialsV097;
 }
 
 // Every EventMutationV094 variant below corresponds 1:1 to a `case` in the
@@ -361,6 +548,57 @@ export interface DeactivateScopeItemMutationV094 {
   scopeItemId: string;
 }
 
+// Phase 4 (Howler Recovery Directive, Budget + Change Orders, corrected plan): 9 new mutation
+// ops. Named ...MutationV094 like every variant above, per this file's own convention -- the
+// EventMutationV094 discriminated union is versioned once, permanently; it is each mutation's
+// *payload* type (BudgetLineV097, CommitmentV097, etc.) that carries the version reflecting when
+// that shape was introduced.
+
+export interface InitializeProjectFinancialsMutationV094 {
+  op: "INITIALIZE_PROJECT_FINANCIALS";
+  currency: string;
+}
+
+export interface SetProjectFinancialBaselineMutationV094 {
+  op: "SET_PROJECT_FINANCIAL_BASELINE";
+  baseline: MoneyV097;
+}
+
+export interface UpsertBudgetCategoryMutationV094 {
+  op: "UPSERT_BUDGET_CATEGORY";
+  category: BudgetCategoryV097;
+}
+
+export interface DeactivateBudgetCategoryMutationV094 {
+  op: "DEACTIVATE_BUDGET_CATEGORY";
+  categoryId: string;
+}
+
+export interface UpsertBudgetLineMutationV094 {
+  op: "UPSERT_BUDGET_LINE";
+  budgetLine: BudgetLineV097;
+}
+
+export interface DeactivateBudgetLineMutationV094 {
+  op: "DEACTIVATE_BUDGET_LINE";
+  budgetLineId: string;
+}
+
+export interface UpsertCommitmentMutationV094 {
+  op: "UPSERT_COMMITMENT";
+  commitment: CommitmentV097;
+}
+
+export interface UpsertActualCostMutationV094 {
+  op: "UPSERT_ACTUAL_COST";
+  actualCost: ActualCostV097;
+}
+
+export interface UpsertChangeOrderMutationV094 {
+  op: "UPSERT_CHANGE_ORDER";
+  changeOrder: ChangeOrderV097;
+}
+
 export type EventMutationV094 =
   | SetActualStartMutationV094
   | SetActualFinishMutationV094
@@ -381,4 +619,13 @@ export type EventMutationV094 =
   | UpsertDependencyMutationV094
   | DeactivateDependencyMutationV094
   | UpsertScopeItemMutationV094
-  | DeactivateScopeItemMutationV094;
+  | DeactivateScopeItemMutationV094
+  | InitializeProjectFinancialsMutationV094
+  | SetProjectFinancialBaselineMutationV094
+  | UpsertBudgetCategoryMutationV094
+  | DeactivateBudgetCategoryMutationV094
+  | UpsertBudgetLineMutationV094
+  | DeactivateBudgetLineMutationV094
+  | UpsertCommitmentMutationV094
+  | UpsertActualCostMutationV094
+  | UpsertChangeOrderMutationV094;
