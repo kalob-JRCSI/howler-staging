@@ -214,6 +214,19 @@ export interface ScopeItemV096 {
   updatedAt: ISODateTime;
 }
 
+// Phase 4 (Howler Recovery Directive, Budget + Change Orders, corrected plan): the one money
+// shape used by every financial entity below. `currency` is deliberately a plain `string`, not
+// `SupportedCurrencyCode` -- this is the wire/storage shape, and a persisted or legacy value must
+// be able to round-trip even if its currency turns out to be unsupported; `isValidMoney` /
+// `isSupportedCurrency` in src/domain/money.ts are the actual validation boundary. Never confuse
+// this with `ProjectBudgetV096.currency` / `ScopeAllowanceV096.currency` above, which predate this
+// contract and are legacy, unvalidated `LegacyCurrencyLabel` strings -- read-only display fields
+// this phase does not parse or reinterpret as cents.
+export interface MoneyV097 {
+  amountMinor: number;
+  currency: string;
+}
+
 export interface ProjectModelV094 {
   projectId: string;
   revision: number;
