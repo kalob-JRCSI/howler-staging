@@ -32,5 +32,7 @@
   ],
   "vars": {
     "HOWLER_MODE": "shadow",
+    "HOWLER_AI_PROVIDER": "openai",
+    "HOWLER_AI_MODEL": "gpt-5.6-terra",
   },
 }
