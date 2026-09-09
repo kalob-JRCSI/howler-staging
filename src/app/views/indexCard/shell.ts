@@ -14,6 +14,8 @@ import { renderOverview } from "./overview";
 import { renderActivity } from "./activity";
 import { renderSchedule } from "./schedule";
 import { renderScope } from "./scope";
+import { renderBudget } from "./budget";
+import { renderChangeOrders } from "./changeOrders";
 import { renderPlaceholder } from "./placeholder";
 
 type ModuleRenderer = (
@@ -34,9 +36,9 @@ export const INDEX_CARD_MODULES: ModuleDefinition[] = [
   { id: "scope", label: "Scope", render: renderScope },
   { id: "plans", label: "Plans", render: renderPlaceholder },
   { id: "photos", label: "Photos", render: renderPlaceholder },
-  { id: "budget", label: "Budget", render: renderPlaceholder },
+  { id: "budget", label: "Budget", render: renderBudget },
   { id: "documents", label: "Documents", render: renderPlaceholder },
-  { id: "change-orders", label: "Change Orders", render: renderPlaceholder },
+  { id: "change-orders", label: "Change Orders", render: renderChangeOrders },
   { id: "selections", label: "Selections", render: renderPlaceholder },
   {
     id: "trades",

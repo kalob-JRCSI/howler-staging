@@ -51,6 +51,8 @@ function candidate(
       recoveryAvailable: false,
       recoveryStandbyAvailable: false,
       advisoryOnly: false,
+      levers: [],
+      protectionActions: [],
     },
     ...overrides,
   };

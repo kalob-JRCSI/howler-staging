@@ -4,7 +4,13 @@
 // tested at the contract/integration level.
 
 import type {
+  BudgetCommandLike,
+  BudgetCommandPreviewLike,
+  ChangeOrderCommandLike,
+  ChangeOrderCommandPreviewLike,
   ForecastSnapshotLike,
+  ProjectBudgetWorkspaceLike,
+  ProjectChangeOrdersWorkspaceLike,
   ProjectEventLike,
   ProjectScheduleLike,
   ProjectScopeLike,
@@ -168,6 +174,47 @@ export function previewScopeCommand(
 ): Promise<ScopeCommandPreviewLike> {
   return postJson<ScopeCommandPreviewLike>(
     `/v1/projects/${encodeURIComponent(projectId)}/scope/commands/preview`,
+    { command },
+  );
+}
+
+// Phase 4 (Budget + Change Orders): the same read view + preview -> apply pattern as
+// Schedule/Scope above (see src/operator/budget.ts / src/operator/change-orders.ts). Applying
+// either kind of event goes through the exact same /events/apply-shadow route --
+// applyScheduleEvent is reused verbatim rather than duplicated.
+
+export function fetchProjectBudget(
+  projectId: string,
+): Promise<ProjectBudgetWorkspaceLike> {
+  return apiFetch<ProjectBudgetWorkspaceLike>(
+    `/v1/projects/${encodeURIComponent(projectId)}/budget`,
+  );
+}
+
+export function previewBudgetCommand(
+  projectId: string,
+  command: BudgetCommandLike,
+): Promise<BudgetCommandPreviewLike> {
+  return postJson<BudgetCommandPreviewLike>(
+    `/v1/projects/${encodeURIComponent(projectId)}/budget/commands/preview`,
+    { command },
+  );
+}
+
+export function fetchProjectChangeOrders(
+  projectId: string,
+): Promise<ProjectChangeOrdersWorkspaceLike> {
+  return apiFetch<ProjectChangeOrdersWorkspaceLike>(
+    `/v1/projects/${encodeURIComponent(projectId)}/change-orders`,
+  );
+}
+
+export function previewChangeOrderCommand(
+  projectId: string,
+  command: ChangeOrderCommandLike,
+): Promise<ChangeOrderCommandPreviewLike> {
+  return postJson<ChangeOrderCommandPreviewLike>(
+    `/v1/projects/${encodeURIComponent(projectId)}/change-orders/commands/preview`,
     { command },
   );
 }

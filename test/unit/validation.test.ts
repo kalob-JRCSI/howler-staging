@@ -466,11 +466,22 @@ describe("EventMutationV094 discriminants", () => {
     // (src/operator/scope.ts).
     "UPSERT_SCOPE_ITEM",
     "DEACTIVATE_SCOPE_ITEM",
+    // Phase 4 (Howler Recovery Directive, Budget + Change Orders, corrected plan): the 9 new
+    // financial mutation ops (src/domain/types.ts, src/engine/reducer.ts).
+    "INITIALIZE_PROJECT_FINANCIALS",
+    "SET_PROJECT_FINANCIAL_BASELINE",
+    "UPSERT_BUDGET_CATEGORY",
+    "DEACTIVATE_BUDGET_CATEGORY",
+    "UPSERT_BUDGET_LINE",
+    "DEACTIVATE_BUDGET_LINE",
+    "UPSERT_COMMITMENT",
+    "UPSERT_ACTUAL_COST",
+    "UPSERT_CHANGE_ORDER",
   ];
 
-  it("covers exactly the 20 mutation ops found in the baseline reducer plus recovery additions", () => {
-    expect(knownOps).toHaveLength(20);
-    expect(new Set(knownOps).size).toBe(20);
+  it("covers exactly the 29 mutation ops found in the baseline reducer plus recovery additions", () => {
+    expect(knownOps).toHaveLength(29);
+    expect(new Set(knownOps).size).toBe(29);
   });
 
   it("exhaustively discriminates every mutation op at compile time", () => {
@@ -516,6 +527,24 @@ describe("EventMutationV094 discriminants", () => {
           return mutation.scopeItem.id;
         case "DEACTIVATE_SCOPE_ITEM":
           return mutation.scopeItemId;
+        case "INITIALIZE_PROJECT_FINANCIALS":
+          return mutation.currency;
+        case "SET_PROJECT_FINANCIAL_BASELINE":
+          return `${String(mutation.baseline.amountMinor)}:${mutation.baseline.currency}`;
+        case "UPSERT_BUDGET_CATEGORY":
+          return mutation.category.id;
+        case "DEACTIVATE_BUDGET_CATEGORY":
+          return mutation.categoryId;
+        case "UPSERT_BUDGET_LINE":
+          return mutation.budgetLine.id;
+        case "DEACTIVATE_BUDGET_LINE":
+          return mutation.budgetLineId;
+        case "UPSERT_COMMITMENT":
+          return mutation.commitment.id;
+        case "UPSERT_ACTUAL_COST":
+          return mutation.actualCost.id;
+        case "UPSERT_CHANGE_ORDER":
+          return mutation.changeOrder.id;
       }
     }
 
