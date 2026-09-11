@@ -3,6 +3,28 @@
 Written because the Claude session that did this work ran low on usage mid-task.
 This is a cold-start briefing: read this fully before touching code.
 
+## Dual-agent loop — Grok + Claude (2026-09-11)
+
+The owner is running **Grok** (live field-pilot OS) and **Claude** (canonical
+Cloudflare Worker on `howler-staging`) together. Do not treat either as a second
+product.
+
+| Agent | Owns | Does not own |
+| --- | --- | --- |
+| **Claude** | `kalob-JRCSI/howler-staging` on `claude/v096-phase4-budget-change-orders`. Canonical Worker, D1, reducer, Budget/CO routes, field UI, tests, CI. | Grok preview app. `main`. Production deploy. |
+| **Grok** | Live Howler operating surface the owner can click. Same product loop: input → preview → confirm → one project truth. | Remote D1. Staging deploy. Merging to `main`. |
+
+**How to include Claude (owner procedure):**
+
+1. Open Claude Code against `kalob-JRCSI/howler-staging`.
+2. Check out `claude/v096-phase4-budget-change-orders` at `2b2250b` (or later).
+3. Read this file and `context/handoff/current-task.json` first.
+4. Do only the bounded next task in `current-task.json`. Push the same branch.
+5. Do **not** merge to `main`, deploy, change `HOWLER_MODE`, or activate storage.
+
+Grok continues the live OS. Claude continues the Worker. Shared contract:
+Universal Data Interaction Contract + Phase 4 directive + this matrix.
+
 ## Current status — Phase 4 polish (Budget + Change Orders)
 
 Phase 4 application work lives on `claude/v096-phase4-budget-change-orders`.
