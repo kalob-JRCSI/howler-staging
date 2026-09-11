@@ -5,7 +5,7 @@
   "title": "Phase 4: Budget + Change Orders — Claude next: Worker browser acceptance + Scope-originated DRAFT CO + DRAFT_CO_UNPRICED",
   "status": "IN_PROGRESS",
   "baseSha": "3aed78e2241a06e3b299baec8a73a2b6b8f11277",
-  "headSha": "5ee189017a73ff2eb2aba80aaa7a698877372f96",
+  "headSha": "7ffdc38b9e8fdecdd7063f0f5f37d7ecdd1944cf",
   "branch": "claude/v096-phase4-budget-change-orders",
   "blocks": ["v096-phase5"],
   "assignee": "Claude",
