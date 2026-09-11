@@ -2,16 +2,23 @@
   "schemaVersion": "1",
   "kind": "handoffRecord",
   "taskId": "v096-phase4-budget-change-orders",
-  "title": "Phase 4: Budget + Change Orders — Claude next: Worker browser acceptance + Scope-originated DRAFT CO",
+  "title": "Phase 4: Budget + Change Orders — Claude next: Worker browser acceptance + Scope-originated DRAFT CO + DRAFT_CO_UNPRICED",
   "status": "IN_PROGRESS",
   "baseSha": "3aed78e2241a06e3b299baec8a73a2b6b8f11277",
-  "headSha": "2b2250bf18cea5d0814b83cc56e1620431d52748",
+  "headSha": "5ee189017a73ff2eb2aba80aaa7a698877372f96",
   "branch": "claude/v096-phase4-budget-change-orders",
   "blocks": ["v096-phase5"],
   "assignee": "Claude",
   "support": "Grok (live field-pilot OS; do not treat as canonical Worker)",
-  "summary": "Phase 4 application through Task 12 plus polish 2b2250b is on the branch (Tell Howler on Budget/CO, parseMoneyDecimal, default categories, extra financial findings). DEVELOPMENT MILESTONE, not field-pilot ready. Claude is the authoritative Worker implementer. Next bounded task for Claude only: (1) isolated local staging browser acceptance of Budget + Change Orders per docs/superpowers/specs/2026-09-09-howler-phase4-requirements-reconciliation.md walkthroughs; (2) Scope-originated unpriced DRAFT CO in the Worker Scope UI — no fabricated price, no auto-approval, Schedule unchanged; (3) keep Tell Howler / manual parity; (4) focused tests + format only the files you touch; (5) push this branch; do not merge main, deploy, change HOWLER_MODE, or activate storage. Grok is operating the live OS in parallel and must not become a second canonical model.",
+  "pickup": [
+    "CLAUDE.md",
+    "context/handoff/claude-next.md",
+    "https://github.com/kalob-JRCSI/howler-staging/issues/16"
+  ],
+  "summary": "Phase 4 application through Task 12 plus polish 2b2250b is on the branch. DEVELOPMENT MILESTONE, not field-pilot ready. Claude is the authoritative Worker implementer. Pickup: open Claude Code on this branch, paste context/handoff/claude-next.md. Bounded task: (1) isolated local staging browser acceptance of Budget + Change Orders per the reconciliation walkthroughs; (2) Scope-originated unpriced DRAFT CO in Worker Scope UI via existing ADD_CHANGE_ORDER — no fabricated price, no auto-approval, Schedule unchanged; (3) add DRAFT_CO_UNPRICED as a separate finding kind — do not change PENDING_CO_UNPRICED so it still ignores DRAFT $0; (4) keep Tell Howler / manual parity; (5) focused tests + format only files you touch; (6) push this branch and comment on issue #16. Do not merge main, deploy, change HOWLER_MODE, or activate storage. Grok live OS now continues from the last History record (“price it $8,000”) and surfaces DRAFT_CO_UNPRICED — Claude should land the Worker equivalent, not copy the preview app.",
   "relevantPaths": [
+    "CLAUDE.md",
+    "context/handoff/claude-next.md",
     "docs/superpowers/specs/2026-09-08-howler-phase4-budget-change-orders-directive.md",
     "docs/superpowers/specs/2026-09-08-howler-universal-data-interaction-contract.md",
     "docs/superpowers/specs/2026-09-09-howler-phase4-requirements-reconciliation.md",
@@ -22,6 +29,8 @@
     "src/app/views/indexCard/changeOrders.ts",
     "src/app/views/indexCard/financialConversation.ts",
     "src/operator/change-orders.ts",
-    "src/operator/financial-intelligence.ts"
+    "src/operator/financial-intelligence.ts",
+    "src/app/types.ts",
+    "test/unit/financial-intelligence.test.ts"
   ]
 }

@@ -16,11 +16,20 @@ product.
 
 **How to include Claude (owner procedure):**
 
-1. Open Claude Code against `kalob-JRCSI/howler-staging`.
-2. Check out `claude/v096-phase4-budget-change-orders` at `2b2250b` (or later).
-3. Read this file and `context/handoff/current-task.json` first.
-4. Do only the bounded next task in `current-task.json`. Push the same branch.
+Grok cannot spawn Claude. The owner starts a **Claude Code** session against this repo. The session auto-reads `CLAUDE.md`.
+
+1. Open Claude Code in `howler-staging`.
+2. `git checkout claude/v096-phase4-budget-change-orders && git pull`
+3. Paste `context/handoff/claude-next.md` as the first message (or: “Read CLAUDE.md and do the current task.”)
+4. Claude does only that bounded Worker task, then pushes this branch.
 5. Do **not** merge to `main`, deploy, change `HOWLER_MODE`, or activate storage.
+
+Shared pickup surfaces (keep these current; do not fork a second plan):
+
+- `CLAUDE.md` — Claude Code router
+- `context/handoff/claude-next.md` — paste-ready next task
+- `context/handoff/current-task.json` — status / SHA / assignee
+- GitHub issue https://github.com/kalob-JRCSI/howler-staging/issues/16
 
 Grok continues the live OS. Claude continues the Worker. Shared contract:
 Universal Data Interaction Contract + Phase 4 directive + this matrix.
