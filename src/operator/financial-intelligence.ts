@@ -8,15 +8,25 @@
 
 import type { ProjectModelV094 } from "../domain/types";
 import { formatMoneyMinor } from "../domain/money";
-import { computeBudgetLineActualTotal } from "./budget";
+import {
+  computeBudgetLineActualTotal,
+  computeBudgetLineCommittedTotal,
+} from "./budget";
 
+// Keep in lockstep with src/app/types.ts FinancialFindingKindLike -- the browser workspace
+// names these findings from the GET /budget payload and cannot invent kinds of its own.
 export type FinancialFindingKindV097 =
   | "LINE_HAS_NO_BASELINE"
   | "ACTUAL_COST_UNALLOCATED"
   | "COMMITMENT_HAS_UNALLOCATED_AMOUNT"
   | "APPROVED_CO_HAS_UNALLOCATED_AMOUNT"
   | "ALLOWANCE_OVERRUN"
-  | "SCOPE_ALLOWANCE_NOT_LINKED";
+  | "SCOPE_ALLOWANCE_NOT_LINKED"
+  | "LINE_COMMITMENT_OVER_REVISED"
+  | "LINE_ACTUAL_OVER_REVISED"
+  | "SCOPE_HAS_NO_BUDGET_ASSOCIATION"
+  | "LINE_HAS_NO_SCOPE"
+  | "PENDING_CO_UNPRICED";
 
 export interface FinancialFindingV097 {
   kind: FinancialFindingKindV097;
@@ -79,6 +89,52 @@ export function computeFinancialFindings(
         message: `Budget line "${line.description}" has no baseline amount recorded.`,
       });
     }
+    if (line.scopeItemIds.length === 0) {
+      findings.push({
+        kind: "LINE_HAS_NO_SCOPE",
+        budgetLineId: line.id,
+        commitmentId: null,
+        actualCostId: null,
+        changeOrderId: null,
+        scopeItemId: null,
+        message: `Budget line "${line.description}" is not associated with any Scope item.`,
+      });
+    }
+    const approvedCO = Object.values(fin.changeOrders)
+      .filter((co) => co.status === "APPROVED")
+      .flatMap((co) =>
+        co.costAllocations.filter((a) => a.budgetLineId === line.id),
+      )
+      .reduce((total, a) => total + a.amount.amountMinor, 0);
+    const revisedMinor = line.baselineAmount
+      ? line.baselineAmount.amountMinor + approvedCO
+      : null;
+    if (revisedMinor !== null) {
+      const committed = computeBudgetLineCommittedTotal(fin, line.id);
+      if (committed.amountMinor > revisedMinor) {
+        findings.push({
+          kind: "LINE_COMMITMENT_OVER_REVISED",
+          budgetLineId: line.id,
+          commitmentId: null,
+          actualCostId: null,
+          changeOrderId: null,
+          scopeItemId: null,
+          message: `Budget line "${line.description}" has ${formatMoneyMinor(committed)} committed against a revised budget of ${formatMoneyMinor({ amountMinor: revisedMinor, currency: fin.currency })}.`,
+        });
+      }
+      const actual = computeBudgetLineActualTotal(fin, line.id);
+      if (actual.amountMinor > revisedMinor) {
+        findings.push({
+          kind: "LINE_ACTUAL_OVER_REVISED",
+          budgetLineId: line.id,
+          commitmentId: null,
+          actualCostId: null,
+          changeOrderId: null,
+          scopeItemId: null,
+          message: `Budget line "${line.description}" has ${formatMoneyMinor(actual)} actual recorded against a revised budget of ${formatMoneyMinor({ amountMinor: revisedMinor, currency: fin.currency })}.`,
+        });
+      }
+    }
   }
 
   for (const actualCost of Object.values(fin.actualCosts)) {
@@ -117,6 +173,19 @@ export function computeFinancialFindings(
   }
 
   for (const co of Object.values(fin.changeOrders)) {
+    if (co.status === "PROPOSED" || co.status === "PENDING_APPROVAL") {
+      if (co.cost.amountMinor === 0) {
+        findings.push({
+          kind: "PENDING_CO_UNPRICED",
+          budgetLineId: null,
+          commitmentId: null,
+          actualCostId: null,
+          changeOrderId: co.id,
+          scopeItemId: null,
+          message: `Pending change order "${co.title}" has no priced cost yet. Approved budget is unchanged.`,
+        });
+      }
+    }
     if (co.status !== "APPROVED") continue;
     const allocated = co.costAllocations.reduce(
       (total, a) => total + a.amount.amountMinor,
@@ -136,8 +205,31 @@ export function computeFinancialFindings(
     }
   }
 
+  const associatedScopeIds = new Set<string>();
+  for (const line of Object.values(fin.budgetLines)) {
+    if (!line.active) continue;
+    for (const scopeItemId of line.scopeItemIds) {
+      associatedScopeIds.add(scopeItemId);
+    }
+  }
+
   for (const item of Object.values(model.scopeItems ?? {})) {
     if (!item.active) continue;
+    if (
+      item.included &&
+      !item.allowanceBudgetLineId &&
+      !associatedScopeIds.has(item.id)
+    ) {
+      findings.push({
+        kind: "SCOPE_HAS_NO_BUDGET_ASSOCIATION",
+        budgetLineId: null,
+        commitmentId: null,
+        actualCostId: null,
+        changeOrderId: null,
+        scopeItemId: item.id,
+        message: `"${item.description}" has no Budget line association, so its financial coverage is unknown.`,
+      });
+    }
     if (item.allowanceBudgetLineId) {
       const line = fin.budgetLines[item.allowanceBudgetLineId];
       if (line?.baselineAmount) {

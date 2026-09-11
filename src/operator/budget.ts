@@ -182,6 +182,13 @@ function lineAllocations(
   return { committed, approvedCO };
 }
 
+export function computeBudgetLineCommittedTotal(
+  fin: ProjectFinancialsV097,
+  budgetLineId: string,
+): MoneyV097 {
+  return zeroOrSum(fin.currency, lineAllocations(fin, budgetLineId).committed);
+}
+
 // Shared with src/operator/scope.ts's linked-allowance adapter (ScopeItemV096.allowanceBudgetLineId)
 // so "how much has actually been spent against this line" is computed in exactly one place --
 // Scope must never recompute this total independently and risk drifting from Budget's own number.
@@ -617,6 +624,57 @@ function requireActualCost(
   return actualCost;
 }
 
+export const DEFAULT_BUDGET_CATEGORY_NAMES = [
+  "General Conditions",
+  "Sitework",
+  "Concrete",
+  "Masonry",
+  "Framing",
+  "Roofing",
+  "Windows / Doors",
+  "Electrical",
+  "Plumbing",
+  "HVAC",
+  "Insulation",
+  "Drywall",
+  "Paint",
+  "Flooring",
+  "Tile",
+  "Cabinetry",
+  "Countertops",
+  "Glass",
+  "Trim / Finish Carpentry",
+  "Fixtures / Selections",
+  "Landscaping",
+  "Other",
+] as const;
+
+function defaultCategoryId(name: string): string {
+  return `default-${name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")}`;
+}
+
+function defaultCategoryMutations(
+  now: ISODateTime,
+  sourceId: string,
+): ProjectEventV094["mutations"] {
+  return DEFAULT_BUDGET_CATEGORY_NAMES.map((name, index) => ({
+    op: "UPSERT_BUDGET_CATEGORY",
+    category: {
+      id: defaultCategoryId(name),
+      name,
+      isDefault: true,
+      active: true,
+      sortOrder: index + 1,
+      sourceIds: [sourceId],
+      createdAt: now,
+      updatedAt: now,
+    },
+  }));
+}
+
 interface BuiltBudgetEvent {
   event: ProjectEventV094;
   historyNote: string;
@@ -685,7 +743,10 @@ export function buildBudgetEvent(
     return finish(
       "PROJECT_FINANCIALS_INITIALIZED",
       `Project financials initialized in ${command.currency}.`,
-      [{ op: "INITIALIZE_PROJECT_FINANCIALS", currency: command.currency }],
+      [
+        { op: "INITIALIZE_PROJECT_FINANCIALS", currency: command.currency },
+        ...defaultCategoryMutations(now, sourceId),
+      ],
     );
   }
 
@@ -735,6 +796,7 @@ export function buildBudgetEvent(
             op: "INITIALIZE_PROJECT_FINANCIALS",
             currency: legacyBudget.currency,
           },
+          ...defaultCategoryMutations(now, sourceId),
           { op: "SET_PROJECT_FINANCIAL_BASELINE", baseline },
         ];
     return finish(
@@ -1009,7 +1071,7 @@ export function buildBudgetEvent(
     };
     return finish(
       "COMMITMENT_ADDED",
-      `Added commitment of ${String(command.amount.amountMinor)} ${command.amount.currency}.`,
+      `Added commitment of ${formatMoneyMinor(command.amount)}.`,
       [{ op: "UPSERT_COMMITMENT", commitment }],
     );
   }

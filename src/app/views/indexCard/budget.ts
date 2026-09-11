@@ -11,10 +11,11 @@ import {
   ApiRequestError,
   applyScheduleEvent as applyBudgetEvent,
   fetchProjectBudget,
+  fetchProjectScope,
   previewBudgetCommand,
   UnauthorizedError,
 } from "../../api";
-import { escapeHtml, formatMoneyMinor } from "../../format";
+import { escapeHtml, formatMoneyMinor, parseMoneyDecimal } from "../../format";
 import type {
   ActualCostViewLike,
   BudgetCategoryViewLike,
@@ -24,7 +25,12 @@ import type {
   CommitmentViewLike,
   MoneyLike,
   ProjectBudgetWorkspaceLike,
+  ScopeItemViewLike,
 } from "../../types";
+import {
+  financialConversationHtml,
+  wireFinancialConversation,
+} from "./financialConversation";
 
 function dash(value: string | null | undefined): string {
   return value ? escapeHtml(value) : "—";
@@ -39,6 +45,14 @@ function formString(data: FormData, key: string, fallback = ""): string {
   return typeof value === "string" ? value : fallback;
 }
 
+function selectedValues(data: FormData, key: string): string[] {
+  return data
+    .getAll(key)
+    .filter(
+      (value): value is string => typeof value === "string" && value !== "",
+    );
+}
+
 function parseMoneyInput(
   data: FormData,
   amountKey: string,
@@ -47,11 +61,9 @@ function parseMoneyInput(
 ): MoneyLike | null {
   const raw = data.get(amountKey);
   if (typeof raw !== "string" || raw.trim() === "") return null;
-  const amount = Number(raw);
-  if (!Number.isFinite(amount)) return null;
   const currency =
     formString(data, currencyKey, fallbackCurrency) || fallbackCurrency;
-  return { amountMinor: Math.round(amount * 100), currency };
+  return parseMoneyDecimal(raw, currency);
 }
 
 export async function renderBudget(
@@ -61,6 +73,7 @@ export async function renderBudget(
   body.innerHTML = `<p>Loading budget&hellip;</p>`;
 
   let workspace: ProjectBudgetWorkspaceLike;
+  let scopeItems: ScopeItemViewLike[] = [];
   try {
     workspace = await fetchProjectBudget(projectId);
   } catch (error) {
@@ -70,6 +83,15 @@ export async function renderBudget(
     }
     body.innerHTML = `<p class="ic-empty">Could not load project budget.</p>`;
     return;
+  }
+  try {
+    const scope = await fetchProjectScope(projectId);
+    scopeItems = scope.items.filter((item) => item.included);
+  } catch (error) {
+    if (error instanceof UnauthorizedError) {
+      window.location.assign("/");
+      return;
+    }
   }
 
   let expandedCategoryId: string | null = null;
@@ -86,6 +108,15 @@ export async function renderBudget(
         return;
       }
       throw error;
+    }
+    try {
+      const scope = await fetchProjectScope(projectId);
+      scopeItems = scope.items.filter((item) => item.included);
+    } catch (error) {
+      if (error instanceof UnauthorizedError) {
+        window.location.assign("/");
+        return;
+      }
     }
     render();
   }
@@ -305,6 +336,15 @@ export async function renderBudget(
       .map(
         (c) =>
           `<option value="${escapeHtml(c.id)}" ${c.id === selectedId ? "selected" : ""}>${escapeHtml(c.name)}</option>`,
+      )
+      .join("");
+  }
+
+  function scopeItemOptions(selectedIds: string[]): string {
+    return scopeItems
+      .map(
+        (item) =>
+          `<option value="${escapeHtml(item.id)}" ${selectedIds.includes(item.id) ? "selected" : ""}>${escapeHtml(item.description)}</option>`,
       )
       .join("");
   }
@@ -542,6 +582,24 @@ export async function renderBudget(
               </form>
             </details>
             <details>
+              <summary>Associated Scope</summary>
+              <form data-action="ASSOCIATE_LINE_SCOPE_ITEMS">
+                <select name="scopeItemIds" multiple size="4">${scopeItemOptions(line.scopeItemIds)}</select>
+                <p class="ic-empty">Select one or more; replaces the current association list.</p>
+                <button type="submit">Save</button>
+              </form>
+              ${
+                line.scopeItemIds.length > 0
+                  ? `<p>Currently: ${line.scopeItemIds
+                      .map((id) => {
+                        const item = scopeItems.find((s) => s.id === id);
+                        return escapeHtml(item?.description ?? id);
+                      })
+                      .join(", ")}</p>`
+                  : `<p class="ic-empty">Not associated with any Scope item.</p>`
+              }
+            </details>
+            <details>
               <summary>Remove line</summary>
               <button type="button" class="sched-deactivate" data-line="${escapeHtml(line.id)}">Remove (non-destructive)</button>
             </details>
@@ -751,6 +809,15 @@ export async function renderBudget(
                 kind: "SET_LINE_NOTES",
                 budgetLineId: line.id,
                 notes: formString(data, "notes"),
+              },
+              panel,
+            );
+          } else if (action === "ASSOCIATE_LINE_SCOPE_ITEMS") {
+            void runCommand(
+              {
+                kind: "ASSOCIATE_LINE_SCOPE_ITEMS",
+                budgetLineId: line.id,
+                scopeItemIds: selectedValues(data, "scopeItemIds"),
               },
               panel,
             );
@@ -1285,12 +1352,14 @@ export async function renderBudget(
     body.innerHTML = `
       ${renderSummary()}
       ${renderFindings()}
+      ${financialConversationHtml()}
       ${renderCategories()}
       ${renderLines()}
       ${renderCommitments()}
       ${renderActualCosts()}
     `;
     wireSummary();
+    wireFinancialConversation(body, projectId, reload, render);
     wireCategories();
     wireLines();
     wireCommitments();

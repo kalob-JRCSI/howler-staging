@@ -42,6 +42,33 @@ export function formatMoneyMinor(money: {
   return `${negative ? "-" : ""}${symbol}${whole.toLocaleString("en-US")}.${String(cents).padStart(2, "0")}`;
 }
 
+/**
+ * Client-side copy of src/domain/money.ts parseMoneyInput for the 2-minor-unit currencies
+ * this app actually displays. Digit-string assembly, never parseFloat(value) * 100.
+ * Returns null for empty or invalid input so forms can refuse to submit.
+ */
+export function parseMoneyDecimal(
+  decimalString: string,
+  currency: string,
+): { amountMinor: number; currency: string } | null {
+  const trimmed = decimalString.trim();
+  if (!trimmed) return null;
+  const match = /^(-)?(\d+)(?:\.(\d+))?$/.exec(trimmed);
+  if (!match) return null;
+  const fractional = match[3] ?? "";
+  if (fractional.length > 2) return null;
+  const combined = `${match[2] ?? "0"}${fractional.padEnd(2, "0")}`;
+  const magnitude = BigInt(combined);
+  const signed = match[1] === "-" ? -magnitude : magnitude;
+  if (
+    signed > BigInt(Number.MAX_SAFE_INTEGER) ||
+    signed < BigInt(Number.MIN_SAFE_INTEGER)
+  ) {
+    return null;
+  }
+  return { amountMinor: Number(signed), currency };
+}
+
 export function formatDate(value: string | null): string {
   if (!value) return "—";
   const parts = value.split("-");

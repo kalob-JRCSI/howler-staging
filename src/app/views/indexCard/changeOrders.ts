@@ -15,7 +15,7 @@ import {
   previewChangeOrderCommand,
   UnauthorizedError,
 } from "../../api";
-import { escapeHtml, formatMoneyMinor } from "../../format";
+import { escapeHtml, formatMoneyMinor, parseMoneyDecimal } from "../../format";
 import type {
   ChangeOrderCommandLike,
   ChangeOrderCommandPreviewLike,
@@ -24,6 +24,10 @@ import type {
   ProjectBudgetWorkspaceLike,
   ProjectChangeOrdersWorkspaceLike,
 } from "../../types";
+import {
+  financialConversationHtml,
+  wireFinancialConversation,
+} from "./financialConversation";
 
 function dash(value: string | null | undefined): string {
   return value ? escapeHtml(value) : "—";
@@ -41,9 +45,7 @@ function parseMoneyInput(
 ): MoneyLike | null {
   const raw = data.get(amountKey);
   if (typeof raw !== "string" || raw.trim() === "") return null;
-  const amount = Number(raw);
-  if (!Number.isFinite(amount)) return null;
-  return { amountMinor: Math.round(amount * 100), currency };
+  return parseMoneyDecimal(raw, currency);
 }
 
 const NEXT_LIFECYCLE_ACTION: Partial<
@@ -478,6 +480,7 @@ export async function renderChangeOrders(
     const changeOrders = workspace.changeOrders;
     body.innerHTML = `
       ${renderSummary()}
+      ${financialConversationHtml()}
       <h3>+ New change order (starts as DRAFT)</h3>
       <div class="sched-action-panel" id="co-add-panel"></div>
       <table class="sched-table">
@@ -499,6 +502,7 @@ export async function renderChangeOrders(
         </tbody>
       </table>
     `;
+    wireFinancialConversation(body, projectId, reload, render);
     showAddForm();
 
     body

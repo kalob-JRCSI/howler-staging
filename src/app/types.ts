@@ -399,15 +399,22 @@ export interface ActualCostViewLike {
 }
 
 // Phase 4 (Task 9 financial intelligence): mirrors src/operator/financial-intelligence.ts's
-// FinancialFindingV097 exactly. Every finding links to real, structured facts already on
-// canonical state -- never a generated narrative.
+// FinancialFindingKindV097 exactly. Keep this union in lockstep with the operator kinds --
+// never a frontend-only finding, never an operator kind the Budget workspace cannot name.
+// Every finding links to real, structured facts already on canonical state -- never a
+// generated narrative.
 export type FinancialFindingKindLike =
   | "LINE_HAS_NO_BASELINE"
   | "ACTUAL_COST_UNALLOCATED"
   | "COMMITMENT_HAS_UNALLOCATED_AMOUNT"
   | "APPROVED_CO_HAS_UNALLOCATED_AMOUNT"
   | "ALLOWANCE_OVERRUN"
-  | "SCOPE_ALLOWANCE_NOT_LINKED";
+  | "SCOPE_ALLOWANCE_NOT_LINKED"
+  | "LINE_COMMITMENT_OVER_REVISED"
+  | "LINE_ACTUAL_OVER_REVISED"
+  | "SCOPE_HAS_NO_BUDGET_ASSOCIATION"
+  | "LINE_HAS_NO_SCOPE"
+  | "PENDING_CO_UNPRICED";
 
 export interface FinancialFindingLike {
   kind: FinancialFindingKindLike;
@@ -670,3 +677,13 @@ export interface ChangeOrderCommandPreviewLike {
     protectionActions: ProtectionActionLike[];
   };
 }
+
+export type FinancialConversationTurnLike =
+  | { outcome: "CLARIFICATION"; message: string }
+  | {
+      outcome: "RESOLVED";
+      historyNote: string;
+      clerical: boolean;
+      reviewToken: string;
+      event: unknown;
+    };

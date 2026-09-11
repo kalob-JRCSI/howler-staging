@@ -8,6 +8,7 @@ import type {
   BudgetCommandPreviewLike,
   ChangeOrderCommandLike,
   ChangeOrderCommandPreviewLike,
+  FinancialConversationTurnLike,
   ForecastSnapshotLike,
   ProjectBudgetWorkspaceLike,
   ProjectChangeOrdersWorkspaceLike,
@@ -216,5 +217,15 @@ export function previewChangeOrderCommand(
   return postJson<ChangeOrderCommandPreviewLike>(
     `/v1/projects/${encodeURIComponent(projectId)}/change-orders/commands/preview`,
     { command },
+  );
+}
+
+export function postFinancialConversationTurn(
+  projectId: string,
+  text: string,
+): Promise<FinancialConversationTurnLike> {
+  return postJson<FinancialConversationTurnLike>(
+    `/v1/projects/${encodeURIComponent(projectId)}/financial-conversation/turn`,
+    { text },
   );
 }

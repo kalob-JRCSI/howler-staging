@@ -294,4 +294,53 @@ describe("renderChangeOrders", () => {
     const panel = detail?.querySelector<HTMLElement>(".sched-action-panel");
     expect(panel?.textContent).toContain("Invalid change order command");
   });
+
+  it("mounts the Tell Howler control on an initialized workspace", async () => {
+    stubFetchRouting({
+      "/change-orders": () => jsonResponse(200, initializedWorkspace()),
+      "/budget": () => jsonResponse(200, budgetWorkspace()),
+    });
+    const body = document.createElement("div");
+    await renderChangeOrders(body, "carver");
+    expect(body.textContent).toContain("Tell Howler");
+    expect(
+      body.querySelector('form[data-action="FINANCIAL_CONVERSATION"]'),
+    ).not.toBeNull();
+  });
+
+  it("ADD_CHANGE_ORDER posts digit-string minor units, not float * 100", async () => {
+    let posted: { command?: { cost?: { amountMinor: number } } } | null = null;
+    stubFetchRouting({
+      "/change-orders": () => jsonResponse(200, initializedWorkspace()),
+      "/budget": () => jsonResponse(200, budgetWorkspace()),
+      "/change-orders/commands/preview": (init) => {
+        posted = JSON.parse(String(init?.body ?? "{}")) as typeof posted;
+        return jsonResponse(200, {
+          projectRevision: 3,
+          reviewToken: "token-money",
+          historyNote: "Draft change order created.",
+          clerical: false,
+          event: { id: "evt-money", baseRevision: 3 },
+          delta: null,
+          recoveryAnalysis: { status: "ON_TRACK", protectionActions: [] },
+        });
+      },
+    });
+
+    const body = document.createElement("div");
+    await renderChangeOrders(body, "carver");
+    const form = body.querySelector<HTMLFormElement>(
+      'form[data-action="ADD_CHANGE_ORDER"]',
+    );
+    const title = form?.querySelector<HTMLInputElement>('input[name="title"]');
+    const amount = form?.querySelector<HTMLInputElement>(
+      'input[name="amount"]',
+    );
+    if (title) title.value = "Extra millwork";
+    if (amount) amount.value = "10000.10";
+    form?.dispatchEvent(new Event("submit", { cancelable: true }));
+    await flushAsyncWork();
+
+    expect(posted?.command?.cost?.amountMinor).toBe(1000010);
+  });
 });

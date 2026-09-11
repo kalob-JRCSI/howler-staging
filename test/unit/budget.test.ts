@@ -4,6 +4,7 @@ import {
   buildBudgetView,
   BudgetCommandError,
   CLERICAL_BUDGET_COMMAND_KINDS,
+  DEFAULT_BUDGET_CATEGORY_NAMES,
 } from "../../src/operator/budget";
 import type {
   ActualCostV097,
@@ -336,6 +337,31 @@ describe("buildBudgetEvent: INITIALIZE_FINANCIALS / SET_FINANCIAL_BASELINE", () 
     expect(built.clerical).toBe(false);
   });
 
+  it("seeds DEFAULT_BUDGET_CATEGORY_NAMES as default categories on INITIALIZE_FINANCIALS", () => {
+    const built = buildBudgetEvent(
+      model(),
+      { kind: "INITIALIZE_FINANCIALS", currency: "USD" },
+      "2026-08-26T12:00:00Z",
+      newId,
+    );
+    const categoryMutations = built.event.mutations.filter(
+      (m) => m.op === "UPSERT_BUDGET_CATEGORY",
+    );
+    expect(categoryMutations).toHaveLength(
+      DEFAULT_BUDGET_CATEGORY_NAMES.length,
+    );
+    expect(
+      categoryMutations.map((m) =>
+        "category" in m ? m.category.name : undefined,
+      ),
+    ).toEqual([...DEFAULT_BUDGET_CATEGORY_NAMES]);
+    expect(
+      categoryMutations.every(
+        (m) => "category" in m && m.category.isDefault && m.category.active,
+      ),
+    ).toBe(true);
+  });
+
   it("rejects an unsupported currency", () => {
     expect(() =>
       buildBudgetEvent(
@@ -438,6 +464,51 @@ describe("buildBudgetEvent: categories and lines", () => {
         ? mutation.budgetLine.baselineAmount
         : undefined,
     ).toBeUndefined();
+  });
+
+  it("ASSOCIATE_LINE_SCOPE_ITEMS replaces the line's scopeItemIds and is not clerical", () => {
+    const built = buildBudgetEvent(
+      model({
+        financials: financials({
+          categories: { cat1: category() },
+          budgetLines: {
+            line1: budgetLine({ scopeItemIds: ["old-scope"] }),
+          },
+        }),
+      }),
+      {
+        kind: "ASSOCIATE_LINE_SCOPE_ITEMS",
+        budgetLineId: "line1",
+        scopeItemIds: ["scope-a", "scope-b", "scope-a"],
+      },
+      "2026-08-26T12:00:00Z",
+      newId,
+    );
+    expect(built.clerical).toBe(false);
+    const mutation = built.event.mutations.find(
+      (m) => m.op === "UPSERT_BUDGET_LINE",
+    );
+    expect(
+      mutation && "budgetLine" in mutation
+        ? mutation.budgetLine.scopeItemIds
+        : undefined,
+    ).toEqual(["scope-a", "scope-b"]);
+    expect(built.event.note).toContain("scope associations updated");
+  });
+
+  it("ASSOCIATE_LINE_SCOPE_ITEMS rejects an unknown budget line", () => {
+    expect(() =>
+      buildBudgetEvent(
+        model({ financials: financials() }),
+        {
+          kind: "ASSOCIATE_LINE_SCOPE_ITEMS",
+          budgetLineId: "missing",
+          scopeItemIds: ["scope-a"],
+        },
+        "2026-08-26T12:00:00Z",
+        newId,
+      ),
+    ).toThrow("Unknown budget line: missing");
   });
 });
 
@@ -587,6 +658,7 @@ describe("buildBudgetEvent: ADOPT_LEGACY_BASELINE (Phase 4 Task 12, legacy compa
     expect(built.event.mutations.map((m) => m.op)).toEqual([
       "UPSERT_SOURCE",
       "INITIALIZE_PROJECT_FINANCIALS",
+      ...DEFAULT_BUDGET_CATEGORY_NAMES.map(() => "UPSERT_BUDGET_CATEGORY"),
       "SET_PROJECT_FINANCIAL_BASELINE",
     ]);
     expect(built.event.mutations).toContainEqual({

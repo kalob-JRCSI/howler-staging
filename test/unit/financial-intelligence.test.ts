@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { computeFinancialFindings } from "../../src/operator/financial-intelligence";
+import {
+  computeFinancialFindings,
+  type FinancialFindingKindV097,
+} from "../../src/operator/financial-intelligence";
 import type {
   ActualCostV097,
   BudgetLineV097,
@@ -409,5 +412,386 @@ describe("computeFinancialFindings", () => {
         (f) => f.kind === "ALLOWANCE_OVERRUN",
       ),
     ).toBe(false);
+  });
+
+  it("LINE_COMMITMENT_OVER_REVISED: flags when allocated commitments exceed the line's revised amount", () => {
+    const model = baseModel({
+      financials: financials({
+        budgetLines: {
+          line1: budgetLine({
+            baselineAmount: { amountMinor: 100000, currency: "USD" },
+            scopeItemIds: ["scope1"],
+          }),
+        },
+        commitments: {
+          commit1: commitment({
+            amount: { amountMinor: 150000, currency: "USD" },
+            allocations: [
+              {
+                budgetLineId: "line1",
+                amount: { amountMinor: 150000, currency: "USD" },
+              },
+            ],
+          }),
+        },
+      }),
+    });
+    const findings = computeFinancialFindings(model);
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        kind: "LINE_COMMITMENT_OVER_REVISED",
+        budgetLineId: "line1",
+      }),
+    );
+    const finding = findings.find(
+      (f) => f.kind === "LINE_COMMITMENT_OVER_REVISED",
+    );
+    expect(finding?.message).toContain("$1,500.00");
+    expect(finding?.message).toContain("$1,000.00");
+  });
+
+  it("LINE_COMMITMENT_OVER_REVISED: never fires when committed is within revised, or the baseline is Unknown", () => {
+    const withinRevised = baseModel({
+      financials: financials({
+        budgetLines: {
+          line1: budgetLine({
+            baselineAmount: { amountMinor: 100000, currency: "USD" },
+            scopeItemIds: ["scope1"],
+          }),
+        },
+        commitments: {
+          commit1: commitment({
+            allocations: [
+              {
+                budgetLineId: "line1",
+                amount: { amountMinor: 100000, currency: "USD" },
+              },
+            ],
+          }),
+        },
+      }),
+    });
+    expect(
+      computeFinancialFindings(withinRevised).some(
+        (f) => f.kind === "LINE_COMMITMENT_OVER_REVISED",
+      ),
+    ).toBe(false);
+
+    const unknownBaseline = baseModel({
+      financials: financials({
+        budgetLines: { line1: budgetLine({ scopeItemIds: ["scope1"] }) },
+        commitments: {
+          commit1: commitment({
+            allocations: [
+              {
+                budgetLineId: "line1",
+                amount: { amountMinor: 150000, currency: "USD" },
+              },
+            ],
+          }),
+        },
+      }),
+    });
+    expect(
+      computeFinancialFindings(unknownBaseline).some(
+        (f) => f.kind === "LINE_COMMITMENT_OVER_REVISED",
+      ),
+    ).toBe(false);
+  });
+
+  it("LINE_ACTUAL_OVER_REVISED: flags when recorded actuals exceed the line's revised amount", () => {
+    const model = baseModel({
+      financials: financials({
+        budgetLines: {
+          line1: budgetLine({
+            baselineAmount: { amountMinor: 100000, currency: "USD" },
+            scopeItemIds: ["scope1"],
+          }),
+        },
+        actualCosts: {
+          a1: actualCost({
+            amount: { amountMinor: 125000, currency: "USD" },
+            budgetLineId: "line1",
+          }),
+        },
+      }),
+    });
+    const findings = computeFinancialFindings(model);
+    expect(findings).toContainEqual(
+      expect.objectContaining({
+        kind: "LINE_ACTUAL_OVER_REVISED",
+        budgetLineId: "line1",
+      }),
+    );
+    const finding = findings.find((f) => f.kind === "LINE_ACTUAL_OVER_REVISED");
+    expect(finding?.message).toContain("$1,250.00");
+    expect(finding?.message).toContain("$1,000.00");
+  });
+
+  it("LINE_ACTUAL_OVER_REVISED: never fires when actual is within revised, or the actual is VOID", () => {
+    const withinRevised = baseModel({
+      financials: financials({
+        budgetLines: {
+          line1: budgetLine({
+            baselineAmount: { amountMinor: 100000, currency: "USD" },
+            scopeItemIds: ["scope1"],
+          }),
+        },
+        actualCosts: {
+          a1: actualCost({
+            amount: { amountMinor: 90000, currency: "USD" },
+            budgetLineId: "line1",
+          }),
+        },
+      }),
+    });
+    expect(
+      computeFinancialFindings(withinRevised).some(
+        (f) => f.kind === "LINE_ACTUAL_OVER_REVISED",
+      ),
+    ).toBe(false);
+
+    const voided = baseModel({
+      financials: financials({
+        budgetLines: {
+          line1: budgetLine({
+            baselineAmount: { amountMinor: 100000, currency: "USD" },
+            scopeItemIds: ["scope1"],
+          }),
+        },
+        actualCosts: {
+          a1: actualCost({
+            amount: { amountMinor: 125000, currency: "USD" },
+            budgetLineId: "line1",
+            status: "VOID",
+          }),
+        },
+      }),
+    });
+    expect(
+      computeFinancialFindings(voided).some(
+        (f) => f.kind === "LINE_ACTUAL_OVER_REVISED",
+      ),
+    ).toBe(false);
+  });
+
+  it("SCOPE_HAS_NO_BUDGET_ASSOCIATION: flags an included scope item with no budget line link", () => {
+    const model = baseModel({
+      scopeItems: { scope1: scopeItem() },
+      financials: financials(),
+    });
+    expect(computeFinancialFindings(model)).toContainEqual(
+      expect.objectContaining({
+        kind: "SCOPE_HAS_NO_BUDGET_ASSOCIATION",
+        scopeItemId: "scope1",
+      }),
+    );
+  });
+
+  it("SCOPE_HAS_NO_BUDGET_ASSOCIATION: never fires once associated, linked as an allowance, or excluded", () => {
+    const associated = baseModel({
+      scopeItems: { scope1: scopeItem() },
+      financials: financials({
+        budgetLines: {
+          line1: budgetLine({
+            baselineAmount: { amountMinor: 100000, currency: "USD" },
+            scopeItemIds: ["scope1"],
+          }),
+        },
+      }),
+    });
+    expect(
+      computeFinancialFindings(associated).some(
+        (f) => f.kind === "SCOPE_HAS_NO_BUDGET_ASSOCIATION",
+      ),
+    ).toBe(false);
+
+    const linkedAllowance = baseModel({
+      scopeItems: { scope1: scopeItem({ allowanceBudgetLineId: "line1" }) },
+      financials: financials({
+        budgetLines: {
+          line1: budgetLine({
+            baselineAmount: { amountMinor: 100000, currency: "USD" },
+          }),
+        },
+      }),
+    });
+    expect(
+      computeFinancialFindings(linkedAllowance).some(
+        (f) => f.kind === "SCOPE_HAS_NO_BUDGET_ASSOCIATION",
+      ),
+    ).toBe(false);
+
+    const excluded = baseModel({
+      scopeItems: { scope1: scopeItem({ included: false }) },
+      financials: financials(),
+    });
+    expect(
+      computeFinancialFindings(excluded).some(
+        (f) => f.kind === "SCOPE_HAS_NO_BUDGET_ASSOCIATION",
+      ),
+    ).toBe(false);
+  });
+
+  it("LINE_HAS_NO_SCOPE: flags an active budget line with no scope association", () => {
+    const model = baseModel({
+      financials: financials({
+        budgetLines: {
+          line1: budgetLine({
+            baselineAmount: { amountMinor: 100000, currency: "USD" },
+          }),
+        },
+      }),
+    });
+    expect(computeFinancialFindings(model)).toContainEqual(
+      expect.objectContaining({
+        kind: "LINE_HAS_NO_SCOPE",
+        budgetLineId: "line1",
+      }),
+    );
+  });
+
+  it("LINE_HAS_NO_SCOPE: never fires once associated, or for a deactivated line", () => {
+    const associated = baseModel({
+      financials: financials({
+        budgetLines: {
+          line1: budgetLine({
+            baselineAmount: { amountMinor: 100000, currency: "USD" },
+            scopeItemIds: ["scope1"],
+          }),
+        },
+      }),
+    });
+    expect(
+      computeFinancialFindings(associated).some(
+        (f) => f.kind === "LINE_HAS_NO_SCOPE",
+      ),
+    ).toBe(false);
+
+    const deactivated = baseModel({
+      financials: financials({
+        budgetLines: { line1: budgetLine({ active: false }) },
+      }),
+    });
+    expect(
+      computeFinancialFindings(deactivated).some(
+        (f) => f.kind === "LINE_HAS_NO_SCOPE",
+      ),
+    ).toBe(false);
+  });
+
+  it("PENDING_CO_UNPRICED: flags a PROPOSED or PENDING_APPROVAL change order with $0 cost", () => {
+    const proposed = baseModel({
+      financials: financials({
+        changeOrders: {
+          co1: changeOrder({
+            status: "PROPOSED",
+            cost: { amountMinor: 0, currency: "USD" },
+          }),
+        },
+      }),
+    });
+    expect(computeFinancialFindings(proposed)).toContainEqual(
+      expect.objectContaining({
+        kind: "PENDING_CO_UNPRICED",
+        changeOrderId: "co1",
+      }),
+    );
+
+    const pending = baseModel({
+      financials: financials({
+        changeOrders: {
+          co1: changeOrder({
+            status: "PENDING_APPROVAL",
+            cost: { amountMinor: 0, currency: "USD" },
+          }),
+        },
+      }),
+    });
+    expect(computeFinancialFindings(pending)).toContainEqual(
+      expect.objectContaining({
+        kind: "PENDING_CO_UNPRICED",
+        changeOrderId: "co1",
+      }),
+    );
+  });
+
+  it("PENDING_CO_UNPRICED: never fires for a priced pending CO, or for DRAFT/APPROVED even at $0", () => {
+    const priced = baseModel({
+      financials: financials({
+        changeOrders: {
+          co1: changeOrder({
+            status: "PROPOSED",
+            cost: { amountMinor: 100, currency: "USD" },
+          }),
+        },
+      }),
+    });
+    expect(
+      computeFinancialFindings(priced).some(
+        (f) => f.kind === "PENDING_CO_UNPRICED",
+      ),
+    ).toBe(false);
+
+    const draft = baseModel({
+      financials: financials({
+        changeOrders: {
+          co1: changeOrder({
+            status: "DRAFT",
+            cost: { amountMinor: 0, currency: "USD" },
+          }),
+        },
+      }),
+    });
+    expect(
+      computeFinancialFindings(draft).some(
+        (f) => f.kind === "PENDING_CO_UNPRICED",
+      ),
+    ).toBe(false);
+
+    const approved = baseModel({
+      financials: financials({
+        changeOrders: {
+          co1: changeOrder({
+            status: "APPROVED",
+            cost: { amountMinor: 0, currency: "USD" },
+          }),
+        },
+      }),
+    });
+    expect(
+      computeFinancialFindings(approved).some(
+        (f) => f.kind === "PENDING_CO_UNPRICED",
+      ),
+    ).toBe(false);
+  });
+
+  it("FinancialFindingKindV097 stays in lockstep with src/app/types.ts FinancialFindingKindLike", () => {
+    // Compile-time: adding an operator kind without updating this list fails `satisfies`.
+    // Runtime: the listed kinds are the exact frontend union -- keep both files together.
+    const kinds = [
+      "LINE_HAS_NO_BASELINE",
+      "ACTUAL_COST_UNALLOCATED",
+      "COMMITMENT_HAS_UNALLOCATED_AMOUNT",
+      "APPROVED_CO_HAS_UNALLOCATED_AMOUNT",
+      "ALLOWANCE_OVERRUN",
+      "SCOPE_ALLOWANCE_NOT_LINKED",
+      "LINE_COMMITMENT_OVER_REVISED",
+      "LINE_ACTUAL_OVER_REVISED",
+      "SCOPE_HAS_NO_BUDGET_ASSOCIATION",
+      "LINE_HAS_NO_SCOPE",
+      "PENDING_CO_UNPRICED",
+    ] as const satisfies readonly FinancialFindingKindV097[];
+    type AssertSame<A, B> = [A] extends [B]
+      ? [B] extends [A]
+        ? true
+        : never
+      : never;
+    const _lockstep: AssertSame<
+      (typeof kinds)[number],
+      FinancialFindingKindV097
+    > = true;
+    expect(_lockstep).toBe(true);
+    expect(kinds).toHaveLength(11);
   });
 });

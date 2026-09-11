@@ -1,10 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { renderBudget } from "../../../views/indexCard/budget";
+import { parseMoneyDecimal } from "../../../format";
 import type {
   BudgetCategoryViewLike,
   BudgetLineViewLike,
+  FinancialFindingKindLike,
   ProjectBudgetWorkspaceLike,
+  ProjectScopeLike,
+  ScopeItemViewLike,
 } from "../../../types";
+import { renderBudget } from "../../../views/indexCard/budget";
 
 function flushAsyncWork(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
@@ -101,6 +105,43 @@ function initializedWorkspace(
   });
 }
 
+function emptyScope(
+  overrides: Partial<ProjectScopeLike> = {},
+): ProjectScopeLike {
+  return {
+    projectId: "carver",
+    projectRevision: 3,
+    items: [],
+    insights: [],
+    allActivities: [],
+    ...overrides,
+  };
+}
+
+function scopeItem(
+  overrides: Partial<ScopeItemViewLike> = {},
+): ScopeItemViewLike {
+  return {
+    id: "scope1",
+    description: "Kitchen cabinets",
+    phase: "Interior",
+    status: "NOT_STARTED",
+    included: true,
+    trade: null,
+    allowance: null,
+    linkedBudgetLine: null,
+    responsibleVendor: null,
+    activities: [],
+    notes: null,
+    createdAt: "2026-08-01T00:00:00.000Z",
+    updatedAt: "2026-08-01T00:00:00.000Z",
+    addedAfterBaseline: false,
+    baselineDescription: null,
+    baselinePhase: null,
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   vi.unstubAllGlobals();
 });
@@ -186,6 +227,9 @@ describe("renderBudget", () => {
           ),
         );
       }
+      if (url.endsWith("/scope") && method === "GET") {
+        return Promise.resolve(jsonResponse(200, emptyScope()));
+      }
       if (url.endsWith("/budget/commands/preview")) {
         return Promise.resolve(
           jsonResponse(200, {
@@ -237,6 +281,9 @@ describe("renderBudget", () => {
           jsonResponse(200, getBudgetCount === 1 ? initial : afterApply),
         );
       }
+      if (url.endsWith("/scope") && method === "GET") {
+        return Promise.resolve(jsonResponse(200, emptyScope()));
+      }
       if (url.endsWith("/budget/commands/preview")) {
         return Promise.resolve(
           jsonResponse(200, {
@@ -281,6 +328,9 @@ describe("renderBudget", () => {
         return Promise.resolve(
           jsonResponse(200, initializedWorkspace({ categories: [category()] })),
         );
+      }
+      if (url.endsWith("/scope")) {
+        return Promise.resolve(jsonResponse(200, emptyScope()));
       }
       if (url.endsWith("/budget/commands/preview")) {
         return Promise.resolve(
@@ -387,6 +437,9 @@ describe("renderBudget: ADOPT_LEGACY_BASELINE affordance (Phase 4 Task 12, legac
           ),
         );
       }
+      if (url.endsWith("/scope") && method === "GET") {
+        return Promise.resolve(jsonResponse(200, emptyScope()));
+      }
       if (url.endsWith("/budget/commands/preview")) {
         return Promise.resolve(
           jsonResponse(200, {
@@ -426,5 +479,282 @@ describe("renderBudget: ADOPT_LEGACY_BASELINE affordance (Phase 4 Task 12, legac
     confirmButton?.click();
     await flushAsyncWork();
     expect(getBudgetCount).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("parseMoneyDecimal", () => {
+  it("assembles minor units from digit strings, never parseFloat * 100", () => {
+    expect(parseMoneyDecimal("19.99", "USD")).toEqual({
+      amountMinor: 1999,
+      currency: "USD",
+    });
+    expect(parseMoneyDecimal("10000.10", "USD")).toEqual({
+      amountMinor: 1000010,
+      currency: "USD",
+    });
+    expect(parseMoneyDecimal("18750", "CAD")).toEqual({
+      amountMinor: 1875000,
+      currency: "CAD",
+    });
+    expect(parseMoneyDecimal("-175.00", "USD")).toEqual({
+      amountMinor: -17500,
+      currency: "USD",
+    });
+  });
+
+  it("rejects empty, non-decimal, excess precision, and exponent notation", () => {
+    expect(parseMoneyDecimal("", "USD")).toBeNull();
+    expect(parseMoneyDecimal("  ", "USD")).toBeNull();
+    expect(parseMoneyDecimal("abc", "USD")).toBeNull();
+    expect(parseMoneyDecimal("1e3", "USD")).toBeNull();
+    expect(parseMoneyDecimal("100.001", "USD")).toBeNull();
+    expect(parseMoneyDecimal("19.99.00", "USD")).toBeNull();
+  });
+});
+
+describe("FinancialFindingKindLike stays in lockstep with operator kinds", () => {
+  it("lists every operator financial finding kind the Budget workspace can name", () => {
+    const kinds = [
+      "LINE_HAS_NO_BASELINE",
+      "ACTUAL_COST_UNALLOCATED",
+      "COMMITMENT_HAS_UNALLOCATED_AMOUNT",
+      "APPROVED_CO_HAS_UNALLOCATED_AMOUNT",
+      "ALLOWANCE_OVERRUN",
+      "SCOPE_ALLOWANCE_NOT_LINKED",
+      "LINE_COMMITMENT_OVER_REVISED",
+      "LINE_ACTUAL_OVER_REVISED",
+      "SCOPE_HAS_NO_BUDGET_ASSOCIATION",
+      "LINE_HAS_NO_SCOPE",
+      "PENDING_CO_UNPRICED",
+    ] as const satisfies readonly FinancialFindingKindLike[];
+    type AssertSame<A, B> = [A] extends [B]
+      ? [B] extends [A]
+        ? true
+        : never
+      : never;
+    const _lockstep: AssertSame<
+      (typeof kinds)[number],
+      FinancialFindingKindLike
+    > = true;
+    expect(_lockstep).toBe(true);
+    expect(kinds).toHaveLength(11);
+  });
+});
+
+describe("renderBudget: Tell Howler, scope association, and money parse", () => {
+  it("mounts the Tell Howler control on an initialized workspace", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", (input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      urls.push(url);
+      if (url.endsWith("/scope")) {
+        return Promise.resolve(jsonResponse(200, emptyScope()));
+      }
+      return Promise.resolve(jsonResponse(200, initializedWorkspace()));
+    });
+    const body = document.createElement("div");
+    await renderBudget(body, "carver");
+    expect(body.textContent).toContain("Tell Howler");
+    expect(
+      body.querySelector('form[data-action="FINANCIAL_CONVERSATION"]'),
+    ).not.toBeNull();
+    expect(urls.some((url) => url.endsWith("/scope"))).toBe(true);
+  });
+
+  it("shows ASSOCIATE_LINE_SCOPE_ITEMS with fetched included scope items", async () => {
+    vi.stubGlobal("fetch", (input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.endsWith("/scope")) {
+        return Promise.resolve(
+          jsonResponse(
+            200,
+            emptyScope({
+              items: [
+                scopeItem(),
+                scopeItem({
+                  id: "scope2",
+                  description: "Excluded millwork",
+                  included: false,
+                }),
+              ],
+            }),
+          ),
+        );
+      }
+      return Promise.resolve(
+        jsonResponse(
+          200,
+          initializedWorkspace({
+            categories: [category()],
+            lines: [line()],
+          }),
+        ),
+      );
+    });
+    const body = document.createElement("div");
+    await renderBudget(body, "carver");
+    body.querySelector<HTMLElement>('tr[data-line="line1"]')?.click();
+    const form = body.querySelector<HTMLFormElement>(
+      'form[data-action="ASSOCIATE_LINE_SCOPE_ITEMS"]',
+    );
+    expect(form).not.toBeNull();
+    const options = Array.from(
+      form?.querySelectorAll<HTMLOptionElement>("option") ?? [],
+    );
+    expect(options.map((option) => option.value)).toEqual(["scope1"]);
+    expect(options[0]?.textContent).toContain("Kitchen cabinets");
+  });
+
+  it("SET_FINANCIAL_BASELINE posts digit-string minor units, not float * 100", async () => {
+    let posted: { command?: { baseline?: { amountMinor: number } } } | null =
+      null;
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith("/scope")) {
+        return Promise.resolve(jsonResponse(200, emptyScope()));
+      }
+      if (url.endsWith("/budget") && method === "GET") {
+        return Promise.resolve(jsonResponse(200, initializedWorkspace()));
+      }
+      if (url.endsWith("/budget/commands/preview")) {
+        posted = JSON.parse(String(init?.body ?? "{}")) as typeof posted;
+        return Promise.resolve(
+          jsonResponse(200, {
+            projectRevision: 3,
+            reviewToken: "token-money",
+            historyNote: "Financial baseline set.",
+            clerical: false,
+            event: { id: "evt-money", baseRevision: 3 },
+            delta: null,
+            recoveryAnalysis: { status: "ON_TRACK", protectionActions: [] },
+          }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${method} ${url}`);
+    });
+
+    const body = document.createElement("div");
+    await renderBudget(body, "carver");
+    const form = body.querySelector<HTMLFormElement>(
+      'form[data-action="SET_FINANCIAL_BASELINE"]',
+    );
+    const amount = form?.querySelector<HTMLInputElement>(
+      'input[name="amount"]',
+    );
+    if (amount) amount.value = "10000.10";
+    form?.dispatchEvent(new Event("submit", { cancelable: true }));
+    await flushAsyncWork();
+
+    expect(posted?.command?.baseline?.amountMinor).toBe(1000010);
+  });
+
+  it("a clerical Tell Howler turn auto-applies after the preview note, with no Confirm", async () => {
+    let applyCount = 0;
+    let resolveApply: ((value: Response) => void) | null = null;
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith("/scope")) {
+        return Promise.resolve(jsonResponse(200, emptyScope()));
+      }
+      if (url.endsWith("/budget") && method === "GET") {
+        return Promise.resolve(
+          jsonResponse(200, initializedWorkspace({ categories: [category()] })),
+        );
+      }
+      if (url.endsWith("/financial-conversation/turn")) {
+        return Promise.resolve(
+          jsonResponse(200, {
+            outcome: "RESOLVED",
+            historyNote: 'Notes updated for "Cabinetry".',
+            clerical: true,
+            reviewToken: "token-fc-clerical",
+            event: { id: "evt-fc-clerical", baseRevision: 3 },
+          }),
+        );
+      }
+      if (url.endsWith("/events/apply-shadow")) {
+        applyCount += 1;
+        return new Promise<Response>((resolve) => {
+          resolveApply = resolve;
+        });
+      }
+      throw new Error(`unexpected fetch: ${method} ${url}`);
+    });
+
+    const body = document.createElement("div");
+    await renderBudget(body, "carver");
+    const form = body.querySelector<HTMLFormElement>(
+      'form[data-action="FINANCIAL_CONVERSATION"]',
+    );
+    const textarea = form?.querySelector<HTMLTextAreaElement>(
+      'textarea[name="text"]',
+    );
+    if (textarea) textarea.value = "Rename the Cabinetry notes.";
+    form?.dispatchEvent(new Event("submit", { cancelable: true }));
+    await flushAsyncWork();
+
+    expect(
+      body.querySelector(".sched-consequence-note")?.textContent,
+    ).toContain("Notes updated");
+    expect(body.querySelector(".sched-confirm")).toBeNull();
+    expect(applyCount).toBe(1);
+
+    resolveApply?.(jsonResponse(201, { applied: true, projectRevision: 4 }));
+    await flushAsyncWork();
+    expect(applyCount).toBe(1);
+  });
+
+  it("a non-clerical Tell Howler turn requires Confirm before apply-shadow", async () => {
+    let applyCount = 0;
+    vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      const method = init?.method ?? "GET";
+      if (url.endsWith("/scope")) {
+        return Promise.resolve(jsonResponse(200, emptyScope()));
+      }
+      if (url.endsWith("/budget") && method === "GET") {
+        return Promise.resolve(jsonResponse(200, initializedWorkspace()));
+      }
+      if (url.endsWith("/financial-conversation/turn")) {
+        return Promise.resolve(
+          jsonResponse(200, {
+            outcome: "RESOLVED",
+            historyNote: "Added commitment of $18,750.00.",
+            clerical: false,
+            reviewToken: "token-fc-money",
+            event: { id: "evt-fc-money", baseRevision: 3 },
+          }),
+        );
+      }
+      if (url.endsWith("/events/apply-shadow")) {
+        applyCount += 1;
+        return Promise.resolve(
+          jsonResponse(201, { applied: true, projectRevision: 4 }),
+        );
+      }
+      throw new Error(`unexpected fetch: ${method} ${url}`);
+    });
+
+    const body = document.createElement("div");
+    await renderBudget(body, "carver");
+    const form = body.querySelector<HTMLFormElement>(
+      'form[data-action="FINANCIAL_CONVERSATION"]',
+    );
+    const textarea = form?.querySelector<HTMLTextAreaElement>(
+      'textarea[name="text"]',
+    );
+    if (textarea) textarea.value = "Medina's plumbing proposal is $18,750.";
+    form?.dispatchEvent(new Event("submit", { cancelable: true }));
+    await flushAsyncWork();
+
+    expect(body.textContent).toContain("Added commitment of $18,750.00.");
+    expect(body.querySelector(".sched-confirm")).not.toBeNull();
+    expect(applyCount).toBe(0);
+
+    body.querySelector<HTMLButtonElement>(".sched-confirm")?.click();
+    await flushAsyncWork();
+    expect(applyCount).toBe(1);
   });
 });
