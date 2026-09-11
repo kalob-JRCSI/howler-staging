@@ -31,6 +31,8 @@ Shared pickup surfaces (keep these current; do not fork a second plan):
 - `context/handoff/current-task.json` — status / SHA / assignee
 - GitHub issue https://github.com/kalob-JRCSI/howler-staging/issues/16
 
+If the live Grok session stops: next Grok turn should read `/workspace/CONTINUE.md` and keep the live OS. Owner manual path is Edit → Review → Confirm; Tell Howler is the same commands. For Worker work, start Claude Code and paste `context/handoff/claude-next.md`. Do not start Phase 5.
+
 Grok continues the live OS. Claude continues the Worker. Shared contract:
 Universal Data Interaction Contract + Phase 4 directive + this matrix.
 
