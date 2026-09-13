@@ -6,8 +6,8 @@ const hits = new Map();
 /** Same function as src/lib/howler/guard.ts — used on command/intent/speak/stt. */
 function clientKey(request) {
   return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
     request.headers.get("cf-connecting-ip") ||
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
     "local"
   );
 }
@@ -19,6 +19,33 @@ function rateLimited(key, max, windowMs) {
   next.push(now);
   hits.set(key, next);
   return next.length > max;
+}
+
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_MAX = 5;
+
+/** rateLimited() plus Cache so login caps survive isolate hops. */
+async function loginRateLimited(request) {
+  const key = `login:${clientKey(request)}`;
+  const memoryHit = rateLimited(key, LOGIN_MAX, LOGIN_WINDOW_MS);
+  try {
+    const cache = caches.default;
+    const cacheKey = new Request(`https://jarvis-voice-staging.kalob.workers.dev/__rate/${encodeURIComponent(key)}`);
+    const cached = await cache.match(cacheKey);
+    const now = Date.now();
+    const times = cached ? JSON.parse(await cached.text()) : [];
+    const next = times.filter((time) => now - time < LOGIN_WINDOW_MS);
+    next.push(now);
+    await cache.put(
+      cacheKey,
+      new Response(JSON.stringify(next), {
+        headers: { "cache-control": "max-age=900", "content-type": "application/json" },
+      }),
+    );
+    return memoryHit || next.length > LOGIN_MAX;
+  } catch {
+    return memoryHit;
+  }
 }
 
 function bytesToHex(bytes) {
@@ -164,7 +191,7 @@ export async function handlePilotGate(request, env) {
   if (publicPath(url.pathname)) return null;
 
   if (request.method === "POST" && url.pathname === "/auth/login") {
-    if (rateLimited(`login:${clientKey(request)}`, 5, 15 * 60 * 1000)) {
+    if (await loginRateLimited(request)) {
       return Response.json({ ok: false, error: "Too many attempts. Try again in 15 minutes." }, { status: 429 });
     }
     let body = {};
