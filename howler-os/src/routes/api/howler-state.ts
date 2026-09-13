@@ -1,13 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { clampUpdatedAt } from "@/lib/howler/guard";
-import { getJobSnapshot, setJobSnapshot } from "@/lib/howler/snapshot.server";
+import { loadJobSnapshot, persistJobSnapshot } from "@/lib/howler/snapshot.server";
 import type { Project } from "@/lib/howler/types";
 
 const MAX_BYTES = 1_500_000;
 
 async function handle({ request }: { request: Request }) {
   if (request.method === "GET") {
-    const snapshot = getJobSnapshot();
+    const snapshot = await loadJobSnapshot();
     if (!snapshot.updatedAt) return new Response(null, { status: 204 });
     const tag = `"${snapshot.updatedAt}"`;
     if (request.headers.get("If-None-Match") === tag) {
@@ -29,12 +29,12 @@ async function handle({ request }: { request: Request }) {
   if (!body?.projects || typeof body.seedVersion !== "string") {
     return Response.json({ ok: false }, { status: 400 });
   }
-  const current = getJobSnapshot();
+  const current = await loadJobSnapshot();
   const updatedAt = clampUpdatedAt(body.updatedAt, current.updatedAt || undefined);
   if (current.updatedAt && updatedAt < current.updatedAt) {
     return Response.json({ ok: true, updatedAt: current.updatedAt });
   }
-  setJobSnapshot({ projects: body.projects, seedVersion: body.seedVersion, updatedAt });
+  await persistJobSnapshot({ projects: body.projects, seedVersion: body.seedVersion, updatedAt });
   return Response.json({ ok: true, updatedAt });
 }
 

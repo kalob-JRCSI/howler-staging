@@ -1,4 +1,11 @@
-/** The word Howler is a name. It is never an address. */
+/** Howler’s live address. Never Grok. Never the word Howler. */
+export const HOWLER_PUBLIC_ORIGIN = "https://jarvis-voice-staging.kalob.workers.dev";
+
+export function howlerPublicHref(path = "/"): string {
+  const suffix = !path || path === "/" ? "/" : path.startsWith("/") ? path : `/${path}`;
+  return `${HOWLER_PUBLIC_ORIGIN}${suffix}`;
+}
+
 export function isCopyableAddress(value: string): boolean {
   const text = value.trim();
   if (!text || text.toLowerCase() === "howler") return false;
@@ -12,37 +19,13 @@ export function isCopyableAddress(value: string): boolean {
 
 export const isHowlerHttps = isCopyableAddress;
 
-export function howlerPublicHref(path = "/"): string | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const url = new URL(window.location.href);
-    url.hash = "";
-    if (path && path !== url.pathname) {
-      url.pathname = path.startsWith("/") ? path : `/${path}`;
-      url.search = "";
-    }
-    const href = url.toString();
-    if (!isCopyableAddress(href)) return null;
-    if (url.hostname === "jarvis-voice-staging.kalob.workers.dev") return href;
-    if (url.hostname.endsWith(".grok.com") || url.hostname === "grok.com") return null;
-    return href;
-  } catch {
-    return null;
-  }
-}
-
 export function liveBoardHref(path = "/"): string | null {
-  return howlerPublicHref(path);
+  const href = howlerPublicHref(path);
+  return isCopyableAddress(href) ? href : null;
 }
 
-export function boardHrefFromHost(hostHeader: string, path = "/"): string | null {
-  const raw = hostHeader.split(",")[0]?.trim() ?? "";
-  const host = raw.replace(/:\d+$/, "").toLowerCase();
-  if (!host || host === "howler") return null;
-  if (host === "grok.com" || host.endsWith(".grok.com")) return null;
-  if (!host.includes(".")) return null;
-  const suffix = path.startsWith("/") ? path : `/${path}`;
-  const href = `https://${raw.replace(/:\d+$/, "")}${suffix}`;
+export function boardHrefFromHost(_hostHeader: string, path = "/"): string | null {
+  const href = howlerPublicHref(path);
   return isCopyableAddress(href) ? href : null;
 }
 

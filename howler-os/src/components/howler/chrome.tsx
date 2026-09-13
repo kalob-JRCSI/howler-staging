@@ -62,79 +62,80 @@ export function AppFrame({
 }
 
 export function BoardAddress() {
-  const [href, setHref] = useState<string | null>(null);
+  const href = howlerPublicHref("/");
   const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    const next = howlerPublicHref("/");
-    setHref(next);
-    applyTabTitle(next);
-  }, []);
+    applyTabTitle(href);
+  }, [href]);
 
   async function copy() {
-    if (!href) return;
     const ok = await copyHttpsAddress(href);
     if (!ok) return;
     setCopied(true);
     window.setTimeout(() => setCopied(false), 2000);
   }
 
-  async function share() {
-    if (!href) {
-      await copy();
-      return;
-    }
-    if (typeof navigator.share !== "function") {
-      await copy();
-      return;
-    }
-    try {
-      await navigator.share({ url: href, text: href, title: href });
-    } catch {
-      await copy();
-    }
-  }
-
   return (
     <div className="mt-4">
-      <label className="text-[10px] font-medium uppercase tracking-[0.14em] text-subtle">
-        Howler vs this window
+      <label className="text-[10px] font-medium uppercase tracking-[0.14em] text-subtle" htmlFor="howler-board-https">
+        Howler
       </label>
       <p className="mt-1 max-w-[52ch] text-sm text-fg">
-        This chat is Howler. Grok is only the workshop. The Cloudflare login at
-        jarvis-voice-staging is an older Worker — not this board.
+        Live Howler is independent of Grok. Copy the https line — never the word Howler.
       </p>
-      {href ? (
-        <>
-          <p className="mt-2 select-all break-all font-mono text-xs text-fg">{href}</p>
-          <div className="mt-2 flex gap-2">
-            <Button type="button" variant="primary" onClick={() => void copy()}>
-              {copied ? "Address copied" : "Copy this window"}
-            </Button>
-            <Button type="button" variant="ghost" onClick={() => void share()}>
-              Share
-            </Button>
-          </div>
-        </>
-      ) : (
-        <p className="mt-2 text-sm text-muted">
-          This Grok window has no Howler https yet. Independent Howler is this exact board, shipped out — not the old login page.
-        </p>
-      )}
+      <p className="mt-2 select-all break-all font-mono text-xs text-fg">{href}</p>
+      <div className="mt-2">
+        <Button type="button" variant="primary" onClick={() => void copy()}>
+          {copied ? "Address copied" : "Copy address"}
+        </Button>
+      </div>
     </div>
   );
 }
 
 export function IphoneActionSetup() {
+  const board = howlerPublicHref("/");
+  const command = howlerPublicHref("/api/howler-command");
+  const [copied, setCopied] = useState<"link" | "command" | null>(null);
+
+  async function copy(kind: "link" | "command") {
+    const href = kind === "command" ? command : board;
+    const ok = await copyHttpsAddress(href);
+    if (!ok) return;
+    setCopied(kind);
+    window.setTimeout(() => setCopied(null), 2000);
+  }
+
   return (
     <details className="mt-5 rounded-lg bg-surface p-4 shadow-[var(--shadow-border)]">
       <summary className="cursor-pointer text-[10px] font-medium uppercase tracking-[0.14em] text-subtle">
-        Howler is not Grok
+        Hey Siri, Howler
       </summary>
       <p className="mt-2 text-sm text-fg">
-        We build Howler here, then ship this exact board to its own https. The Cloudflare
-        sign-in page is not this Howler. This board has no login wall.
+        A website cannot hear a locked iPhone. Siri can. Paste the https command URL — not the word Howler.
       </p>
+      <input
+        readOnly
+        value={command}
+        onFocus={(event) => event.currentTarget.select()}
+        className={`${inputClass} mt-3 font-mono text-xs`}
+      />
+      <ol className="mt-3 list-decimal space-y-1.5 pl-4 text-sm text-muted">
+        <li>Shortcuts → New Shortcut → name it Howler</li>
+        <li>Add Dictate Text</li>
+        <li>Add Get Contents of URL → POST the https command URL → JSON body command = Dictated Text</li>
+        <li>Add Speak Text → Dictionary Value say</li>
+        <li>Shortcut ⓘ → Ask Before Running off. Then: Hey Siri, Howler</li>
+      </ol>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button variant="ghost" onClick={() => void copy("command")}>
+          {copied === "command" ? "https copied" : "Copy https command"}
+        </Button>
+        <Button variant="ghost" onClick={() => void copy("link")}>
+          {copied === "link" ? "https copied" : "Copy https board"}
+        </Button>
+      </div>
     </details>
   );
 }

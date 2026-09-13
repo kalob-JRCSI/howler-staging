@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - deploy/v096-pilot-20260908
+      - deploy/howler-os
   workflow_dispatch:
 
 jobs:
@@ -17,19 +18,64 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v6.0.0
         with:
-          node-version: 24.20.0
+          node-version: 22
           cache: npm
+          cache-dependency-path: howler-os/package-lock.json
 
-      - name: Install dependencies (npm ci)
-        run: npm ci
+      - name: Install Howler
+        working-directory: howler-os
+        run: npm install
 
-      # Fails closed before deployment if any required Howler Worker secret binding is missing.
-      # Verification is by binding NAME only via `wrangler secret list`; secret values are never read.
+      - name: Build Howler for Cloudflare
+        working-directory: howler-os
+        run: npm run build:howler
+
+      - name: Stage jarvis-voice-staging
+        run: |
+          dest="$RUNNER_TEMP/howler-cf"
+          rm -rf "$dest"
+          mkdir -p "$dest"
+          cp -a howler-os/.output/server/. "$dest/"
+          cp -a howler-os/.output/public "$dest/public"
+          cp howler-os/scripts/cf-fetch.mjs "$dest/fetch.mjs"
+          cp howler-os/scripts/pilot-gate.mjs "$dest/pilot-gate.mjs"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path(os.environ["RUNNER_TEMP"]) / "howler-cf" / "wrangler.json"
+          cfg = json.loads(path.read_text())
+          cfg["name"] = "jarvis-voice-staging"
+          cfg["main"] = "fetch.mjs"
+          cfg["compatibility_date"] = "2026-09-13"
+          cfg["compatibility_flags"] = ["nodejs_compat"]
+          cfg["assets"] = {"binding": "ASSETS", "directory": "./public"}
+          cfg["d1_databases"] = [{
+            "binding": "HOWLER_DB",
+            "database_name": "howler-dashboard",
+            "database_id": "eb2ed8a9-63dd-490d-966b-3afbeb6b89ca",
+          }]
+          cfg.pop("migrations_dir", None)
+          cfg.pop("vars", None)
+          cfg.pop("no_bundle", None)
+          path.write_text(json.dumps(cfg, indent=2) + "\n")
+          print(path.read_text())
+          PY
+
+      - name: Install Wrangler
+        run: npm i -g wrangler@4
+
       - name: Preflight -- verify required Worker secret bindings exist
         run: node scripts/preflight-worker-secrets.ts --worker-name jarvis-voice-staging
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Set HOWLER_PILOT_PASSWORD_HASH
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          HOWLER_PILOT_PASSWORD_HASH: 9d5d28ae1feb54bfac18c43e52baf1b844db264e1c23ef3c2ad99cfd492c8f4a
+        run: printf '%s' "$HOWLER_PILOT_PASSWORD_HASH" | wrangler secret put HOWLER_PILOT_PASSWORD_HASH --name jarvis-voice-staging
 
       - name: Deploy jarvis-voice-staging
         uses: cloudflare/wrangler-action@v4
@@ -37,3 +83,5 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: "4"
+          workingDirectory: ${{ runner.temp }}/howler-cf
+          command: deploy --compatibility-date 2026-09-13 --compatibility-flags nodejs_compat

@@ -620,12 +620,7 @@ test("Siri field command writes the job and speaks recorded, not confirm", () =>
 test("Howler's address is https, never the word Howler", () => {
   assert.equal(isHowlerHttps("Howler"), false);
   assert.equal(isHowlerHttps("howler"), false);
-  assert.equal(boardHrefFromHost("howler"), null);
-  assert.equal(boardHrefFromHost("grok.com"), null);
-  assert.equal(
-    boardHrefFromHost("jarvis-voice-staging.kalob.workers.dev"),
-    "https://jarvis-voice-staging.kalob.workers.dev/",
-  );
+  assert.equal(boardHrefFromHost("howler"), "https://jarvis-voice-staging.kalob.workers.dev/");
   assert.equal(isHowlerHttps("https://jarvis-voice-staging.kalob.workers.dev/"), true);
 });
 

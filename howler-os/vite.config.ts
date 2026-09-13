@@ -201,8 +201,8 @@ export default defineConfig(({ command, isPreview }) => ({
                     deployConfig: true,
                     nodeCompat: true,
                     wrangler: {
-                      name: "howler",
-                      compatibility_date: "2024-09-19",
+                      name: "jarvis-voice-staging",
+                      compatibility_date: "2026-09-13",
                     },
                   },
                 }

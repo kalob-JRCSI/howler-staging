@@ -25,10 +25,9 @@
   "d1_databases": [
     {
       "binding": "HOWLER_DB",
-      "database_name": "howler-intelligence-staging",
-      "database_id": "b1049979-11cc-4faa-9a94-a0f42f9f4f23",
-      "migrations_dir": "migrations",
-    },
+      "database_name": "howler-dashboard",
+      "database_id": "eb2ed8a9-63dd-490d-966b-3afbeb6b89ca"
+    }
   ],
   "vars": {
     "HOWLER_MODE": "shadow",
