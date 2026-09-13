@@ -101,17 +101,21 @@ jobs:
         env:
           HOWLER_COMMAND_TOKEN: HowlerCmd-t7RBEeFkVyiRsUG4Rj
         run: |
-          curl -fsS -A 'Mozilla/5.0' 'https://jarvis-voice-staging.kalob.workers.dev/' >/tmp/howler-home.html
+          curl -sS -A 'Mozilla/5.0' -o /tmp/howler-home.html -w 'home %{http_code}\n' \
+            'https://jarvis-voice-staging.kalob.workers.dev/'
           no_token=$(curl -sS -A 'Mozilla/5.0' -o /tmp/howler-command-401.json -w '%{http_code}' \
             -X POST 'https://jarvis-voice-staging.kalob.workers.dev/api/howler-command' \
             -H 'content-type: application/json' \
             -d '{"command":"how is the board"}')
+          echo "no_token_http=$no_token $(cat /tmp/howler-command-401.json)"
           test "$no_token" = "401"
-          curl -fsS -A 'Mozilla/5.0' -X POST 'https://jarvis-voice-staging.kalob.workers.dev/api/howler-command' \
+          with_token=$(curl -sS -A 'Mozilla/5.0' -o /tmp/howler-command.json -w '%{http_code}' \
+            -X POST 'https://jarvis-voice-staging.kalob.workers.dev/api/howler-command' \
             -H 'content-type: application/json' \
             -H "x-howler-token: $HOWLER_COMMAND_TOKEN" \
-            -d '{"command":"how is the board"}' | tee /tmp/howler-command.json
-          test -s /tmp/howler-command.json
+            -d '{"command":"how is the board"}')
+          echo "with_token_http=$with_token $(cat /tmp/howler-command.json)"
+          test "$with_token" = "200"
 
       - name: Verify HOWLER_DB is howler-dashboard
         env:
