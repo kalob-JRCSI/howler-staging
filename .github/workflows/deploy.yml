@@ -56,6 +56,10 @@ jobs:
           }]
           cfg.pop("migrations_dir", None)
           cfg.pop("vars", None)
+          cfg["vars"] = {
+            "HOWLER_AI_PROVIDER": "openai",
+            "HOWLER_AI_MODEL": "gpt-5.6-terra",
+          }
           cfg.pop("no_bundle", None)
           path.write_text(json.dumps(cfg, indent=2) + "\n")
           print(path.read_text())
@@ -64,11 +68,12 @@ jobs:
       - name: Install Wrangler
         run: npm i -g wrangler@4
 
-      - name: Preflight -- verify required Worker secret bindings exist
-        run: node scripts/preflight-worker-secrets.ts --worker-name jarvis-voice-staging
+      - name: Set HOWLER_COMMAND_TOKEN
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          HOWLER_COMMAND_TOKEN: HowlerCmd-t7RBEeFkVyiRsUG4Rj
+        run: printf '%s' "$HOWLER_COMMAND_TOKEN" | wrangler secret put HOWLER_COMMAND_TOKEN --name jarvis-voice-staging
 
       - name: Set HOWLER_PILOT_PASSWORD_HASH
         env:
@@ -76,6 +81,12 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           HOWLER_PILOT_PASSWORD_HASH: 9d5d28ae1feb54bfac18c43e52baf1b844db264e1c23ef3c2ad99cfd492c8f4a
         run: printf '%s' "$HOWLER_PILOT_PASSWORD_HASH" | wrangler secret put HOWLER_PILOT_PASSWORD_HASH --name jarvis-voice-staging
+
+      - name: Preflight -- verify required Worker secret bindings exist
+        run: node scripts/preflight-worker-secrets.ts --worker-name jarvis-voice-staging
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Deploy jarvis-voice-staging
         uses: cloudflare/wrangler-action@v4
@@ -87,10 +98,19 @@ jobs:
           command: deploy --compatibility-date 2026-09-13 --compatibility-flags nodejs_compat
 
       - name: Warm howler-dashboard schema
+        env:
+          HOWLER_COMMAND_TOKEN: HowlerCmd-t7RBEeFkVyiRsUG4Rj
         run: |
           curl -fsS -A 'Mozilla/5.0' 'https://jarvis-voice-staging.kalob.workers.dev/' >/tmp/howler-home.html
-          curl -fsS -A 'Mozilla/5.0' -X GET 'https://jarvis-voice-staging.kalob.workers.dev/api/howler-command' \
-            -H 'content-type: application/json' | tee /tmp/howler-command.json
+          no_token=$(curl -sS -A 'Mozilla/5.0' -o /tmp/howler-command-401.json -w '%{http_code}' \
+            -X POST 'https://jarvis-voice-staging.kalob.workers.dev/api/howler-command' \
+            -H 'content-type: application/json' \
+            -d '{"command":"how is the board"}')
+          test "$no_token" = "401"
+          curl -fsS -A 'Mozilla/5.0' -X POST 'https://jarvis-voice-staging.kalob.workers.dev/api/howler-command' \
+            -H 'content-type: application/json' \
+            -H "x-howler-token: $HOWLER_COMMAND_TOKEN" \
+            -d '{"command":"how is the board"}' | tee /tmp/howler-command.json
           test -s /tmp/howler-command.json
 
       - name: Verify HOWLER_DB is howler-dashboard

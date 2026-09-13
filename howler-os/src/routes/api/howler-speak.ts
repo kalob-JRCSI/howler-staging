@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { clientKey, rateLimited } from "@/lib/howler/guard";
+import { clientKey, howlerSecret, rateLimited } from "@/lib/howler/guard";
 
 /** Howler voice. Optional rented engine. Client only talks to Howler. */
 
@@ -8,34 +8,35 @@ async function speak({ request }: { request: Request }) {
   if (rateLimited(`speak:${clientKey(request)}`, 20, 60_000)) {
     return new Response("Slow down", { status: 429 });
   }
-  const apiKey = process.env.XAI_API_KEY;
+  const apiKey = howlerSecret("HOWLER_OPENAI_API_KEY") || howlerSecret("OPENAI_API_KEY");
   if (!apiKey) return new Response("Voice offline", { status: 503 });
   const body = (await request.json()) as { text?: string };
   const text = (body.text ?? "").replace(/\s+/g, " ").trim().slice(0, 600);
   if (!text) return new Response("Empty", { status: 400 });
 
-  const res = await fetch("https://api.x.ai/v1/tts", {
+  const res = await fetch("https://api.openai.com/v1/audio/speech", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      text,
-      voice_id: "eve",
-      language: "en",
+      model: "gpt-4o-mini-tts",
+      voice: "nova",
+      input: text,
+      instructions: "British woman. Calm, conversational, not chirpy.",
     }),
   });
   if (!res.ok) {
-    const fallback = await fetch("https://api.x.ai/v1/audio/speech", {
+    const fallback = await fetch("https://api.openai.com/v1/audio/speech", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "grok-voice-latest",
-        voice: "eve",
+        model: "tts-1",
+        voice: "nova",
         input: text,
       }),
     });

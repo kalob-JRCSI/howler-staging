@@ -124,7 +124,7 @@ export function IphoneActionSetup() {
       <ol className="mt-3 list-decimal space-y-1.5 pl-4 text-sm text-muted">
         <li>Shortcuts → New Shortcut → name it Howler</li>
         <li>Add Dictate Text</li>
-        <li>Add Get Contents of URL → POST the https command URL → JSON body command = Dictated Text</li>
+        <li>Add Get Contents of URL → POST the https command URL → header x-howler-token → JSON body command = Dictated Text</li>
         <li>Add Speak Text → Dictionary Value say</li>
         <li>Shortcut ⓘ → Ask Before Running off. Then: Hey Siri, Howler</li>
       </ol>

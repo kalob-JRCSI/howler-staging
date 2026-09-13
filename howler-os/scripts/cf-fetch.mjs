@@ -1,6 +1,16 @@
 import nitro from "./index.mjs";
 import { handlePilotGate } from "./pilot-gate.mjs";
 
+function exposeEnv(env) {
+  globalThis.__HOWLER_ENV = env;
+  globalThis.__env__ = env;
+  if (!env || typeof process === "undefined" || !process.env) return;
+  for (const key of Object.keys(env)) {
+    const value = env[key];
+    if (typeof value === "string") process.env[key] = value;
+  }
+}
+
 /** Additive-only. Never DROP. Bound HOWLER_DB is howler-dashboard. */
 async function ensureDashboardColumns(env) {
   const db = env?.HOWLER_DB;
@@ -19,8 +29,7 @@ async function ensureDashboardColumns(env) {
 
 export default {
   async fetch(request, env, ctx) {
-    globalThis.__HOWLER_ENV = env;
-    globalThis.__env__ = env;
+    exposeEnv(env);
     await ensureDashboardColumns(env);
     const gated = await handlePilotGate(request, env);
     if (gated) return gated;

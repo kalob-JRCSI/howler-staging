@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { clientKey, rateLimited } from "@/lib/howler/guard";
+import { clientKey, howlerSecret, rateLimited } from "@/lib/howler/guard";
 
 type JobCard = { id: string; name: string; clientName: string; note: string };
 const KINDS = new Set(["progress", "status", "close", "money", "plans"]);
@@ -9,7 +9,7 @@ async function intent({ request }: { request: Request }) {
   if (rateLimited(`intent:${clientKey(request)}`, 30, 60_000)) {
     return Response.json({ ok: false as const }, { status: 429 });
   }
-  const apiKey = process.env.XAI_API_KEY;
+  const apiKey = howlerSecret("HOWLER_OPENAI_API_KEY") || howlerSecret("OPENAI_API_KEY");
   if (!apiKey) return Response.json({ ok: false as const });
 
   const body = (await request.json()) as {
@@ -30,15 +30,16 @@ async function intent({ request }: { request: Request }) {
   const ids = new Set(jobs.map((job) => job.id));
   const roster = jobs.map((job) => `${job.id}: ${job.name}`).join("\n");
   const picture = (body.picture ?? "").slice(0, 400);
+  const model = howlerSecret("HOWLER_AI_MODEL") || "gpt-5.6-terra";
 
-  const res = await fetch("https://api.x.ai/v1/chat/completions", {
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: "grok-4.5",
+      model,
       temperature: 0,
       max_tokens: 220,
       messages: [

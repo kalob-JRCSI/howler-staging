@@ -18,6 +18,7 @@ const REQUIRED_SECRET_NAMES = [
   "HOWLER_PILOT_USERNAME",
   "HOWLER_PILOT_PASSWORD_HASH",
   "HOWLER_SESSION_SIGNING_SECRET",
+  "HOWLER_COMMAND_TOKEN",
 ] as const;
 
 function allPresentJson(): string {

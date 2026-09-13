@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { clientKey, rateLimited } from "@/lib/howler/guard";
+import { clientKey, howlerSecret, rateLimited } from "@/lib/howler/guard";
 
 const MAX_BYTES = 3_500_000;
 
@@ -12,7 +12,7 @@ async function transcribe({ request }: { request: Request }) {
   if (length > MAX_BYTES) {
     return Response.json({ ok: false, error: "Clip too long." }, { status: 413 });
   }
-  const apiKey = process.env.XAI_API_KEY;
+  const apiKey = howlerSecret("HOWLER_OPENAI_API_KEY") || howlerSecret("OPENAI_API_KEY");
   if (!apiKey) {
     return Response.json({ ok: false, error: "Voice is not available. Type the command." }, { status: 503 });
   }
@@ -33,12 +33,12 @@ async function transcribe({ request }: { request: Request }) {
   }
 
   const body = new FormData();
+  body.append("model", "whisper-1");
   body.append("language", "en");
-  body.append("format", "true");
-  body.append("keyterm", "Hey Howler McMillan DeBoard Ciurlizza Carver Pratt Stewart Swiderski");
+  body.append("prompt", "Hey Howler McMillan DeBoard Ciurlizza Carver Pratt Stewart Swiderski Craven");
   body.append("file", new File([file], "speech.webm", { type }));
 
-  const res = await fetch("https://api.x.ai/v1/stt", {
+  const res = await fetch("https://api.openai.com/v1/audio/transcriptions", {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}` },
     body,

@@ -1,12 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { runFieldCommand } from "@/lib/howler/field-command";
-import { clientKey, rateLimited } from "@/lib/howler/guard";
+import { clientKey, commandTokenOk, rateLimited } from "@/lib/howler/guard";
 import { SEED_VERSION } from "@/lib/howler/seed";
 import { loadJobSnapshot, persistJobSnapshot } from "@/lib/howler/snapshot.server";
 
-/** Siri door: unauthenticated on purpose. No Access-Control-Allow-Origin: * — this is not a session route. */
+/** Siri door: no session cookie. Requires HOWLER_COMMAND_TOKEN. No Access-Control-Allow-Origin: *. */
 const cors = {
-  "Access-Control-Allow-Headers": "content-type",
+  "Access-Control-Allow-Headers": "content-type, x-howler-token",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Cache-Control": "private, no-store",
 };
@@ -18,6 +18,7 @@ function json(body: unknown, status = 200) {
 async function handle({ request }: { request: Request }) {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
   if (request.method === "GET") {
+    if (!(await commandTokenOk(request, null))) return json({ ok: false }, 401);
     await loadJobSnapshot();
     return json({ ok: true, say: "Howler is ready. Post a command." });
   }
@@ -25,13 +26,14 @@ async function handle({ request }: { request: Request }) {
   if (rateLimited(`command:${clientKey(request)}`, 20, 60_000)) {
     return json({ ok: false, say: "Howler is busy. Try again in a minute." }, 429);
   }
-  let command = "";
+  let body: { command?: unknown; text?: unknown; token?: unknown } = {};
   try {
-    const body = (await request.json()) as { command?: unknown; text?: unknown };
-    command = String(body.command ?? body.text ?? "");
+    body = (await request.json()) as { command?: unknown; text?: unknown; token?: unknown };
   } catch {
     return json({ ok: false, say: "I did not get that." }, 400);
   }
+  if (!(await commandTokenOk(request, body))) return json({ ok: false }, 401);
+  const command = String(body.command ?? body.text ?? "");
   const snap = await loadJobSnapshot();
   const result = runFieldCommand(snap.projects, command, null);
   if (result.applied) {
