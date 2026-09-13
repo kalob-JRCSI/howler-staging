@@ -68,28 +68,6 @@ jobs:
       - name: Install Wrangler
         run: npm i -g wrangler@4
 
-      - name: Delete leftover howler Worker
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          wrangler delete --name howler --force || true
-          python3 - <<'PY'
-          import json, os, urllib.request
-          acct = os.environ["CLOUDFLARE_ACCOUNT_ID"]
-          token = os.environ["CLOUDFLARE_API_TOKEN"]
-          req = urllib.request.Request(
-              f"https://api.cloudflare.com/client/v4/accounts/{acct}/workers/scripts",
-              headers={"authorization": f"Bearer {token}"},
-          )
-          body = json.load(urllib.request.urlopen(req))
-          names = sorted(str(item.get("id") or "") for item in body.get("result") or [])
-          print("workers:", ", ".join(names))
-          if "howler" in names:
-              raise SystemExit("howler Worker still exists")
-          print("howler Worker is gone")
-          PY
-
       - name: Set HOWLER_COMMAND_TOKEN
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
