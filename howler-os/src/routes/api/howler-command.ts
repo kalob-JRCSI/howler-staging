@@ -18,6 +18,7 @@ function json(body: unknown, status = 200) {
 async function handle({ request }: { request: Request }) {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: cors });
   if (request.method === "GET") {
+    await loadJobSnapshot();
     return json({ ok: true, say: "Howler is ready. Post a command." });
   }
   if (request.method !== "POST") return new Response("Method not allowed", { status: 405, headers: cors });

@@ -25,6 +25,7 @@ type D1Like = {
     };
     all: <T>() => Promise<{ results: T[] }>;
     first: <T>() => Promise<T | null>;
+    run: () => Promise<unknown>;
   };
 };
 
@@ -100,16 +101,88 @@ function mergeRow(row: DashboardRow, seed: Record<string, Project>): { slug: Liv
   return { slug, project: overlayDashboard(base, row, slug) };
 }
 
+type PragmaCol = { name: string; notnull: number; pk: number; dflt_value: unknown };
+
+async function ensureDashboardColumns(db: D1Like): Promise<PragmaCol[]> {
+  const info = await db.prepare("PRAGMA table_info(projects)").all<PragmaCol>();
+  const cols = info.results ?? [];
+  const names = new Set(cols.map((row) => row.name));
+  const adds: [string, string][] = [
+    ["project_id", "project_id TEXT"],
+    ["revision", "revision INTEGER DEFAULT 0"],
+    ["current_model_json", "current_model_json TEXT"],
+  ];
+  for (const [name, ddl] of adds) {
+    if (names.has(name)) continue;
+    try {
+      await db.prepare(`ALTER TABLE projects ADD COLUMN ${ddl}`).run();
+      names.add(name);
+    } catch {
+      /* column may already exist */
+    }
+  }
+  if (!names.has("project_id") || !names.has("current_model_json")) {
+    const again = await db.prepare("PRAGMA table_info(projects)").all<PragmaCol>();
+    return again.results ?? cols;
+  }
+  return cols;
+}
+
+async function backfillLiveRows(
+  db: D1Like,
+  rows: DashboardRow[],
+  seed: Record<string, Project>,
+): Promise<void> {
+  const matched = new Set<LiveProjectId>();
+  for (const row of rows) {
+    const merged = mergeRow(row, seed);
+    if (!merged) continue;
+    matched.add(merged.slug);
+    if (row.project_id === merged.slug && row.current_model_json && row.current_model_json.length > 40) continue;
+    const key = row.id ?? row.project_id ?? row.name;
+    try {
+      await db
+        .prepare(
+          `UPDATE projects
+           SET project_id = ?, revision = COALESCE(revision, 0), current_model_json = ?
+           WHERE id = ? OR project_id = ? OR name = ?`,
+        )
+        .bind(merged.slug, JSON.stringify(merged.project), key, row.project_id, row.name)
+        .run();
+    } catch {
+      /* leave the in-memory overlay; never DROP */
+    }
+  }
+  for (const slug of LIVE_PROJECT_IDS) {
+    if (matched.has(slug) || !seed[slug]) continue;
+    const project = seed[slug];
+    try {
+      await db
+        .prepare(
+          `INSERT INTO projects (name, project_id, revision, current_model_json, updated_at)
+           VALUES (?, ?, ?, ?, ?)`,
+        )
+        .bind(project.name, slug, project.revision ?? 0, JSON.stringify(project), new Date().toISOString())
+        .run();
+    } catch {
+      /* row may already exist under a name we didn't match */
+    }
+  }
+}
+
 export async function loadJobSnapshot(): Promise<JobSnapshot> {
   const memory = getJobSnapshot();
   const db = envDb();
   if (!db) return memory;
   try {
+    await ensureDashboardColumns(db);
     const result = await db.prepare("SELECT * FROM projects").all<DashboardRow>();
     const rows = result.results ?? [];
     const seed = seedProjects();
+    await backfillLiveRows(db, rows, seed);
     const projects: Record<string, Project> = {};
-    for (const row of rows) {
+    const refreshed = await db.prepare("SELECT * FROM projects").all<DashboardRow>();
+    for (const row of refreshed.results ?? rows) {
       const merged = mergeRow(row, seed);
       if (!merged) continue;
       projects[merged.slug] = merged.project;
