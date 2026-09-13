@@ -47,7 +47,7 @@ export function DashboardView() {
 
       <Atmosphere
         greeting="KF Live"
-        command="Seven jobs."
+        command="Eight jobs."
         statement="This board is Howler. Grok is the workshop we build it in."
       />
 

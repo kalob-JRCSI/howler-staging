@@ -78,7 +78,7 @@ export function SourceDrawings({
     item.kind === "TRADEWALK" || item.kind === "STRUCTURAL" || item.kind === "SITE" || item.kind === "FRAMING" || item.kind === "CALCS",
   );
   const files = evidence.filter((item) => !drawings.includes(item));
-  const isDeboard = project.id === "deboard-v091";
+  const isDeboard = project.id === "deboard";
   const isCarver = project.id === "carver";
   const working = isDeboard ? DEBOARD_WORKING_PREVIEWS : isCarver ? CARVER_WORKING_PREVIEWS : [];
 

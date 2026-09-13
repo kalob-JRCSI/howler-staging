@@ -4,23 +4,24 @@ import type { InterpretResult, Project } from "./types";
 import { matchWake, pickHowlerAck } from "./voice";
 
 const ALIASES: { alias: string; projectId: string }[] = [
-  { alias: "deboard", projectId: "deboard-v091" },
-  { alias: "de board", projectId: "deboard-v091" },
-  { alias: "debord", projectId: "deboard-v091" },
-  { alias: "garage", projectId: "deboard-v091" },
-  { alias: "mcmillan", projectId: "mcmillan-v1" },
-  { alias: "macmillan", projectId: "mcmillan-v1" },
-  { alias: "caveson", projectId: "mcmillan-v1" },
-  { alias: "ciurlizza", projectId: "ciurlizza-v1" },
-  { alias: "cher liza", projectId: "ciurlizza-v1" },
-  { alias: "andover", projectId: "ciurlizza-v1" },
+  { alias: "deboard", projectId: "deboard" },
+  { alias: "de board", projectId: "deboard" },
+  { alias: "debord", projectId: "deboard" },
+  { alias: "garage", projectId: "deboard" },
+  { alias: "mcmillan", projectId: "mcmillan" },
+  { alias: "macmillan", projectId: "mcmillan" },
+  { alias: "caveson", projectId: "mcmillan" },
+  { alias: "ciurlizza", projectId: "ciurlizza" },
+  { alias: "cher liza", projectId: "ciurlizza" },
+  { alias: "andover", projectId: "ciurlizza" },
   { alias: "carver", projectId: "carver" },
   { alias: "julian", projectId: "carver" },
   { alias: "wil rose", projectId: "carver" },
-  { alias: "pratt", projectId: "pratt-v1" },
-  { alias: "stewart", projectId: "stewart-v1" },
-  { alias: "swiderski", projectId: "swiderski-v1" },
-  { alias: "swidersky", projectId: "swiderski-v1" },
+  { alias: "pratt", projectId: "pratt" },
+  { alias: "stewart", projectId: "stewart" },
+  { alias: "swiderski", projectId: "swiderski" },
+  { alias: "swidersky", projectId: "swiderski" },
+  { alias: "craven", projectId: "craven" },
 ];
 
 export function resolveProjectMention(

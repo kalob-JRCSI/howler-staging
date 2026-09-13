@@ -1,6 +1,25 @@
 const SESSION_COOKIE = "howler_session";
 const SESSION_TTL_SECONDS = 8 * 60 * 60;
 const encoder = new TextEncoder();
+const hits = new Map();
+
+/** Same function as src/lib/howler/guard.ts — used on command/intent/speak/stt. */
+function clientKey(request) {
+  return (
+    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    request.headers.get("cf-connecting-ip") ||
+    "local"
+  );
+}
+
+/** Same function as src/lib/howler/guard.ts — used on command/intent/speak/stt. */
+function rateLimited(key, max, windowMs) {
+  const now = Date.now();
+  const next = (hits.get(key) ?? []).filter((time) => now - time < windowMs);
+  next.push(now);
+  hits.set(key, next);
+  return next.length > max;
+}
 
 function bytesToHex(bytes) {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -129,6 +148,7 @@ function loginPage() {
         }),
       });
       if (response.ok) { location.replace('/'); return; }
+      if (response.status === 429) { status.textContent = 'Too many attempts. Try again in 15 minutes.'; return; }
       status.textContent = response.status === 401 ? 'Invalid username or password.' : 'Unable to sign in.';
     });
   </script>
@@ -144,6 +164,9 @@ export async function handlePilotGate(request, env) {
   if (publicPath(url.pathname)) return null;
 
   if (request.method === "POST" && url.pathname === "/auth/login") {
+    if (rateLimited(`login:${clientKey(request)}`, 5, 15 * 60 * 1000)) {
+      return Response.json({ ok: false, error: "Too many attempts. Try again in 15 minutes." }, { status: 429 });
+    }
     let body = {};
     try {
       body = await request.json();

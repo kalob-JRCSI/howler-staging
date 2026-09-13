@@ -7,7 +7,7 @@ import { deboardSowScope } from "./sow";
 
 function deboard(): Project {
   return {
-    id: "deboard-v091",
+    id: "deboard",
     name: "DeBoard Residence",
     clientName: "DeBoard",
     address: "227 Marengo Dr",
@@ -162,12 +162,12 @@ function deboard(): Project {
   };
 }
 
-export const SEED_VERSION = "howler-pilot-v14-card-dates-2026-09-12";
+export const SEED_VERSION = "howler-pilot-v15-dashboard-8-2026-09-13";
 
 export function createSeedState(): PortfolioState {
   return {
     projects: {
-      "deboard-v091": deboard(),
+      "deboard": deboard(),
       ...kfProjects(),
     },
   };

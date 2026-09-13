@@ -2,10 +2,10 @@ import { createFileRoute } from "@tanstack/react-router";
 import { runFieldCommand } from "@/lib/howler/field-command";
 import { clientKey, rateLimited } from "@/lib/howler/guard";
 import { SEED_VERSION } from "@/lib/howler/seed";
-import { getJobSnapshot, setJobSnapshot } from "@/lib/howler/snapshot.server";
+import { loadJobSnapshot, persistJobSnapshot } from "@/lib/howler/snapshot.server";
 
+/** Siri door: unauthenticated on purpose. No Access-Control-Allow-Origin: * — this is not a session route. */
 const cors = {
-  "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "content-type",
   "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   "Cache-Control": "private, no-store",
@@ -31,10 +31,10 @@ async function handle({ request }: { request: Request }) {
   } catch {
     return json({ ok: false, say: "I did not get that." }, 400);
   }
-  const snap = getJobSnapshot();
+  const snap = await loadJobSnapshot();
   const result = runFieldCommand(snap.projects, command, null);
   if (result.applied) {
-    setJobSnapshot({
+    await persistJobSnapshot({
       projects: result.projects,
       seedVersion: SEED_VERSION,
       updatedAt: Date.now(),

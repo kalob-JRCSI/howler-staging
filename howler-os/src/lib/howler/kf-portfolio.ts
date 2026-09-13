@@ -114,7 +114,7 @@ function base(input: {
 
 export function stewart(): Project {
   return base({
-    id: "stewart-v1",
+    id: "stewart",
     name: "Stewart",
     clientName: "Stewart",
     address: "110 Creek Ridge Dr",
@@ -193,7 +193,7 @@ export function stewart(): Project {
 
 export function swiderski(): Project {
   return base({
-    id: "swiderski-v1",
+    id: "swiderski",
     name: "Swiderski",
     clientName: "Swiderski",
     address: "1138 Payne Depot Rd",
@@ -261,7 +261,7 @@ export function swiderski(): Project {
 
 export function pratt(): Project {
   return base({
-    id: "pratt-v1",
+    id: "pratt",
     name: "Pratt",
     clientName: "Pratt",
     projectType: "Final closeout — paint before carpet and closets",
@@ -465,7 +465,7 @@ export function carver(): Project {
 
 export function ciurlizza(): Project {
   return base({
-    id: "ciurlizza-v1",
+    id: "ciurlizza",
     name: "Ciurlizza",
     clientName: "Ciurlizza",
     address: "740 Andover Village Dr",
@@ -562,7 +562,7 @@ export function ciurlizza(): Project {
 
 export function mcmillan(): Project {
   return base({
-    id: "mcmillan-v1",
+    id: "mcmillan",
     name: "McMillan",
     clientName: "McMillan",
     address: "109 Caveson Way",
@@ -666,13 +666,29 @@ export function mcmillan(): Project {
   });
 }
 
+export function craven(): Project {
+  return base({
+    id: "craven",
+    name: "Craven",
+    clientName: "Craven",
+    address: "Unknown",
+    projectType: "Unknown",
+    healthBand: "YELLOW",
+    dashboardNote:
+      "Live howler-dashboard job. Status, next call, and address stay Unknown until the dashboard row supplies them — Howler will not invent them.",
+    activities: {},
+    scopeItems: {},
+  });
+}
+
 export function kfProjects(): Record<string, Project> {
   return {
-    "stewart-v1": stewart(),
-    "swiderski-v1": swiderski(),
-    "pratt-v1": pratt(),
+    "stewart": stewart(),
+    "swiderski": swiderski(),
+    "pratt": pratt(),
     carver: carver(),
-    "ciurlizza-v1": ciurlizza(),
-    "mcmillan-v1": mcmillan(),
+    "ciurlizza": ciurlizza(),
+    "mcmillan": mcmillan(),
+    craven: craven(),
   };
 }

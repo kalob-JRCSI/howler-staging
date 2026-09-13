@@ -27,6 +27,7 @@ import { joinUtterance } from "./field-ear.ts";
 import { runFieldCommand, talkRecorded } from "./field-command.ts";
 import { boardHrefFromHost, isHowlerHttps } from "./board-address.ts";
 import { interpretUtterance, resolveProjectMention } from "./ear.ts";
+import { LIVE_PROJECT_IDS, slugFromName, slugFromProjectId } from "./dashboard.ts";
 
 test("Kentucky has 120 counties and Boone is 20 psf", () => {
   assert.equal(KY_COUNTIES.length, 120);
@@ -95,7 +96,7 @@ test("2x6 lumber does not overwrite a 24x32 envelope", () => {
 });
 
 test("use the Tradewalk plans records the L-shape from Drive, not a 24x32 box", () => {
-  const project = createSeedState().projects["deboard-v091"];
+  const project = createSeedState().projects["deboard"];
   const result = interpretFinancial(project, "use the Tradewalk plans");
   assert.equal(result.outcome, "RESOLVED");
   if (result.outcome !== "RESOLVED") return;
@@ -113,7 +114,7 @@ test("the working set has a sheet for each Tradewalk trade plus wall framing", (
 });
 
 test("Tradewalk opening schedule and unresolved register stay honest", () => {
-  const project = createSeedState().projects["deboard-v091"];
+  const project = createSeedState().projects["deboard"];
   const result = interpretFinancial(project, "use the Tradewalk plans");
   assert.equal(result.outcome, "RESOLVED");
   if (result.outcome !== "RESOLVED") return;
@@ -133,7 +134,7 @@ test("Tradewalk opening schedule and unresolved register stay honest", () => {
 });
 
 test("issue the drawings writes ISSUED and lists unresolved items", () => {
-  const project = createSeedState().projects["deboard-v091"];
+  const project = createSeedState().projects["deboard"];
   const adopted = interpretFinancial(project, "use the Tradewalk plans");
   assert.equal(adopted.outcome, "RESOLVED");
   if (adopted.outcome !== "RESOLVED") return;
@@ -153,7 +154,7 @@ test("verbal 24 by 32 is proposed, not a verified field measurement", () => {
 });
 
 test("Tradewalk callouts cite 2018 KRC sections and do not invent frost", () => {
-  const project = createSeedState().projects["deboard-v091"];
+  const project = createSeedState().projects["deboard"];
   const adopted = interpretFinancial(project, "use the Tradewalk plans");
   assert.equal(adopted.outcome, "RESOLVED");
   if (adopted.outcome !== "RESOLVED") return;
@@ -168,7 +169,7 @@ test("Tradewalk callouts cite 2018 KRC sections and do not invent frost", () => 
 });
 
 test("what's the code basis is a clarification, not a mutation", () => {
-  const project = createSeedState().projects["deboard-v091"];
+  const project = createSeedState().projects["deboard"];
   const result = interpretFinancial(project, "what's the code basis");
   assert.equal(result.outcome, "CLARIFICATION");
   if (result.outcome !== "CLARIFICATION") return;
@@ -180,7 +181,7 @@ test("Kentucky stairs are 8¼ / 9, not IRC 7¾ / 10", () => {
   assert.equal(KY_STAIR.maxRiserIn, 8.25);
   assert.equal(KY_STAIR.minTreadIn, 9);
   assert.equal(minRisersForRise(131.25), 16);
-  const project = createSeedState().projects["deboard-v091"];
+  const project = createSeedState().projects["deboard"];
   const adopted = interpretFinancial(project, "use the Tradewalk plans");
   assert.equal(adopted.outcome, "RESOLVED");
   if (adopted.outcome !== "RESOLVED") return;
@@ -192,7 +193,7 @@ test("Kentucky stairs are 8¼ / 9, not IRC 7¾ / 10", () => {
 });
 
 test("Tell Howler commands match the manual buttons and do not invent an OHD", () => {
-  const project = createSeedState().projects["deboard-v091"];
+  const project = createSeedState().projects["deboard"];
   const adopted = interpretFinancial(project, "use the Tradewalk plans");
   assert.equal(adopted.outcome, "RESOLVED");
   if (adopted.outcome !== "RESOLVED") return;
@@ -240,7 +241,7 @@ test("SB3621 is a 3'-6\" × 2'-1\" window tag, not a Simpson holdown", () => {
   assert.equal(parseOpeningTag("2868")?.widthIn, 32);
   assert.equal(parseOpeningTag("2840DH")?.suffix, "DH");
 
-  const project = createSeedState().projects["deboard-v091"];
+  const project = createSeedState().projects["deboard"];
   const adopted = interpretFinancial(project, "use the Tradewalk plans");
   assert.equal(adopted.outcome, "RESOLVED");
   if (adopted.outcome !== "RESOLVED") return;
@@ -266,7 +267,7 @@ test("SB3621 is a 3'-6\" × 2'-1\" window tag, not a Simpson holdown", () => {
 });
 
 test("job book inspections and contacts are commands, not placeholders", () => {
-  const project = createSeedState().projects["deboard-v091"];
+  const project = createSeedState().projects["deboard"];
   assert.equal(project.job.permitStatus, "NOT_FILED");
   assert.equal(project.job.inspections["insp-footing"]?.status, "READY");
   assert.ok(Object.values(project.job.contacts).some((item) => item.name === "John Marr"));
@@ -291,12 +292,12 @@ test("job book inspections and contacts are commands, not placeholders", () => {
 });
 
 test("project shape is stable so the index card does not infinite-loop", () => {
-  const project = createSeedState().projects["deboard-v091"];
+  const project = createSeedState().projects["deboard"];
   assert.equal(ensureProjectShape(project), project);
 });
 
 test("adding scope drafts an unpriced CO and does not move Revised", () => {
-  const project = createSeedState().projects["deboard-v091"];
+  const project = createSeedState().projects["deboard"];
   const before = project.financials?.baseline?.amountMinor;
   const result = interpretFinancial(project, "add scope mini split for the office");
   assert.equal(result.outcome, "RESOLVED");
@@ -354,14 +355,14 @@ test("once armed, Hey Howler is required — after wake, the next utterance is a
 test("index cards list official start and intended finish without inventing them", () => {
   const { projects } = createSeedState();
   assert.equal(formatDay("2026-08-18"), "Aug 18, 2026");
-  assert.equal(contractDates(projects["deboard-v091"]!).officialStart, "Aug 18, 2026");
-  assert.equal(contractDates(projects["deboard-v091"]!).finishKnown, false);
+  assert.equal(contractDates(projects["deboard"]!).officialStart, "Aug 18, 2026");
+  assert.equal(contractDates(projects["deboard"]!).finishKnown, false);
   assert.equal(contractDates(projects.carver!).startKnown, false);
-  assert.equal(contractDates(projects["mcmillan-v1"]!).officialStart, "Unknown");
-  const preview = interpretFinancial(projects["deboard-v091"]!, "intended finish October 15, 2026");
+  assert.equal(contractDates(projects["mcmillan"]!).officialStart, "Unknown");
+  const preview = interpretFinancial(projects["deboard"]!, "intended finish October 15, 2026");
   assert.equal(preview.outcome, "RESOLVED");
   if (preview.outcome !== "RESOLVED") return;
-  const next = preview.preview.apply(projects["deboard-v091"]!);
+  const next = preview.preview.apply(projects["deboard"]!);
   assert.equal(next.intendedFinish, "2026-10-15");
   assert.equal(contractDates(next).intendedFinish, "Oct 15, 2026");
 });
@@ -369,36 +370,40 @@ test("index cards list official start and intended finish without inventing them
 test("index card glance is now, 14-day window, then at most three things to solve", () => {
   const { projects } = createSeedState();
   const asOf = "2026-09-12";
-  const ciurlizza = cardGlance(projects["ciurlizza-v1"]!, asOf);
+  const ciurlizza = cardGlance(projects["ciurlizza"]!, asOf);
   assert.ok(/FAILED/i.test(ciurlizza.now));
   assert.ok(ciurlizza.window.some((item) => item.name === "31-W fire stop" && item.when === "Sep 15"));
   assert.ok(ciurlizza.window.some((item) => item.name === "Fayette County reinspection" && item.when === "Sep 17"));
   assert.ok(ciurlizza.solve.length <= 3);
   assert.ok(ciurlizza.solve.some((item) => /framing fail/i.test(item)));
-  const deboard = cardGlance(projects["deboard-v091"]!, asOf);
+  const deboard = cardGlance(projects["deboard"]!, asOf);
   assert.ok(deboard.window.some((item) => /Concrete slab/i.test(item.name)));
   assert.ok(deboard.window.some((item) => /Framing/i.test(item.name) && item.when === "Sep 14"));
-  const mcmillan = cardGlance(projects["mcmillan-v1"]!, asOf);
+  const mcmillan = cardGlance(projects["mcmillan"]!, asOf);
   assert.equal(mcmillan.windowHint, "Nothing dated in the next 14 days");
   assert.ok(mcmillan.solve.some((item) => /Interior held/i.test(item)));
   assert.ok(mcmillan.now.includes("closing out"));
 });
 
-test("KF live dashboard injects seven index cards without inventing money", () => {
+test("KF live dashboard injects eight index cards without inventing money", () => {
   const { projects } = createSeedState();
-  assert.equal(Object.keys(projects).length, 7);
-  assert.equal(projects["ciurlizza-v1"]?.healthBand, "RED");
-  assert.equal(projects["mcmillan-v1"]?.paused, false);
-  assert.ok(projects["mcmillan-v1"]?.heldPhases.includes("Interior"));
+  assert.equal(Object.keys(projects).length, 8);
+  assert.ok(projects.craven);
+  assert.equal(projects.craven.address, "Unknown");
+  assert.equal(projects.craven.projectType, "Unknown");
+  assert.equal(projects["ciurlizza"]?.healthBand, "RED");
+  assert.equal(projects["mcmillan"]?.paused, false);
+  assert.ok(projects["mcmillan"]?.heldPhases.includes("Interior"));
   assert.equal(projects.carver?.financials, null);
-  assert.equal(projects["pratt-v1"]?.financials, null);
-  assert.ok(projects["deboard-v091"]?.financials);
+  assert.equal(projects["pratt"]?.financials, null);
+  assert.ok(projects["deboard"]?.financials);
   assert.equal(projects.carver?.activities["act-elec"]?.state, "NOT_STARTED");
-  assert.match(projects["ciurlizza-v1"]?.job.inspections["insp-framing"]?.status ?? "", /FAILED/);
+  assert.match(projects["ciurlizza"]?.job.inspections["insp-framing"]?.status ?? "", /FAILED/);
+  assert.equal(Object.keys(projects).some((id) => /smith|v091|v09/.test(id)), false);
 });
 
 test("McMillan progress reads exterior closeout, not the held interior", () => {
-  const mcmillan = createSeedState().projects["mcmillan-v1"];
+  const mcmillan = createSeedState().projects["mcmillan"];
   assert.ok(mcmillan);
   assert.equal(mcmillan.paused, false);
   assert.equal(mcmillan.healthBand, "GREEN");
@@ -454,16 +459,16 @@ test("Hey Howler wake phrase strips and routes to the named job", () => {
   assert.equal(decideHeardAction("apply", { state: "LISTENING", hasPreview: true }).kind, "confirm");
 
   const { projects } = createSeedState();
-  assert.equal(resolveProjectMention("mcmillan porch", projects).projectId, "mcmillan-v1");
+  assert.equal(resolveProjectMention("mcmillan porch", projects).projectId, "mcmillan");
   const status = interpretUtterance(projects, "how's McMillan", null);
-  assert.equal(status.projectId, "mcmillan-v1");
+  assert.equal(status.projectId, "mcmillan");
   assert.equal(status.result.outcome, "CLARIFICATION");
   if (status.result.outcome !== "CLARIFICATION") return;
   assert.match(status.result.message, /McMillan/);
   assert.match(status.result.message, /GREEN/);
 
   const close = interpretUtterance(projects, "hey howler, McMillan exterior is closing out", null);
-  assert.equal(close.projectId, "mcmillan-v1");
+  assert.equal(close.projectId, "mcmillan");
   assert.equal(close.result.outcome, "RESOLVED");
   if (close.result.outcome === "RESOLVED") assert.equal(close.result.preview.clerical, true);
   const update = interpretUtterance(
@@ -471,7 +476,7 @@ test("Hey Howler wake phrase strips and routes to the named job", () => {
     "hey howler McMillan porch ceiling is going in this week no budget change",
     null,
   );
-  assert.equal(update.projectId, "mcmillan-v1");
+  assert.equal(update.projectId, "mcmillan");
   assert.equal(update.result.outcome, "RESOLVED");
   if (update.result.outcome === "RESOLVED") {
     assert.equal(update.result.preview.clerical, true);
@@ -479,10 +484,10 @@ test("Hey Howler wake phrase strips and routes to the named job", () => {
     assert.match(update.result.preview.understood, /porch ceiling/i);
   }
   const concrete = interpretUtterance(projects, "hey howler McMillan concrete is done", null);
-  assert.equal(concrete.projectId, "mcmillan-v1");
+  assert.equal(concrete.projectId, "mcmillan");
   assert.equal(concrete.result.outcome, "RESOLVED");
   if (concrete.result.outcome === "RESOLVED") {
-    const next = concrete.result.preview.apply(projects["mcmillan-v1"]!);
+    const next = concrete.result.preview.apply(projects["mcmillan"]!);
     assert.equal(next.activities["act-concrete"]?.state, "COMPLETE");
     assert.match(next.dashboardNote ?? "", /complete/i);
     assert.match(next.dashboardNote ?? "", /Next call/i);
@@ -497,7 +502,7 @@ test("Hey Howler wake phrase strips and routes to the named job", () => {
   );
   assert.equal(withNext.result.outcome, "RESOLVED");
   if (withNext.result.outcome === "RESOLVED") {
-    const next = withNext.result.preview.apply(projects["mcmillan-v1"]!);
+    const next = withNext.result.preview.apply(projects["mcmillan"]!);
     assert.equal(next.activities["act-concrete"]?.state, "COMPLETE");
     assert.notEqual(next.activities["act-ceiling"]?.state, "COMPLETE");
     assert.match(next.dashboardNote ?? "", /porch ceiling/i);
@@ -507,12 +512,12 @@ test("Hey Howler wake phrase strips and routes to the named job", () => {
     "update McMillan, concrete is done, Jason Bonham is completing the exterior light pole, we are awaiting David Stanfield's estimate approval by Paul and Jeff via email",
     null,
   );
-  assert.equal(field.projectId, "mcmillan-v1");
+  assert.equal(field.projectId, "mcmillan");
   assert.equal(field.result.outcome, "RESOLVED");
   if (field.result.outcome === "RESOLVED") {
     assert.equal(field.result.preview.clerical, true);
     assert.equal(field.result.preview.eventType, "JOB_STATUS_UPDATED");
-    const next = field.result.preview.apply(projects["mcmillan-v1"]!);
+    const next = field.result.preview.apply(projects["mcmillan"]!);
     assert.equal(next.activities["act-concrete"]?.state, "COMPLETE");
     assert.notEqual(next.activities["act-elec"]?.state, "COMPLETE");
     assert.match(next.dashboardNote ?? "", /Stanfield|estimate|Next call/i);
@@ -523,11 +528,11 @@ test("Hey Howler wake phrase strips and routes to the named job", () => {
   const poured = interpretUtterance(projects, "hey howler McMillan concrete is poured", null);
   assert.equal(poured.result.outcome, "RESOLVED");
   if (poured.result.outcome === "RESOLVED") {
-    const next = poured.result.preview.apply(projects["mcmillan-v1"]!);
+    const next = poured.result.preview.apply(projects["mcmillan"]!);
     assert.equal(next.activities["act-concrete"]?.state, "COMPLETE");
   }
   const studs = interpretUtterance(projects, "hey howler DeBoard studs are done", null);
-  assert.equal(studs.projectId, "deboard-v091");
+  assert.equal(studs.projectId, "deboard");
   assert.equal(studs.result.outcome, "RESOLVED");
   if (studs.result.outcome === "RESOLVED") {
     assert.equal(studs.result.preview.eventType, "JOB_STATUS_UPDATED");
@@ -552,7 +557,7 @@ test("Carver progress reads the SOW, not leftover punch", () => {
 });
 
 test("Deboard contracted scope is the garage SOW, not three leftover cards", () => {
-  const deboard = createSeedState().projects["deboard-v091"];
+  const deboard = createSeedState().projects["deboard"];
   assert.ok(deboard);
   const included = Object.values(deboard.scopeItems).filter((item) => item.included);
   assert.ok(included.length >= 10);
@@ -563,7 +568,7 @@ test("Deboard contracted scope is the garage SOW, not three leftover cards", () 
 });
 
 test("approve, finish, door, and inspection each carry a ripple", () => {
-  const project = createSeedState().projects["deboard-v091"];
+  const project = createSeedState().projects["deboard"];
 
   const finish = interpretFinancial(project, "finish footer");
   if (finish.outcome === "CLARIFICATION") {
@@ -591,13 +596,13 @@ test("approve, finish, door, and inspection each carry a ripple", () => {
 
 test("DeBoard trade tracker is the real baseline and maps to trades", () => {
   const { projects } = createSeedState();
-  const deboard = projects["deboard-v091"]!;
+  const deboard = projects["deboard"]!;
   assert.equal(deboard.financials?.baseline?.amountMinor, 16555228);
   assert.ok(deboard.financials?.lines["line-06-101"]?.vendorRef?.includes("Stanfield"));
   assert.equal(deboard.financials?.lines["line-15-401"]?.trade, "Plumbing");
   assert.equal(deboard.financials?.lines["line-15-401"]?.activityId, "act-mech");
-  assert.equal(projects["ciurlizza-v1"]?.financials?.baseline?.amountMinor, 8188700);
-  assert.equal(projects["pratt-v1"]?.financials, null);
+  assert.equal(projects["ciurlizza"]?.financials?.baseline?.amountMinor, 8188700);
+  assert.equal(projects["pratt"]?.financials, null);
   const place = placeLine(deboard, deboard.financials!.lines["line-06-101"]!);
   assert.ok(place.conflict);
 });
@@ -607,7 +612,7 @@ test("Siri field command writes the job and speaks recorded, not confirm", () =>
   const result = runFieldCommand(projects, "McMillan concrete is done");
   assert.equal(result.applied, true);
   assert.equal(result.job, "McMillan");
-  assert.equal(result.projects["mcmillan-v1"]?.activities["act-concrete"]?.state, "COMPLETE");
+  assert.equal(result.projects["mcmillan"]?.activities["act-concrete"]?.state, "COMPLETE");
   assert.match(result.say, /McMillan/i);
   assert.match(result.say, /Recorded/i);
   assert.doesNotMatch(result.say, /Confirm\?/i);
@@ -622,6 +627,26 @@ test("Howler's address is https, never the word Howler", () => {
   assert.equal(isHowlerHttps("howler"), false);
   assert.equal(boardHrefFromHost("howler"), "https://jarvis-voice-staging.kalob.workers.dev/");
   assert.equal(isHowlerHttps("https://jarvis-voice-staging.kalob.workers.dev/"), true);
+});
+
+test("howler-dashboard slugs are the eight live jobs, never Smith or DeBoard snapshots", () => {
+  assert.deepEqual([...LIVE_PROJECT_IDS], [
+    "stewart",
+    "swiderski",
+    "pratt",
+    "carver",
+    "ciurlizza",
+    "deboard",
+    "mcmillan",
+    "craven",
+  ]);
+  assert.equal(slugFromName("Smith Residence"), null);
+  assert.equal(slugFromName("deboard-v091"), null);
+  assert.equal(slugFromName("deboard-v09"), null);
+  assert.equal(slugFromName("DeBoard Residence"), "deboard");
+  assert.equal(slugFromName("Craven"), "craven");
+  assert.equal(slugFromProjectId("deboard-v091"), "deboard");
+  assert.equal(slugFromProjectId("craven"), "craven");
 });
 
 

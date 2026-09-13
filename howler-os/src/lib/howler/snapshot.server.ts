@@ -1,3 +1,12 @@
+import {
+  LIVE_PROJECT_IDS,
+  overlayDashboard,
+  projectFromDashboardRow,
+  slugFromName,
+  slugFromProjectId,
+  type DashboardRow,
+  type LiveProjectId,
+} from "./dashboard";
 import { createSeedState, SEED_VERSION } from "./seed";
 import type { Project } from "./types";
 
@@ -7,15 +16,15 @@ export type JobSnapshot = {
   projects: Record<string, Project>;
 };
 
-/** Own row on howler-dashboard. Never the other eight project ids. */
-const BOARD_ROW = "kf-live-board";
-
 type D1Like = {
   prepare: (sql: string) => {
     bind: (...args: unknown[]) => {
       first: <T>() => Promise<T | null>;
+      all: <T>() => Promise<{ results: T[] }>;
       run: () => Promise<unknown>;
     };
+    all: <T>() => Promise<{ results: T[] }>;
+    first: <T>() => Promise<T | null>;
   };
 };
 
@@ -29,11 +38,14 @@ function envDb(): D1Like | undefined {
 
 let snapshot: JobSnapshot | null = null;
 
+function seedProjects(): Record<string, Project> {
+  return createSeedState().projects;
+}
+
 export function getJobSnapshot(): JobSnapshot {
   if (snapshot && snapshot.seedVersion === SEED_VERSION) return snapshot;
-  const seed = createSeedState();
   snapshot = {
-    projects: seed.projects,
+    projects: seedProjects(),
     seedVersion: SEED_VERSION,
     updatedAt: snapshot?.updatedAt ?? 0,
   };
@@ -44,22 +56,72 @@ export function setJobSnapshot(next: JobSnapshot) {
   snapshot = next;
 }
 
+function parseStored(json: string | null | undefined, slug: LiveProjectId): Project | null {
+  if (!json) return null;
+  try {
+    const parsed = JSON.parse(json) as Project | JobSnapshot;
+    if (!parsed || typeof parsed !== "object") return null;
+    if ("projects" in parsed && parsed.projects && typeof parsed.projects === "object") {
+      const nested =
+        parsed.projects[slug] ??
+        parsed.projects["deboard-v091"] ??
+        parsed.projects["deboard-v09"] ??
+        parsed.projects.deboard;
+      return nested ? { ...nested, id: slug } : null;
+    }
+    if (!("id" in parsed) && !("activities" in parsed)) return null;
+    return { ...(parsed as Project), id: slug };
+  } catch {
+    return null;
+  }
+}
+
+function hasJobBook(project: Project | null): boolean {
+  if (!project) return false;
+  return Boolean(
+    Object.keys(project.activities ?? {}).length ||
+      Object.keys(project.scopeItems ?? {}).length ||
+      project.financials ||
+      Object.keys(project.job?.contacts ?? {}).length ||
+      (project.blueprint?.evidence?.length ?? 0) ||
+      (project.events?.length ?? 0) > 1,
+  );
+}
+
+function mergeRow(row: DashboardRow, seed: Record<string, Project>): { slug: LiveProjectId; project: Project } | null {
+  const slug = slugFromProjectId(row.project_id) ?? slugFromName(row.name);
+  if (!slug) return null;
+  const stored = parseStored(row.current_model_json, slug);
+  const fromSeed = seed[slug];
+  const fromRow = projectFromDashboardRow(row, slug);
+  const base = hasJobBook(stored)
+    ? { ...(fromSeed ?? fromRow), ...stored, id: slug }
+    : (fromSeed ?? stored ?? fromRow);
+  return { slug, project: overlayDashboard(base, row, slug) };
+}
+
 export async function loadJobSnapshot(): Promise<JobSnapshot> {
   const memory = getJobSnapshot();
   const db = envDb();
   if (!db) return memory;
   try {
-    const row = await db
-      .prepare("SELECT current_model_json FROM projects WHERE project_id = ?")
-      .bind(BOARD_ROW)
-      .first<{ current_model_json: string }>();
-    if (!row?.current_model_json) return memory;
-    const parsed = JSON.parse(row.current_model_json) as JobSnapshot;
-    if (!parsed?.projects || typeof parsed.projects !== "object") return memory;
+    const result = await db.prepare("SELECT * FROM projects").all<DashboardRow>();
+    const rows = result.results ?? [];
+    const seed = seedProjects();
+    const projects: Record<string, Project> = {};
+    for (const row of rows) {
+      const merged = mergeRow(row, seed);
+      if (!merged) continue;
+      projects[merged.slug] = merged.project;
+    }
+    for (const id of LIVE_PROJECT_IDS) {
+      if (!projects[id] && seed[id]) projects[id] = seed[id];
+    }
+    if (Object.keys(projects).length === 0) return memory;
     snapshot = {
-      projects: parsed.projects,
-      seedVersion: typeof parsed.seedVersion === "string" ? parsed.seedVersion : SEED_VERSION,
-      updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0,
+      projects,
+      seedVersion: SEED_VERSION,
+      updatedAt: Date.now(),
     };
     return snapshot;
   } catch {
@@ -72,17 +134,20 @@ export async function persistJobSnapshot(next: JobSnapshot): Promise<void> {
   const db = envDb();
   if (!db) return;
   try {
-    await db
-      .prepare(
-        `INSERT INTO projects (project_id, name, revision, current_model_json, updated_at)
-         VALUES (?, 'KF Live', 0, ?, ?)
-         ON CONFLICT(project_id) DO UPDATE SET
-           current_model_json = excluded.current_model_json,
-           updated_at = excluded.updated_at`,
-      )
-      .bind(BOARD_ROW, JSON.stringify(next), new Date().toISOString())
-      .run();
+    const now = new Date().toISOString();
+    for (const id of LIVE_PROJECT_IDS) {
+      const project = next.projects[id];
+      if (!project) continue;
+      await db
+        .prepare(
+          `UPDATE projects
+           SET current_model_json = ?, revision = ?, updated_at = ?, project_id = ?
+           WHERE project_id = ?`,
+        )
+        .bind(JSON.stringify(project), project.revision ?? 0, now, id, id)
+        .run();
+    }
   } catch {
-    /* never rewrite schema; memory still holds the board */
+    /* never rewrite schema; never touch howler-intelligence-staging */
   }
 }
