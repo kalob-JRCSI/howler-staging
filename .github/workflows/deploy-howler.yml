@@ -45,11 +45,12 @@ jobs:
           cfg = json.loads(path.read_text())
           cfg["name"] = "howler"
           cfg["main"] = "index.mjs"
-          cfg["compatibility_date"] = "2024-09-19"
+          cfg["compatibility_date"] = "2026-09-13"
           cfg["compatibility_flags"] = ["nodejs_compat"]
           cfg["assets"] = {"binding": "ASSETS", "directory": "./public"}
           cfg.pop("d1_databases", None)
           cfg.pop("vars", None)
+          cfg.pop("no_bundle", None)
           path.write_text(json.dumps(cfg, indent=2) + "\n")
           print(path.read_text())
           PY
@@ -61,4 +62,4 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: "4"
           workingDirectory: ${{ runner.temp }}/howler-cf
-          command: deploy
+          command: deploy --compatibility-date 2026-09-13 --compatibility-flags nodejs_compat
