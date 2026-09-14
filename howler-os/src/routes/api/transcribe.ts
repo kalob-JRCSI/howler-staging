@@ -33,7 +33,7 @@ async function transcribe({ request }: { request: Request }) {
   }
 
   const body = new FormData();
-  body.append("model", "whisper-1");
+  body.append("model", "gpt-4o-transcribe");
   body.append("language", "en");
   body.append("prompt", "Hey Howler McMillan DeBoard Ciurlizza Carver Pratt Stewart Swiderski Craven");
   body.append("file", new File([file], "speech.webm", { type }));
