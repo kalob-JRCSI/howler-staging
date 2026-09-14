@@ -44,9 +44,12 @@ async function transcribe({ request }: { request: Request }) {
     body,
   });
   if (!res.ok) {
+    const detail = (await res.text()).slice(0, 800);
     return Response.json({
       ok: false,
       error: "Could not transcribe. Type the command.",
+      status: res.status,
+      detail,
     });
   }
   const json = (await res.json()) as { text?: string };
