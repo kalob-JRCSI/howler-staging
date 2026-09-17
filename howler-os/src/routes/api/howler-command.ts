@@ -42,6 +42,29 @@ async function handle({ request }: { request: Request }) {
       seedVersion: SEED_VERSION,
       updatedAt: Date.now(),
     });
+    // FIX2: read back before claiming Recorded
+    try {
+      const verify = await loadJobSnapshot();
+      const jobName = result.job;
+      const found = jobName
+        ? Object.values(verify.projects).find((p) => p?.name === jobName || (p as { id?: string })?.id === jobName)
+        : null;
+      if (!found) {
+        return json({
+          ok: false,
+          say: `${jobName || "That job"} write could not be verified. Nothing claimed as Recorded.`,
+          applied: false,
+          job: result.job,
+        });
+      }
+    } catch {
+      return json({
+        ok: false,
+        say: "Persist readback failed. Nothing claimed as Recorded.",
+        applied: false,
+        job: result.job,
+      });
+    }
   }
   return json({
     ok: true,
