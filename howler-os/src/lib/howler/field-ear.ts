@@ -101,7 +101,7 @@ export function startFieldEar(handlers: Handlers): {
 
   const openCommand = () => {
     mode = "command";
-    commandUntil = Date.now() + 20000;
+    commandUntil = Date.now() + 45000;
     handlers.onWake();
   };
 
