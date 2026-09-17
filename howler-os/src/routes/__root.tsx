@@ -1,7 +1,7 @@
 import { createRootRoute, HeadContent, Outlet, Scripts } from "@tanstack/react-router";
 import { AuthProvider } from "@/lib/auth/provider";
 import { PreviewHostBridge } from "@/components/preview-host-bridge";
-import { HowlerDebugStrip, HowlerEarProvider } from "@/components/howler/howler-ear";
+import { HowlerEarProvider } from "@/components/howler/howler-ear";
 import { HowlerTabTitle } from "@/components/howler/chrome";
 import appCss from "../styles.css?url";
 
@@ -44,7 +44,6 @@ export const Route = createRootRoute({
         <HowlerTabTitle />
         <AuthProvider>
           <HowlerEarProvider>
-            <HowlerDebugStrip />
             <Outlet />
           </HowlerEarProvider>
         </AuthProvider>
