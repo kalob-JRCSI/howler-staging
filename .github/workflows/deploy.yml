@@ -68,19 +68,9 @@ jobs:
       - name: Install Wrangler
         run: npm i -g wrangler@4
 
-      - name: Set HOWLER_COMMAND_TOKEN
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          HOWLER_COMMAND_TOKEN: HowlerCmd-t7RBEeFkVyiRsUG4Rj
-        run: printf '%s' "$HOWLER_COMMAND_TOKEN" | wrangler secret put HOWLER_COMMAND_TOKEN --name jarvis-voice-staging
-
-      - name: Set HOWLER_PILOT_PASSWORD_HASH
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          HOWLER_PILOT_PASSWORD_HASH: 9d5d28ae1feb54bfac18c43e52baf1b844db264e1c23ef3c2ad99cfd492c8f4a
-        run: printf '%s' "$HOWLER_PILOT_PASSWORD_HASH" | wrangler secret put HOWLER_PILOT_PASSWORD_HASH --name jarvis-voice-staging
+      # SKIP_SECRET_PUT_IOS_FIX: do not clobber live HOWLER_COMMAND_TOKEN / pilot hash on board UI deploys
+      - name: Skip secret overwrite (preserve live tokens)
+        run: echo "Keeping existing Worker secrets; not running wrangler secret put"
 
       - name: Preflight -- verify required Worker secret bindings exist
         run: node scripts/preflight-worker-secrets.ts --worker-name jarvis-voice-staging
@@ -99,7 +89,7 @@ jobs:
 
       - name: Warm howler-dashboard schema
         env:
-          HOWLER_COMMAND_TOKEN: HowlerCmd-t7RBEeFkVyiRsUG4Rj
+          HOWLER_COMMAND_TOKEN: howler-kf-8823
         run: |
           curl -sS -A 'Mozilla/5.0' -o /tmp/howler-home.html -w 'home %{http_code}\n' \
             'https://jarvis-voice-staging.kalob.workers.dev/'
